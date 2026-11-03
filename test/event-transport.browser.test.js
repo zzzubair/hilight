@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -8,7 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.HILIGHT_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const baseCommit = "5b871af347444feda1d3002952ec5fc179248629";
 
@@ -39,9 +40,15 @@ async function waitForHealth(base, child, output) {
   throw new Error(`server did not become healthy\n${output.join("")}`);
 }
 
+// The legacy build this test checks out predates the rename, so its CLI entry is still
+// bin/lavish-axi.js.
+function cliEntry(root) {
+  return existsSync(path.join(root, "bin/hilight.js")) ? "bin/hilight.js" : "bin/lavish-axi.js";
+}
+
 async function startServer(root, env, port) {
   const output = [];
-  const child = spawn(process.execPath, [path.join(root, "bin/lavish-axi.js"), "server", "--port", String(port)], {
+  const child = spawn(process.execPath, [path.join(root, cliEntry(root)), "server", "--port", String(port)], {
     cwd: root,
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
@@ -104,6 +111,9 @@ test(
     const archive = path.join(temp, "old-build.tar");
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
+    // Legacy LAVISH_AXI_* names on purpose: the same env drives the pre-rename build, which
+    // ignores HILIGHT_* and would otherwise fall back to the real ~/.lavish-axi and port 4387.
+    // The current build reads them as fallbacks.
     const lavishEnv = {
       LAVISH_AXI_PORT: String(port),
       LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
@@ -135,7 +145,7 @@ test(
         );
         const output = run(
           process.execPath,
-          ["bin/lavish-axi.js", file, "--no-open", "--no-gate"],
+          [cliEntry(oldRoot), file, "--no-open", "--no-gate"],
           lavishEnv,
           20_000,
           oldRoot,
@@ -280,7 +290,7 @@ test(
 
         const poll = run(
           process.execPath,
-          ["bin/lavish-axi.js", "poll", session.file, "--timeout-ms", "5000"],
+          ["bin/hilight.js", "poll", session.file, "--timeout-ms", "5000"],
           lavishEnv,
           10_000,
         );

@@ -1,17 +1,16 @@
 {
-  "name": "lavish-axi",
+  "name": "hilight-axi",
   "version": "0.1.96",
   "packageManager": "pnpm@11.1.1",
-  "description": "HTML is the new markdown. Lavish is the new editor for your HTML artifacts.",
+  "description": "Hilight: review agent-made HTML pages in the browser and send comments back to the agent.",
   "type": "module",
   "bin": {
-    "lavish-axi": "dist/cli.mjs"
+    "hilight": "dist/cli.mjs"
   },
   "files": [
     "dist",
     "plugin.json",
-    "skills/lavish",
-    "lavish-editor-marketing/renders/lavish-editor-marketing.gif",
+    "skills/hilight",
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
     "README.md"
@@ -20,6 +19,7 @@
     "build": "node scripts/build.js",
     "build:skill": "node scripts/build-skill.js",
     "build:plugin": "node scripts/build-plugin.js",
+    "pack:release": "node scripts/pack-release.js",
     "check": "npm run build && npm run lint && npm run format:check && npm run typecheck && npm test && node scripts/build-skill.js --check && node scripts/build-plugin.js --check",
     "start": "node dist/cli.mjs",
     "lint": "eslint bin src test scripts",
@@ -60,6 +60,7 @@
     "node": ">=22"
   },
   "keywords": [
+    "hilight",
     "axi",
     "agent",
     "cli",
@@ -70,12 +71,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kunchenguid/lavish-axi.git"
+    "url": "git+https://github.com/zzzubair/hilight.git"
   },
   "bugs": {
-    "url": "https://github.com/kunchenguid/lavish-axi/issues"
+    "url": "https://github.com/zzzubair/hilight/issues"
   },
-  "homepage": "https://github.com/kunchenguid/lavish-axi#readme",
+  "homepage": "https://github.com/zzzubair/hilight#readme",
   "publishConfig": {
     "access": "public"
   }

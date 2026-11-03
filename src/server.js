@@ -88,6 +88,7 @@ import {
   sweepAttachments,
   writeAttachment,
 } from "./attachment-store.js";
+import { readEnv } from "./env.js";
 
 const chromeClientUrl = new URL("./chrome-client.js", import.meta.url);
 const chromeCssUrl = new URL("./chrome.css", import.meta.url);
@@ -118,7 +119,7 @@ const NETWORK_RECONCILE_CACHE_MS = 1_000;
 const BIND_RETRY_DELAYS_MS = [100, 250, 500];
 // A requested address that still has not bound after that budget is retried in the background for
 // the life of the process (the last delay repeats), so a tailnet address held by a stale daemon or
-// absent while Tailscale restarts comes back without anyone restarting Lavish.
+// absent while Tailscale restarts comes back without anyone restarting Hilight.
 const BIND_RECOVERY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 const LOOPBACK_OWNER_PROBE_TIMEOUT_MS = 500;
 const WEBSOCKET_CLOSE_GRACE_MS = 250;
@@ -151,7 +152,7 @@ export const BATCH_RELOAD_DEBOUNCE_MS = 900;
 
 // The whiteboard frame bundle (Excalidraw + Mermaid converter + React) is
 // produced by `scripts/build.js` into dist/whiteboard. Packaged runs find it
-// next to the served bundle; source runs (node bin/lavish-axi.js) fall back to
+// next to the served bundle; source runs (node bin/hilight.js) fall back to
 // the repo's dist output, so `pnpm run build` must have run at least once.
 export function defaultWhiteboardAssetsDir() {
   const packaged = fileURLToPath(new URL("./whiteboard", import.meta.url));
@@ -262,11 +263,11 @@ export function isValidWhiteboardChannelToken(token, secret, sessionKey, now = D
 
 // A detached server should not live forever. When no browser chrome or agent poll
 // are connected for this long, the server shuts itself down so it stops dangling. The next
-// `lavish-axi <file>` invocation re-spawns a fresh server and adopts resumable sessions from
+// `hilight <file>` invocation re-spawns a fresh server and adopts resumable sessions from
 // state.json. Browser-ended sessions still require the explicit --reopen opt-in. Set
-// LAVISH_AXI_IDLE_TIMEOUT_MS to 0/off to disable, or to a custom millisecond budget.
+// HILIGHT_IDLE_TIMEOUT_MS to 0/off to disable, or to a custom millisecond budget.
 export function resolveIdleTimeoutMs(env = process.env) {
-  const raw = env.LAVISH_AXI_IDLE_TIMEOUT_MS?.trim();
+  const raw = readEnv(env, "IDLE_TIMEOUT_MS")?.trim();
   if (raw === undefined || raw === "") return DEFAULT_IDLE_TIMEOUT_MS;
   if (raw === "0" || raw.toLowerCase() === "off") return null;
   const value = Number(raw);
@@ -276,12 +277,12 @@ export function resolveIdleTimeoutMs(env = process.env) {
 
 // How long an active poll waits for a review page to reconnect after the last one drops before it
 // returns browser_disconnected. A phone that locks or backgrounds the tab drops its socket, so the
-// 10s default can be too short there. Set LAVISH_AXI_DISCONNECT_GRACE_MS to a custom millisecond
+// 10s default can be too short there. Set HILIGHT_DISCONNECT_GRACE_MS to a custom millisecond
 // budget, or to 0/off so a disconnect never releases the poll (only feedback, an end, or its own
 // timeout does). Both resolvers clamp to 2147483647 ms, setTimeout's maximum; a larger delay would
 // overflow and fire after about 1 ms.
 export function resolveBrowserDisconnectGraceMs(env = process.env) {
-  const raw = env.LAVISH_AXI_DISCONNECT_GRACE_MS?.trim();
+  const raw = readEnv(env, "DISCONNECT_GRACE_MS")?.trim();
   if (raw === undefined || raw === "") return DEFAULT_BROWSER_DISCONNECT_GRACE_MS;
   if (raw === "0" || raw.toLowerCase() === "off") return null;
   const value = Number(raw);
@@ -316,7 +317,7 @@ export async function serve({
   // Keep the transport dependency off fast metadata paths such as `--version`.
   const { WebSocket, WebSocketServer } = await import("ws");
   const extraHosts = allowedHosts ?? extraAllowedHosts(env);
-  const envHost = env.LAVISH_AXI_HOST?.trim();
+  const envHost = readEnv(env, "HOST")?.trim();
   const autoTailscale = !envHost;
   const detect = detectTailscaleFn === undefined ? detectTailscale : detectTailscaleFn;
   const tailscale = !hosts?.length && autoTailscale && typeof detect === "function" ? await detect() : null;
@@ -363,15 +364,15 @@ export async function serve({
   // Sessions with at least one warning the user queued that has not been re-checked yet.
   const outstandingRepairBatches = new Set();
   const diagnosticViewportClasses = resolveDiagnosticViewportClasses();
-  const verbose = debug || env.LAVISH_AXI_DEBUG === "1";
+  const verbose = debug || readEnv(env, "DEBUG") === "1";
   // The detached server's stderr is appended to server.log across restarts, where an untimestamped
   // line cannot be dated or correlated with an outage. An injected logger formats its own lines.
   const writeLog =
     typeof log === "function"
       ? log
       : (line) => process.stderr.write(`${serverStdioIsTimestamped() ? line : formatServerLogLine(line)}\n`);
-  const logEvent = verbose ? (line) => writeLog(`[lavish] ${line}`) : null;
-  if (tailscaleDetectionWarning) writeLog(`[lavish] WARNING: ${tailscaleDetectionWarning}`);
+  const logEvent = verbose ? (line) => writeLog(`[hilight] ${line}`) : null;
+  if (tailscaleDetectionWarning) writeLog(`[hilight] WARNING: ${tailscaleDetectionWarning}`);
   let publicPort = port;
   let serverReady = false;
   let networkReconcileCheckedAt = 0;
@@ -398,7 +399,7 @@ export async function serve({
       .then((session) => {
         if (session) events.emit("chat-sync", key, session);
       })
-      .catch((error) => writeLog(`[lavish] working stamp after reload failed: ${error?.message || error}`));
+      .catch((error) => writeLog(`[hilight] working stamp after reload failed: ${error?.message || error}`));
   });
   // The transcript the chrome renders is computed here (src/chat-messages.js): agent text ships
   // with its rendered html, user entries ship as text with their anchor, never as html.
@@ -485,12 +486,12 @@ export async function serve({
             ? `${code}: that name does not resolve right now`
             : code || (error instanceof Error ? error.message : String(error));
     const address = `${hostForUrl(listenHost)}:${publicPort || port}`;
-    const reachable = `Lavish remains available on ${boundHosts.map((bound) => hostForUrl(bound)).join(", ") || "loopback"}`;
+    const reachable = `Hilight remains available on ${boundHosts.map((bound) => hostForUrl(bound)).join(", ") || "loopback"}`;
     if (listenHost === tailscale?.ipv4) {
       return `Tailscale binding failed for ${address} (${why}); there is no phone access and tailnet review links do not load. ${reachable} and keeps retrying the tailnet address in the background.`;
     }
     const fellBack = boundHosts.length > 0 && boundHosts.every((bound) => bound === LOOPBACK_HOST);
-    return `Could not bind ${address} (${why}); ${fellBack ? "Lavish fell back to loopback and is" : "Lavish is"} not reachable at that address. ${reachable} and keeps retrying ${hostForUrl(listenHost)} in the background.`;
+    return `Could not bind ${address} (${why}); ${fellBack ? "Hilight fell back to loopback and is" : "Hilight is"} not reachable at that address. ${reachable} and keeps retrying ${hostForUrl(listenHost)} in the background.`;
   }
 
   // Everything that reports network health reads this, so the warning appears and clears with the
@@ -552,7 +553,7 @@ export async function serve({
       const session = await store.findByKey(key);
       if (session) events.emit("chat-sync", key, session);
     } catch (error) {
-      writeLog(`[lavish] chat-sync after delivery failed: ${error?.message || error}`);
+      writeLog(`[hilight] chat-sync after delivery failed: ${error?.message || error}`);
     }
   }
 
@@ -617,12 +618,12 @@ export async function serve({
     const persistedNothing = !session || Boolean(session.rejected) || Boolean(session.conflict);
     if (restoreError) {
       writeLog(
-        `[lavish] closed poll feedback restore failed; the batch was lost: ${restoreError?.message || restoreError}`,
+        `[hilight] closed poll feedback restore failed; the batch was lost: ${restoreError?.message || restoreError}`,
       );
     } else if (persistedNothing) {
-      writeLog("[lavish] closed poll feedback restore was refused; nothing was re-queued and the batch was lost");
+      writeLog("[hilight] closed poll feedback restore was refused; nothing was re-queued and the batch was lost");
     } else if (!restoredPrompts || JSON.stringify(restoredPrompts) !== JSON.stringify(prompts) || !failuresRestored) {
-      writeLog("[lavish] closed poll feedback restore was incomplete; delivery was not marked");
+      writeLog("[hilight] closed poll feedback restore was incomplete; delivery was not marked");
     }
     const pendingAfterRestore =
       (Array.isArray(restoredPrompts) && restoredPrompts.length > 0) ||
@@ -645,11 +646,11 @@ export async function serve({
   // never one of the hostnames this server answers to.
   //
   // Loopback names are always accepted. Binding to a concrete interface
-  // (LAVISH_AXI_HOST) or naming a link host (LAVISH_AXI_LINK_HOST) adds that host,
+  // (HILIGHT_HOST) or naming a link host (HILIGHT_LINK_HOST) adds that host,
   // so an operator who intentionally exposes the server on a specific interface
   // keeps rebinding protection while their chosen hostname works. Additional
   // names (a reverse-proxy hostname, extra interfaces) are an explicit opt-in via
-  // LAVISH_AXI_ALLOWED_HOSTS; a lone "*" there disables the guard for operators
+  // HILIGHT_ALLOWED_HOSTS; a lone "*" there disables the guard for operators
   // who front the server with their own authentication. When a reverse proxy sits
   // in front, X-Forwarded-Host is validated too (see isAllowedRequestHost).
   //
@@ -716,8 +717,8 @@ export async function serve({
         error: "forbidden host",
         title: "Wrong address",
         message: tailscalePhoneReady
-          ? "This Lavish review server does not accept that host. Open the working URL below on this computer or your phone through Tailscale."
-          : "This Lavish review server does not accept that host. Open the working URL below on this computer. Phone access is unavailable.",
+          ? "This Hilight review server does not accept that host. Open the working URL below on this computer or your phone through Tailscale."
+          : "This Hilight review server does not accept that host. Open the working URL below on this computer. Phone access is unavailable.",
       });
     });
   }
@@ -770,6 +771,8 @@ export async function serve({
 
   app.get("/health", async (req, res) => {
     if (!serverReady) {
+      // "lavish-axi" is the wire id from before the rename. It stays, so a Hilight CLI and a
+      // server started before the upgrade recognize each other and live sessions survive.
       res.status(503).json({ ok: false, app: "lavish-axi", version });
       return;
     }
@@ -823,9 +826,9 @@ export async function serve({
       const sessionUrl = `http://${hostForUrl(resolvedLinkHost)}:${publicPort}/session/${key}`;
       // A user-initiated end (ending or send-and-ending from the browser) means the human
       // deliberately closed the review surface. Silently reopening it on the next
-      // `lavish-axi <file>` is the exact behavior this route exists to prevent - require an
+      // `hilight <file>` is the exact behavior this route exists to prevent - require an
       // explicit `reopen` opt-in instead of reviving it automatically. Agent-initiated ends
-      // (`lavish-axi end`) keep reviving on the next open, same as before this change.
+      // (`hilight end`) keep reviving on the next open, same as before this change.
       if (existing?.status === "ended" && existing.ended_by === "user" && !reopen) {
         logEvent?.(`session open blocked (user-ended) key=${key} file=${file}`);
         res.json({
@@ -1244,7 +1247,7 @@ export async function serve({
   });
 
   // Passive detection. A diagnostic pass updates the warning inbox and notifies open browser
-  // chromes - it never emits "feedback", so it can never make `lavish-axi poll` return and can
+  // chromes - it never emits "feedback", so it can never make `hilight poll` return and can
   // never wake an agent. Only the user's explicit "Queue selected fixes" does that, through the
   // ordinary prompt queue.
   app.post("/api/:key/layout-diagnostics", async (req, res, next) => {
@@ -1420,7 +1423,7 @@ export async function serve({
   });
 
   // Hosted share: build the local-inlined artifact and publish it to ht-ml.app, a third-party
-  // hosting service not part of Lavish, returning the share URL. Publishing sends the artifact
+  // hosting service not part of Hilight, returning the share URL. Publishing sends the artifact
   // to ht-ml.app's servers. Remote CDN/font references are left intact for the viewer's browser
   // to load.
   // Publishing creates a public third-party page unless a password is supplied, so this is gated
@@ -1492,7 +1495,7 @@ export async function serve({
       const { unresolved, notices } = splitExportWarnings(warnings);
       res.json({
         ...site,
-        // Only a password Lavish minted goes back to the browser; one the user typed is already
+        // Only a password Hilight minted goes back to the browser; one the user typed is already
         // theirs, and echoing it would put it in a field they did not ask to have filled.
         ...(generatePassword ? { password } : {}),
         ...(warnings.length ? { warnings: exportWarningSummaries(warnings) } : {}),
@@ -1543,7 +1546,7 @@ export async function serve({
         createChromeHtml(session, {
           layoutGateEnabled: shouldEnableLayoutGate(req.query || {}),
           faviconTag,
-          title: title ? `${title} · Lavish` : "Lavish Editor",
+          title: title ? `${title} · Hilight` : "Hilight",
           artifactRevision: chromeLoad.artifact_revision,
           artifactLoadToken: chromeLoad.artifact_load_token,
           artifactLoadSequence: chromeLoad.artifact_load_sequence,
@@ -1621,7 +1624,7 @@ export async function serve({
           .status(409)
           .type("html")
           .send(
-            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Lavish to continue.</p>",
+            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Hilight to continue.</p>",
           );
         return;
       }
@@ -1632,7 +1635,7 @@ export async function serve({
           .status(409)
           .type("html")
           .send(
-            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Lavish to continue.</p>",
+            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Hilight to continue.</p>",
           );
         return;
       }
@@ -1811,7 +1814,7 @@ export async function serve({
   });
 
   // User-supplied Excalidraw libraries for every whiteboard's library panel and
-  // for `%% lavish-icon` nodes. Read-only: Lavish never writes that directory.
+  // for `%% lavish-icon` nodes. Read-only: Hilight never writes that directory.
   app.get("/api/whiteboard-libraries", async (req, res, next) => {
     try {
       if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
@@ -2065,7 +2068,7 @@ export async function serve({
         sendEvent(type, data) {
           if (webSocket.readyState === WebSocket.OPEN) webSocket.send(JSON.stringify({ type, data }));
         },
-        close(code = 1001, reason = "Lavish server shutdown") {
+        close(code = 1001, reason = "Hilight server shutdown") {
           webSocket.close(code, reason);
           const terminateTimer = setTimeout(() => {
             if (webSocket.readyState !== WebSocket.CLOSED) webSocket.terminate();
@@ -2132,11 +2135,11 @@ export async function serve({
       }
     }
     const httpServer = await listenHttp(app, boundPort, address, (error) => {
-      writeLog(`[lavish] HTTP server error: ${error instanceof Error ? error.message : String(error)}`);
+      writeLog(`[hilight] HTTP server error: ${error instanceof Error ? error.message : String(error)}`);
     });
     if (shuttingDown) {
       httpServer.close();
-      throw new Error("Lavish server is shutting down");
+      throw new Error("Hilight server is shutting down");
     }
     httpServer.on("upgrade", handleEventUpgrade);
     if (boundPort === 0) boundPort = httpServer.address().port;
@@ -2208,7 +2211,9 @@ export async function serve({
             await listenOnce(listenHost);
             pendingBinds.delete(listenHost);
             bound = true;
-            writeLog(`[lavish] now listening on ${hostForUrl(listenHost)}:${boundPort} after an earlier bind failure.`);
+            writeLog(
+              `[hilight] now listening on ${hostForUrl(listenHost)}:${boundPort} after an earlier bind failure.`,
+            );
           } catch (error) {
             if (!shuttingDown) pendingBinds.set(listenHost, error instanceof Error ? error : new Error(String(error)));
           }
@@ -2236,7 +2241,7 @@ export async function serve({
   }
 
   // Loopback is bound first because it is this port's control address: every CLI probes it
-  // whatever its own LAVISH_AXI_HOST says. Whoever holds it owns the port, so a second Lavish
+  // whatever its own HILIGHT_HOST says. Whoever holds it owns the port, so a second Hilight
   // server started concurrently (two agents with different host settings) loses here and exits
   // instead of taking the remaining addresses and splitting one port across two daemons that share
   // one state file.
@@ -2251,8 +2256,8 @@ export async function serve({
       const owner = await probeLavishHealth(LOOPBACK_HOST, boundPort);
       throw new Error(
         owner
-          ? `Another Lavish server (version ${owner.version || "unknown"}) already owns port ${boundPort} on ${LOOPBACK_HOST}; not starting a second one.`
-          : `Loopback ${LOOPBACK_HOST}:${boundPort} is already in use; not starting a Lavish server on another address.`,
+          ? `Another Hilight server (version ${owner.version || "unknown"}) already owns port ${boundPort} on ${LOOPBACK_HOST}; not starting a second one.`
+          : `Loopback ${LOOPBACK_HOST}:${boundPort} is already in use; not starting a Hilight server on another address.`,
         { cause: error },
       );
     }
@@ -2269,7 +2274,7 @@ export async function serve({
   }
   if (httpServers.length === 0) {
     throw new Error(
-      `Lavish server failed to bind any address${lastBindError ? `: ${lastBindError.message}` : ""}`,
+      `Hilight server failed to bind any address${lastBindError ? `: ${lastBindError.message}` : ""}`,
       lastBindError ? { cause: lastBindError } : undefined,
     );
   }
@@ -2277,7 +2282,7 @@ export async function serve({
   // bound neither is alive and unreachable, so close every listener already taken in this call.
   if (!boundHosts.includes(LOOPBACK_HOST) && !boundHosts.includes(listenHosts[0])) {
     const error = new Error(
-      `Lavish server failed to bind a control-channel address${lastBindError ? `: ${lastBindError.message}` : ""}`,
+      `Hilight server failed to bind a control-channel address${lastBindError ? `: ${lastBindError.message}` : ""}`,
       lastBindError ? { cause: lastBindError } : undefined,
     );
     await Promise.all(
@@ -2296,7 +2301,7 @@ export async function serve({
   // Always logged, not only under --verbose: an address that silently stopped serving is what left
   // tailnet review links dead for most of an hour with nothing but a debug line to show for it.
   for (const [listenHost, error] of pendingBinds) {
-    writeLog(`[lavish] WARNING: ${describeBindFailure(listenHost, error)}`);
+    writeLog(`[hilight] WARNING: ${describeBindFailure(listenHost, error)}`);
   }
   serverReady = true;
   scheduleBindRecovery();
@@ -2307,7 +2312,7 @@ export async function serve({
   function shutdown(reloadKey = "", reason = "", cause = "requested") {
     if (shuttingDown) return;
     shuttingDown = true;
-    writeLog(`[lavish] shutting down: ${cause}${reason ? ` (reason=${reason})` : ""}`);
+    writeLog(`[hilight] shutting down: ${cause}${reason ? ` (reason=${reason})` : ""}`);
     if (idleTimer) {
       clearTimeout(idleTimer);
       idleTimer = null;
@@ -2506,7 +2511,7 @@ function isAddressInUseBindError(error) {
   return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
 }
 
-// Whether a Lavish server answers /health at this address. Bounded, because a foreign process
+// Whether a Hilight server answers /health at this address. Bounded, because a foreign process
 // that accepts the connection and never answers must not stall startup, and the socket is
 // destroyed on every exit path: a lingering probe connection keeps a failed server process alive
 // and holds the other process's close() open.
@@ -2545,14 +2550,14 @@ function wantsHtml(req) {
 }
 
 function createLandingHtml() {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lavish Editor</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0}</style></head><body><main class="card"><h1>Lavish Editor is running</h1><p>Open the review session URL printed by your agent.</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hilight</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0}</style></head><body><main class="card"><h1>Hilight is running</h1><p>Open the review session URL printed by your agent.</p></main></body></html>`;
 }
 
 function createDeniedHtml({ title, message, workingUrl }) {
   const safeTitle = escapeHtml(title);
   const safeMessage = escapeHtml(message);
   const safeUrl = escapeHtml(workingUrl);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle} - Lavish Editor</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0 0 18px}.url{display:block;padding:12px 14px;border-radius:10px;background:#f0ebe4;color:#25221f;overflow-wrap:anywhere}a{color:inherit;font-weight:700}</style></head><body><main class="card"><h1>${safeTitle}</h1><p>${safeMessage}</p><p>Open this working URL:</p><a class="url" href="${safeUrl}">${safeUrl}</a></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle} - Hilight</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0 0 18px}.url{display:block;padding:12px 14px;border-radius:10px;background:#f0ebe4;color:#25221f;overflow-wrap:anywhere}a{color:inherit;font-weight:700}</style></head><body><main class="card"><h1>${safeTitle}</h1><p>${safeMessage}</p><p>Open this working URL:</p><a class="url" href="${safeUrl}">${safeUrl}</a></main></body></html>`;
 }
 
 async function readDesignAsset(asset) {
@@ -2615,7 +2620,7 @@ export function buildAllowedHostnames({ host, hosts = [], linkHost: linkHostName
   );
 }
 
-// A lone "*" in LAVISH_AXI_ALLOWED_HOSTS is an explicit opt-out of the Host
+// A lone "*" in HILIGHT_ALLOWED_HOSTS is an explicit opt-out of the Host
 // allowlist, for operators who front the server with their own auth/proxy.
 export function allowsAllHosts(allowedHosts = []) {
   return allowedHosts.some((value) => String(value).trim() === "*");
@@ -2672,7 +2677,7 @@ export function isAllowedHostHeader(hostHeader, allowedHostnames) {
 // header is required and must be allowlisted. When an X-Forwarded-Host is present
 // - a reverse proxy in front of the loopback server - its outermost (last) value
 // must ALSO be allowlisted, so a proxy works once its public hostname is added to
-// LAVISH_AXI_ALLOWED_HOSTS. This is an AND check: a client-spoofed forwarded host
+// HILIGHT_ALLOWED_HOSTS. This is an AND check: a client-spoofed forwarded host
 // can only narrow access (Host is still checked), never widen it into a bypass. A
 // blank forwarded host is treated as absent, matching how proxies omit it.
 /**
@@ -2825,7 +2830,7 @@ export async function resolveWatchTarget(session) {
         scope: "directory",
         options: {
           ...baseOptions,
-          ignored: /(^|[/\\])(\.git|node_modules|dist|build|\.lavish-axi)([/\\]|$)/,
+          ignored: /(^|[/\\])(\.git|node_modules|dist|build|\.hilight|\.lavish-axi)([/\\]|$)/,
         },
       };
     }
@@ -2859,9 +2864,7 @@ function listenerConflict(holder, code) {
     status: "error",
     code,
     error:
-      code === "LISTENER_ACTIVE"
-        ? "Lavish Editor already has an active poll listener"
-        : "Lavish Editor poll listener was replaced",
+      code === "LISTENER_ACTIVE" ? "Hilight already has an active poll listener" : "Hilight poll listener was replaced",
     holder: { label: listenerLabel(holder), age_ms: Math.max(0, Date.now() - holder.startedAt) },
   };
 }
@@ -3011,8 +3014,14 @@ function normalizeFlagValue(value) {
   return value === undefined || value === null ? "" : String(value).trim().toLowerCase();
 }
 
-const LAVISH_DEFAULT_FAVICON =
-  "<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F48E}</text></svg>\">";
+// Hilight's mark: a light bulb drawn as solid shapes so it stays readable at 16px.
+// One shape set serves the tab favicon (fixed amber, legible on light and dark tabs) and the
+// editor bar mark (currentColor). Single quotes only, so it embeds in attributes and data: URLs.
+const HILIGHT_BULB_SHAPES =
+  "<path d='M12 1.5a7.5 7.5 0 0 0-4.5 13.5v2.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V15A7.5 7.5 0 0 0 12 1.5z'/>" +
+  "<rect x='8.5' y='19.5' width='7' height='1.75' rx='.875'/><rect x='9.75' y='21.75' width='4.5' height='1.75' rx='.875'/>";
+const HILIGHT_BRAND_MARK = `<svg class="brand-bulb" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${HILIGHT_BULB_SHAPES}</svg>hilight`;
+const HILIGHT_DEFAULT_FAVICON = `<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23f5a524'>${HILIGHT_BULB_SHAPES}</svg>">`;
 
 function readTagAttr(tag, name) {
   // Tokenize real attributes rather than searching for the bare name anywhere in
@@ -3032,16 +3041,16 @@ function readTagAttr(tag, name) {
   return "";
 }
 
-// Pull a tab favicon + title out of the artifact's own <head>. Lavish renders the
+// Pull a tab favicon + title out of the artifact's own <head>. Hilight renders the
 // artifact in a sandboxed iframe, so the artifact's own <link rel="icon"> and
-// <title> never reach the browser tab; surfacing them here makes a wall of Lavish
-// tabs identifiable. Falls back to the Lavish default favicon. Only data: and
+// <title> never reach the browser tab; surfacing them here makes a wall of Hilight
+// tabs identifiable. Falls back to the Hilight default favicon. Only data: and
 // absolute (http/https/protocol-relative) icon hrefs are adopted verbatim;
 // artifact-relative hrefs would not resolve against the chrome page, so they fall
 // back to the default.
 export function extractArtifactHead(html) {
   const head = String(html || "").slice(0, 10000);
-  let faviconTag = LAVISH_DEFAULT_FAVICON;
+  let faviconTag = HILIGHT_DEFAULT_FAVICON;
   const linkTags = head.match(/<link\b(?:"[^"]*"|'[^']*'|[^"'>])*>/gi) || [];
   const iconTag = linkTags.find((tag) => /(^|\s)icon(\s|$)/i.test(readTagAttr(tag, "rel")));
   const iconHref = iconTag ? readTagAttr(iconTag, "href") : "";
@@ -3087,8 +3096,8 @@ if(window.__lavishChromeReady||ended)return;
 h=document.getElementById("layoutGateTitle");
 c=document.getElementById("layoutGateCopy");
 a=document.getElementById("layoutGateAction");
-if(h)h.textContent="Lavish could not finish loading.";
-if(c)c.textContent="The Lavish editor script did not load. The server usually restarted while this page was opening. Check and reload to reconnect.";
+if(h)h.textContent="Hilight could not finish loading.";
+if(c)c.textContent="The Hilight editor script did not load. The server usually restarted while this page was opening. Check and reload to reconnect.";
 if(a){a.textContent="Check and reload";a.disabled=false;a.onclick=check;}
 showBypass();
 if(o)o.hidden=false;
@@ -3103,7 +3112,7 @@ fetch("/health",{cache:"no-store",signal:ctl.signal}).then(function(r){return r&
 clearTimeout(pt);
 if(outcome==="running"){location.reload();return;}
 if(a)a.disabled=false;
-if(c)c.textContent=outcome==="no-answer"?"Lavish did not answer the check, so this page cannot tell whether it is running. Try again in a moment.":"Lavish is still not running. Start it again with your agent, then use Check and reload.";
+if(c)c.textContent=outcome==="no-answer"?"Hilight did not answer the check, so this page cannot tell whether it is running. Try again in a moment.":"Hilight is still not running. Start it again with your agent, then use Check and reload.";
 });
 }
 })();`;
@@ -3112,8 +3121,8 @@ export function createChromeHtml(
   session,
   {
     layoutGateEnabled = true,
-    faviconTag = LAVISH_DEFAULT_FAVICON,
-    title = "Lavish Editor",
+    faviconTag = HILIGHT_DEFAULT_FAVICON,
+    title = "Hilight",
     artifactRevision = 0,
     artifactLoadToken = "",
     artifactLoadSequence = 0,
@@ -3170,11 +3179,11 @@ ${faviconTag}
 <link rel="stylesheet" href="/chrome.css">
 </head>
 <body class="${bodyClass}">
-<div class="bar"><div class="brand"><span class="brand-mark">lavish</span><span class="brand-file" title="${escapeHtml(session.file)}">${escapeHtml(pathTail)}</span></div><div class="spacer" aria-hidden="true"></div><span class="agent-status" id="agentStatus" role="status" aria-live="polite" data-state="waiting" title="No agent is polling this review. Ask your agent to run lavish-axi poll.">Not listening</span><div class="warnings-wrap" id="warningsWrap" hidden><button class="warnings-button" id="warningsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="warningsDrawer">${chromeIcons.warning}<span class="warnings-count" id="warningsCount">0</span></button><div class="menu warnings-drawer" id="warningsDrawer" role="dialog" aria-labelledby="warningsTitle" aria-describedby="warningsSummary" hidden><div class="warnings-head"><h2 class="warnings-title" id="warningsTitle">Layout issues</h2><p class="warnings-summary" id="warningsSummary"></p></div><div class="warnings-toolbar"><label class="warnings-selectall"><input type="checkbox" id="warningsSelectAll"><span>Select all</span></label><span class="warnings-selected" id="warningsSelected" role="status" aria-live="polite"></span></div><div class="warnings-list" id="warningsList"></div><div class="warnings-foot"><p class="warnings-note">Queueing adds a repair request to your unsent comments. An issue is marked resolved only after a newer artifact load and a complete check at the same viewport no longer finds it.</p><button class="button" id="warningsQueueButton" type="button" disabled>Queue selected fixes</button></div></div></div><div class="resolved-wrap" id="resolvedWrap" hidden><button class="resolved-button" id="resolvedButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="resolvedDrawer"><span id="resolvedCount">0 resolved</span></button><div class="menu resolved-drawer" id="resolvedDrawer" role="dialog" aria-labelledby="resolvedTitle" hidden><div class="resolved-head"><h2 class="resolved-title" id="resolvedTitle">Resolved and off-page comments</h2></div><div class="resolved-list" id="resolvedList"></div></div></div><button class="annotate-switch" id="annotation" type="button" aria-pressed="true" title="${escapeHtml(modeToggleHint)}"><span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span><span>Annotate</span></button><div class="more-wrap" id="moreWrap"><button class="more-button" id="moreButton" type="button" title="More" aria-haspopup="menu" aria-expanded="false">${chromeIcons.more}</button><div class="menu more-menu" id="moreMenu" hidden><div class="menu-head"><div class="menu-label">Editing</div><button class="menu-file" id="copyPath" type="button" title="Copy path · ${escapeHtml(session.file)}">${chromeIcons.file}<span class="menu-file-text"><span class="path-head">${escapeHtml(pathHead)}</span><span class="path-tail">${escapeHtml(pathTail)}</span></span><span class="copy-hint" id="copyHint"><span class="icon-copy">${chromeIcons.copy}</span><span class="icon-check">${chromeIcons.check}</span><span id="copyHintText">Copy</span></span></button></div><div class="menu-rule"></div><button class="menu-item" id="attachImages" type="button">${chromeIcons.image}<span>Attach images to a page comment</span></button><button class="menu-item" id="reloadArtifact" type="button">${chromeIcons.refresh}<span>Reload artifact</span></button><button class="menu-item" id="copySnapshot" type="button">${chromeIcons.camera}<span>Copy DOM snapshot</span></button><button class="menu-item" id="exportArtifact" type="button">${chromeIcons.download}<span>Export standalone HTML</span></button><button class="menu-item" id="shareArtifact" type="button">${chromeIcons.globe}<span>Publish link</span></button><div class="menu-rule"></div><button class="menu-item" id="sendAndEnd" type="button">${chromeIcons.exit}<span>Send all and end session</span></button><button class="menu-item danger" id="end" type="button">${chromeIcons.exit}<span>End session</span></button></div></div></div>
-<div class="notices"><div class="notice" id="handoffBanner" hidden><span>This review is open in another Lavish tab. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</span><button class="notice-action" id="handoffTakeover" type="button">Take over here</button></div><div class="notice" id="outdatedBanner" hidden><span id="outdatedText">The Lavish server this page was connected to is no longer running. Reloading will work once it is running again.</span><span class="notice-actions"><button class="notice-action" id="outdatedReload" type="button">Check and reload</button><button class="notice-action" id="outdatedDismiss" type="button">Dismiss</button></span></div></div>
+<div class="bar"><div class="brand"><span class="brand-mark">${HILIGHT_BRAND_MARK}</span><span class="brand-file" title="${escapeHtml(session.file)}">${escapeHtml(pathTail)}</span></div><div class="spacer" aria-hidden="true"></div><span class="agent-status" id="agentStatus" role="status" aria-live="polite" data-state="waiting" title="No agent is polling this review. Ask your agent to run hilight poll.">Not listening</span><div class="warnings-wrap" id="warningsWrap" hidden><button class="warnings-button" id="warningsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="warningsDrawer">${chromeIcons.warning}<span class="warnings-count" id="warningsCount">0</span></button><div class="menu warnings-drawer" id="warningsDrawer" role="dialog" aria-labelledby="warningsTitle" aria-describedby="warningsSummary" hidden><div class="warnings-head"><h2 class="warnings-title" id="warningsTitle">Layout issues</h2><p class="warnings-summary" id="warningsSummary"></p></div><div class="warnings-toolbar"><label class="warnings-selectall"><input type="checkbox" id="warningsSelectAll"><span>Select all</span></label><span class="warnings-selected" id="warningsSelected" role="status" aria-live="polite"></span></div><div class="warnings-list" id="warningsList"></div><div class="warnings-foot"><p class="warnings-note">Queueing adds a repair request to your unsent comments. An issue is marked resolved only after a newer artifact load and a complete check at the same viewport no longer finds it.</p><button class="button" id="warningsQueueButton" type="button" disabled>Queue selected fixes</button></div></div></div><div class="resolved-wrap" id="resolvedWrap" hidden><button class="resolved-button" id="resolvedButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="resolvedDrawer"><span id="resolvedCount">0 resolved</span></button><div class="menu resolved-drawer" id="resolvedDrawer" role="dialog" aria-labelledby="resolvedTitle" hidden><div class="resolved-head"><h2 class="resolved-title" id="resolvedTitle">Resolved and off-page comments</h2></div><div class="resolved-list" id="resolvedList"></div></div></div><button class="annotate-switch" id="annotation" type="button" aria-pressed="true" title="${escapeHtml(modeToggleHint)}"><span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span><span>Annotate</span></button><div class="more-wrap" id="moreWrap"><button class="more-button" id="moreButton" type="button" title="More" aria-haspopup="menu" aria-expanded="false">${chromeIcons.more}</button><div class="menu more-menu" id="moreMenu" hidden><div class="menu-head"><div class="menu-label">Editing</div><button class="menu-file" id="copyPath" type="button" title="Copy path · ${escapeHtml(session.file)}">${chromeIcons.file}<span class="menu-file-text"><span class="path-head">${escapeHtml(pathHead)}</span><span class="path-tail">${escapeHtml(pathTail)}</span></span><span class="copy-hint" id="copyHint"><span class="icon-copy">${chromeIcons.copy}</span><span class="icon-check">${chromeIcons.check}</span><span id="copyHintText">Copy</span></span></button></div><div class="menu-rule"></div><button class="menu-item" id="attachImages" type="button">${chromeIcons.image}<span>Attach images to a page comment</span></button><button class="menu-item" id="reloadArtifact" type="button">${chromeIcons.refresh}<span>Reload artifact</span></button><button class="menu-item" id="copySnapshot" type="button">${chromeIcons.camera}<span>Copy DOM snapshot</span></button><button class="menu-item" id="exportArtifact" type="button">${chromeIcons.download}<span>Export standalone HTML</span></button><button class="menu-item" id="shareArtifact" type="button">${chromeIcons.globe}<span>Publish link</span></button><div class="menu-rule"></div><button class="menu-item" id="sendAndEnd" type="button">${chromeIcons.exit}<span>Send all and end session</span></button><button class="menu-item danger" id="end" type="button">${chromeIcons.exit}<span>End session</span></button></div></div></div>
+<div class="notices"><div class="notice" id="handoffBanner" hidden><span>This review is open in another Hilight tab. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</span><button class="notice-action" id="handoffTakeover" type="button">Take over here</button></div><div class="notice" id="outdatedBanner" hidden><span id="outdatedText">The Hilight server this page was connected to is no longer running. Reloading will work once it is running again.</span><span class="notice-actions"><button class="notice-action" id="outdatedReload" type="button">Check and reload</button><button class="notice-action" id="outdatedDismiss" type="button">Dismiss</button></span></div></div>
 <div class="layout"><div class="frame"><iframe id="artifact" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" data-artifact-src="/artifact/${session.key}/index.html"></iframe></div><div class="sheet-scrim" id="sheetScrim"></div><aside class="comments" id="comments" aria-label="Comments"><div class="sheet-head" id="sheetHead"><span class="sheet-handle" aria-hidden="true"></span><div class="sheet-head-row"><h2>Comments</h2><span class="sheet-summary" id="sheetSummary" role="status" aria-live="polite"></span><button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="comments" aria-label="Show comments">${chromeIcons.chevronUp}</button></div></div><div class="comments-body" id="commentsBody"><section class="comment-thread page-thread" id="pageThread" data-thread-id="page" tabindex="0" aria-label="Comments on the whole page"><header class="thread-head"><span class="thread-quote">Whole page</span><span class="thread-status" id="pageThreadStatus"></span></header><ol class="thread-messages" id="pageMessages"></ol><div class="thread-reply" id="chatComposer"><textarea id="chatInput" rows="1" aria-label="Comment on the whole page" placeholder="Comment on the whole page"></textarea><div class="chat-attachments" id="chatAttachments"></div><div class="thread-reply-row"><button class="text-button chat-attach" id="chatAttach" type="button">Attach images</button><input id="chatAttachInput" type="file" accept="${escapeHtml(acceptedMime.join(","))}" multiple hidden><span class="chat-attachment-notice" id="chatAttachmentNotice" role="status"></span><span class="thread-hint">Enter saves · Esc closes</span></div></div></section><div id="marginThreads" class="margin-threads"><div id="marginThreadCanvas" class="margin-canvas"></div></div></div><div class="comments-foot" id="commentsFoot"><div class="resolve-toast" id="resolveToast" role="status" hidden><span id="resolveToastText">Resolved</span><button class="text-button" id="resolveUndo" type="button">Undo</button></div><div class="send-hint" id="sendHint" hidden>Nothing to send yet. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</div><button class="button send-button" id="send" type="button">Send to agent</button></div></aside></div>
-<div class="share-overlay" id="shareDialog" role="dialog" aria-modal="true" aria-labelledby="shareTitleText" hidden><form class="share-card" id="shareForm"><div class="share-head"><div><div class="share-kicker">Publish to <a class="share-link" href="https://ht-ml.app" target="_blank" rel="noopener noreferrer">ht-ml.app</a></div><h2 id="shareTitleText">Publish artifact</h2></div><button class="share-close" id="shareClose" type="button" aria-label="Close publish dialog"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><p class="share-note">ht-ml.app is a separate, third-party hosting service, not part of Lavish. Publishing sends this artifact to its servers.</p><p class="share-copy">This uploads this artifact to ht-ml.app with local assets inlined. Without a password, the page is PUBLIC and anyone with the link can open it. With a password, the page is PRIVATE and viewers must supply the password to view.</p><p class="share-note">Do not publish secrets. The Lavish annotation SDK is not included.</p><div class="share-grid"><label class="share-check"><input id="shareGenerate" type="checkbox"><span>Generate a password (makes this page private)</span></label><label>Password (optional)<input id="sharePassword" name="password" type="password" autocomplete="new-password" placeholder="Leave blank for a public page"></label></div><div class="share-status" id="shareStatus" role="status"></div><div class="share-result" id="shareResult" hidden><label id="shareUrlResult">Share URL<div class="share-copy-row"><input id="shareUrl" readonly><button class="share-copy-btn" id="copyShareUrl" type="button">Copy URL</button></div></label><label id="sharePasswordResult" hidden>Password (shared secret)<div class="share-copy-row"><input id="sharePasswordOut" readonly><button class="share-copy-btn" id="copySharePassword" type="button">Copy password</button></div></label><label id="shareSiteIdResult" hidden>Site ID<div class="share-copy-row"><input id="shareSiteId" readonly><button class="share-copy-btn" id="copyShareSiteId" type="button">Copy site ID</button></div></label><label id="shareUpdateKeyResult">Update key (secret)<div class="share-copy-row"><input id="shareUpdateKey" readonly><button class="share-copy-btn" id="copyUpdateKey" type="button">Copy key</button></div></label><p class="share-note" id="shareUpdateKeyNote">Keep the update key private. ht-ml.app returns it once and it is the only way to update this page later; the service has no delete. Republish this page&#39;s HTML with <code>lavish-axi share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;</code>, and add <code>--private</code> to also lock it behind a new generated password.</p></div><div class="share-actions"><button class="share-cancel" id="shareCancel" type="button">Cancel</button><button class="button" id="sharePublish" type="submit">Publish</button></div></form></div>
-<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Lavish is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
+<div class="share-overlay" id="shareDialog" role="dialog" aria-modal="true" aria-labelledby="shareTitleText" hidden><form class="share-card" id="shareForm"><div class="share-head"><div><div class="share-kicker">Publish to <a class="share-link" href="https://ht-ml.app" target="_blank" rel="noopener noreferrer">ht-ml.app</a></div><h2 id="shareTitleText">Publish artifact</h2></div><button class="share-close" id="shareClose" type="button" aria-label="Close publish dialog"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><p class="share-note">ht-ml.app is a separate, third-party hosting service, not part of Hilight. Publishing sends this artifact to its servers.</p><p class="share-copy">This uploads this artifact to ht-ml.app with local assets inlined. Without a password, the page is PUBLIC and anyone with the link can open it. With a password, the page is PRIVATE and viewers must supply the password to view.</p><p class="share-note">Do not publish secrets. The Hilight annotation SDK is not included.</p><div class="share-grid"><label class="share-check"><input id="shareGenerate" type="checkbox"><span>Generate a password (makes this page private)</span></label><label>Password (optional)<input id="sharePassword" name="password" type="password" autocomplete="new-password" placeholder="Leave blank for a public page"></label></div><div class="share-status" id="shareStatus" role="status"></div><div class="share-result" id="shareResult" hidden><label id="shareUrlResult">Share URL<div class="share-copy-row"><input id="shareUrl" readonly><button class="share-copy-btn" id="copyShareUrl" type="button">Copy URL</button></div></label><label id="sharePasswordResult" hidden>Password (shared secret)<div class="share-copy-row"><input id="sharePasswordOut" readonly><button class="share-copy-btn" id="copySharePassword" type="button">Copy password</button></div></label><label id="shareSiteIdResult" hidden>Site ID<div class="share-copy-row"><input id="shareSiteId" readonly><button class="share-copy-btn" id="copyShareSiteId" type="button">Copy site ID</button></div></label><label id="shareUpdateKeyResult">Update key (secret)<div class="share-copy-row"><input id="shareUpdateKey" readonly><button class="share-copy-btn" id="copyUpdateKey" type="button">Copy key</button></div></label><p class="share-note" id="shareUpdateKeyNote">Keep the update key private. ht-ml.app returns it once and it is the only way to update this page later; the service has no delete. Republish this page&#39;s HTML with <code>hilight share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;</code>, and add <code>--private</code> to also lock it behind a new generated password.</p></div><div class="share-actions"><button class="share-cancel" id="shareCancel" type="button">Cancel</button><button class="button" id="sharePublish" type="submit">Publish</button></div></form></div>
+<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Hilight is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
 <div class="ended-overlay" id="endedOverlay" hidden><div class="ended-card"><div class="ended-title">Session ended.<br>Return to your agent to continue.</div><p class="ended-copy">${escapeHtml(session.file)}</p></div></div>
 <div class="whiteboard-overlay" id="whiteboardOverlay" hidden><div class="whiteboard-shell"><div class="whiteboard-error" id="whiteboardError" hidden></div><button class="whiteboard-close" id="whiteboardClose" type="button" aria-label="Close whiteboard"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button><iframe id="whiteboardFrame" title="Excalidraw whiteboard" sandbox="allow-scripts allow-popups"></iframe></div></div>
 <script id="lavish-session" type="application/json">${sessionJson}</script>
@@ -3190,7 +3199,7 @@ export function createWhiteboardFrameHtml(channelToken = "") {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lavish Whiteboard</title>
+<title>Hilight Whiteboard</title>
 <link rel="stylesheet" href="/whiteboard-assets/whiteboard.css">
 </head>
 <body>

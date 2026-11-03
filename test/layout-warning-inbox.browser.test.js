@@ -8,11 +8,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 // The behavioral regression boundary for passive layout triage. Before this change the browser's
-// audit returned straight out of `lavish-axi poll` with no user action, so several individually
+// audit returned straight out of `hilight poll` with no user action, so several individually
 // reasonable agent fixes produced repeated edit/reload cycles while the user was mid-review. Every
 // assertion here pins the replacement contract in a real browser: detection is passive, the user
 // decides what becomes work, and only a queued batch wakes the agent.
-const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.HILIGHT_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = path.join(repoRoot, "test/fixtures/layout-audit");
 
@@ -47,12 +47,12 @@ test(
     const temp = await mkdtemp(path.join(tmpdir(), "lavish-warning-inbox-"));
     const port = await freePort();
     const lavishEnv = {
-      LAVISH_AXI_PORT: String(port),
-      LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
-      LAVISH_AXI_NO_OPEN: "1",
-      LAVISH_AXI_TELEMETRY: "0",
-      LAVISH_AXI_HOST: "127.0.0.1",
-      LAVISH_AXI_LINK_HOST: "127.0.0.1",
+      HILIGHT_PORT: String(port),
+      HILIGHT_STATE_DIR: path.join(temp, "state"),
+      HILIGHT_NO_OPEN: "1",
+      HILIGHT_TELEMETRY: "0",
+      HILIGHT_HOST: "127.0.0.1",
+      HILIGHT_LINK_HOST: "127.0.0.1",
     };
     const chromeEnv = {
       CHROME_DEVTOOLS_AXI_SESSION: `lavish-warning-inbox-${process.pid}`,
@@ -60,7 +60,7 @@ test(
     };
 
     function openArtifact(file, args = []) {
-      const output = run(process.execPath, ["bin/lavish-axi.js", file, "--no-open", ...args], lavishEnv);
+      const output = run(process.execPath, ["bin/hilight.js", file, "--no-open", ...args], lavishEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
       return url;
@@ -69,7 +69,7 @@ test(
     function poll(file, timeoutMs) {
       return run(
         process.execPath,
-        ["bin/lavish-axi.js", "poll", file, "--timeout-ms", String(timeoutMs)],
+        ["bin/hilight.js", "poll", file, "--timeout-ms", String(timeoutMs)],
         lavishEnv,
         timeoutMs + 45_000,
       );
@@ -421,108 +421,112 @@ test(
       assert.match(cleanFeedback, /Tighten the summary/);
       assert.doesNotMatch(cleanFeedback, /layout-warnings/);
     } finally {
-      run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
+      run(process.execPath, ["bin/hilight.js", "stop", "--port", String(port)], lavishEnv, 15_000);
       run("chrome-devtools-axi", ["stop"], chromeEnv);
       await rm(temp, { recursive: true, force: true });
     }
   },
 );
 
-test("a live reload preserves the review context Lavish owns", { skip: !runBrowserE2e, timeout: 240_000 }, async () => {
-  const temp = await mkdtemp(path.join(tmpdir(), "lavish-review-context-"));
-  const port = await freePort();
-  const lavishEnv = {
-    LAVISH_AXI_PORT: String(port),
-    LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
-    LAVISH_AXI_NO_OPEN: "1",
-    LAVISH_AXI_TELEMETRY: "0",
-    LAVISH_AXI_HOST: "127.0.0.1",
-    LAVISH_AXI_LINK_HOST: "127.0.0.1",
-  };
-  const chromeEnv = {
-    CHROME_DEVTOOLS_AXI_SESSION: `lavish-review-context-${process.pid}`,
-    CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
-  };
+test(
+  "a live reload preserves the review context Hilight owns",
+  { skip: !runBrowserE2e, timeout: 240_000 },
+  async () => {
+    const temp = await mkdtemp(path.join(tmpdir(), "lavish-review-context-"));
+    const port = await freePort();
+    const lavishEnv = {
+      HILIGHT_PORT: String(port),
+      HILIGHT_STATE_DIR: path.join(temp, "state"),
+      HILIGHT_NO_OPEN: "1",
+      HILIGHT_TELEMETRY: "0",
+      HILIGHT_HOST: "127.0.0.1",
+      HILIGHT_LINK_HOST: "127.0.0.1",
+    };
+    const chromeEnv = {
+      CHROME_DEVTOOLS_AXI_SESSION: `lavish-review-context-${process.pid}`,
+      CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
+    };
 
-  // Accessibility-tree refs go stale after every action, so always resolve a fresh one.
-  function snapshot() {
-    return run("chrome-devtools-axi", ["snapshot"], chromeEnv);
-  }
-  function ref(pattern) {
-    const line = snapshot()
-      .split("\n")
-      .find((candidate) => pattern.test(candidate));
-    assert.ok(line, `no snapshot line matching ${pattern}`);
-    return line.trim().split(/\s+/)[0].replace(/^uid=/, "");
-  }
-  function click(pattern) {
-    run("chrome-devtools-axi", ["click", `@${ref(pattern)}`], chromeEnv);
-  }
-  function wait(ms) {
-    // An in-page timer: `chrome-devtools-axi wait <ms>` fails with "fn is not a function" in 0.1.34.
-    run(
-      "chrome-devtools-axi",
-      ["eval", `async()=>{await new Promise(r=>setTimeout(r,${ms}));return true}`],
-      chromeEnv,
-      ms + 45_000,
-    );
-  }
+    // Accessibility-tree refs go stale after every action, so always resolve a fresh one.
+    function snapshot() {
+      return run("chrome-devtools-axi", ["snapshot"], chromeEnv);
+    }
+    function ref(pattern) {
+      const line = snapshot()
+        .split("\n")
+        .find((candidate) => pattern.test(candidate));
+      assert.ok(line, `no snapshot line matching ${pattern}`);
+      return line.trim().split(/\s+/)[0].replace(/^uid=/, "");
+    }
+    function click(pattern) {
+      run("chrome-devtools-axi", ["click", `@${ref(pattern)}`], chromeEnv);
+    }
+    function wait(ms) {
+      // An in-page timer: `chrome-devtools-axi wait <ms>` fails with "fn is not a function" in 0.1.34.
+      run(
+        "chrome-devtools-axi",
+        ["eval", `async()=>{await new Promise(r=>setTimeout(r,${ms}));return true}`],
+        chromeEnv,
+        ms + 45_000,
+      );
+    }
 
-  try {
-    const artifact = path.join(temp, "review-context.html");
-    await copyFile(path.join(fixtures, "review-context.html"), artifact);
-    const output = run(process.execPath, ["bin/lavish-axi.js", artifact, "--no-open"], lavishEnv);
-    const url = output.match(/url:\s*"([^"]+)"/)?.[1];
-    assert.ok(url, output);
-    run("chrome-devtools-axi", ["open", "data:text/html,"], chromeEnv);
-    run("chrome-devtools-axi", ["emulate", "--viewport", "1440x1000x1"], chromeEnv);
-    run("chrome-devtools-axi", ["open", url], chromeEnv);
-    wait(4500);
+    try {
+      const artifact = path.join(temp, "review-context.html");
+      await copyFile(path.join(fixtures, "review-context.html"), artifact);
+      const output = run(process.execPath, ["bin/hilight.js", artifact, "--no-open"], lavishEnv);
+      const url = output.match(/url:\s*"([^"]+)"/)?.[1];
+      assert.ok(url, output);
+      run("chrome-devtools-axi", ["open", "data:text/html,"], chromeEnv);
+      run("chrome-devtools-axi", ["emulate", "--viewport", "1440x1000x1"], chromeEnv);
+      run("chrome-devtools-axi", ["open", url], chromeEnv);
+      wait(4500);
 
-    // Lavish-owned answers: a radio and a checkbox inside a data-lavish-question scope.
-    click(/radio "Pro"/);
-    click(/checkbox "Include beta cohort"/);
-    // Unsent annotation text on an element the reload will replace.
-    click(/Annotate this paragraph/);
-    wait(800);
-    run("chrome-devtools-axi", ["type", "Shorten this to one sentence"], chromeEnv);
-    wait(800);
+      // Lavish-owned answers: a radio and a checkbox inside a data-lavish-question scope.
+      click(/radio "Pro"/);
+      click(/checkbox "Include beta cohort"/);
+      // Unsent annotation text on an element the reload will replace.
+      click(/Annotate this paragraph/);
+      wait(800);
+      run("chrome-devtools-axi", ["type", "Shorten this to one sentence"], chromeEnv);
+      wait(800);
 
-    const before = snapshot();
-    assert.match(before, /radio "Pro" checked/);
-    assert.match(before, /checkbox "Include beta cohort" checked/);
+      const before = snapshot();
+      assert.match(before, /radio "Pro" checked/);
+      assert.match(before, /checkbox "Include beta cohort" checked/);
 
-    await writeFile(artifact, `${await readFile(artifact, "utf8")}\n<!-- revision -->\n`);
-    wait(5000);
+      await writeFile(artifact, `${await readFile(artifact, "utf8")}\n<!-- revision -->\n`);
+      wait(5000);
 
-    const after = snapshot();
-    assert.match(after, /radio "Pro" checked/, "a Lavish-owned answer survives the reload");
-    assert.match(after, /checkbox "Include beta cohort" checked/);
-    assert.match(after, /Annotate <p>/, "the open annotation card comes back");
+      const after = snapshot();
+      assert.match(after, /radio "Pro" checked/, "a Lavish-owned answer survives the reload");
+      assert.match(after, /checkbox "Include beta cohort" checked/);
+      assert.match(after, /Annotate <p>/, "the open annotation card comes back");
 
-    // Saving the restored card proves the unsent text itself survived, not just the card: it
-    // becomes a dashed Not sent margin card whose quote stays on one line.
-    click(/button "Save"/);
-    wait(800);
-    const queuedNote = run(
-      "chrome-devtools-axi",
-      [
-        "eval",
-        '() => { const card = document.querySelector("#marginThreadCanvas .comment-thread.is-pending"); const quote = card.querySelector(".thread-quote"); return JSON.stringify({ text: card.querySelector(".thread-body").textContent, status: card.querySelector(".thread-status").textContent, borderStyle: getComputedStyle(card).borderTopStyle, quoteWhiteSpace: getComputedStyle(quote).whiteSpace, quoteHeight: quote.getBoundingClientRect().height, quoteLineHeight: parseFloat(getComputedStyle(quote).lineHeight) }); }',
-      ],
-      chromeEnv,
-    );
-    let geometry = JSON.parse(queuedNote.match(/result:\s*("(?:[^"\\]|\\.)*")/s)?.[1] || "null");
-    while (typeof geometry === "string") geometry = JSON.parse(geometry);
-    assert.ok(geometry, queuedNote);
-    assert.equal(geometry.text, "Shorten this to one sentence");
-    assert.equal(geometry.status, "Not sent");
-    assert.equal(geometry.borderStyle, "dashed");
-    assert.equal(geometry.quoteWhiteSpace, "nowrap");
-    assert.ok(geometry.quoteHeight <= geometry.quoteLineHeight + 1, "the anchor quote stays on one line");
-  } finally {
-    run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
-    run("chrome-devtools-axi", ["stop"], chromeEnv);
-    await rm(temp, { recursive: true, force: true });
-  }
-});
+      // Saving the restored card proves the unsent text itself survived, not just the card: it
+      // becomes a dashed Not sent margin card whose quote stays on one line.
+      click(/button "Save"/);
+      wait(800);
+      const queuedNote = run(
+        "chrome-devtools-axi",
+        [
+          "eval",
+          '() => { const card = document.querySelector("#marginThreadCanvas .comment-thread.is-pending"); const quote = card.querySelector(".thread-quote"); return JSON.stringify({ text: card.querySelector(".thread-body").textContent, status: card.querySelector(".thread-status").textContent, borderStyle: getComputedStyle(card).borderTopStyle, quoteWhiteSpace: getComputedStyle(quote).whiteSpace, quoteHeight: quote.getBoundingClientRect().height, quoteLineHeight: parseFloat(getComputedStyle(quote).lineHeight) }); }',
+        ],
+        chromeEnv,
+      );
+      let geometry = JSON.parse(queuedNote.match(/result:\s*("(?:[^"\\]|\\.)*")/s)?.[1] || "null");
+      while (typeof geometry === "string") geometry = JSON.parse(geometry);
+      assert.ok(geometry, queuedNote);
+      assert.equal(geometry.text, "Shorten this to one sentence");
+      assert.equal(geometry.status, "Not sent");
+      assert.equal(geometry.borderStyle, "dashed");
+      assert.equal(geometry.quoteWhiteSpace, "nowrap");
+      assert.ok(geometry.quoteHeight <= geometry.quoteLineHeight + 1, "the anchor quote stays on one line");
+    } finally {
+      run(process.execPath, ["bin/hilight.js", "stop", "--port", String(port)], lavishEnv, 15_000);
+      run("chrome-devtools-axi", ["stop"], chromeEnv);
+      await rm(temp, { recursive: true, force: true });
+    }
+  },
+);

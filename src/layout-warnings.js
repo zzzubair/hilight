@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
+import { readEnv } from "./env.js";
 
 // The passive layout-warning inbox. Detection is passive: a browser diagnostic pass never wakes
 // an agent and never triggers a repair. Findings land here as durable records the user triages
-// from the Lavish top bar, and only an explicit "Queue selected fixes" turns them into an
+// from the Hilight top bar, and only an explicit "Queue selected fixes" turns them into an
 // ordinary queued prompt.
 //
 // Every rule in this module is a lifecycle rule, and the lifecycle is deliberately conservative:
@@ -329,7 +330,7 @@ export function layoutWarningPromptPayload(warnings) {
     `Fix ${count === 1 ? "this layout issue" : `these ${count} layout issues`} the browser detected in this artifact:\n` +
     `${lines.join("\n")}\n\n` +
     "Apply every listed fix in one pass before saving so the review refreshes once. " +
-    "A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.";
+    "A queued layout issue is a repair request, not a resolved issue: Hilight only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.";
   const target = {
     type: "layout-warnings",
     artifact_revision: Math.max(0, Math.trunc(finiteNumber(selected[0]?.queued_revision))),
@@ -378,7 +379,7 @@ export function normalizeLayoutWarningsTarget(target) {
 }
 
 export function resolveDiagnosticViewportClasses(env = process.env) {
-  const raw = String(env.LAVISH_AXI_DIAGNOSTIC_VIEWPORTS || "").trim();
+  const raw = String(readEnv(env, "DIAGNOSTIC_VIEWPORTS") || "").trim();
   if (!raw) return [...DEFAULT_DIAGNOSTIC_VIEWPORT_CLASSES];
   const configured = raw
     .split(",")

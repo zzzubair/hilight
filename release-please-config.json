@@ -5,7 +5,7 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "lavish-axi",
+      "package-name": "hilight-axi",
       "extra-files": [
         {
           "type": "json",

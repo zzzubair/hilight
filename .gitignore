@@ -11,3 +11,5 @@ coverage/
 package-lock.json
 .no-mistakes/evidence/
 /.planning/
+.hilight/
+hilight-axi.tgz

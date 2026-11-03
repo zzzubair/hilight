@@ -9,14 +9,14 @@ import test from "node:test";
 
 import { AxiError } from "axi-sdk-js";
 
-process.env.LAVISH_AXI_HOST = "127.0.0.1";
-process.env.LAVISH_AXI_LINK_HOST = "127.0.0.1";
+process.env.HILIGHT_HOST = "127.0.0.1";
+process.env.HILIGHT_LINK_HOST = "127.0.0.1";
 
 import { createOpenOutput, createPollOutput, getCommandHelp, resolveAgentReply, VERSION } from "../src/cli.js";
 import { serve } from "../src/server.js";
 import { sessionKey } from "../src/session-store.js";
 
-const CLI = fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url));
+const CLI = fileURLToPath(new URL("../bin/hilight.js", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const STRUCTURED_REPLY = ["## What changed", "", "- **Phase 1 heading** done", "- next item", "", "1. ship it"].join(
@@ -95,8 +95,8 @@ test("open and poll next_step keep --agent-reply concise-first and structure-whe
 
   assertConciseFirstGuidance(open.next_step);
   assertConciseFirstGuidance(poll.next_step);
-  assert.match(open.next_step, /lavish-axi poll --help|README/);
-  assert.match(poll.next_step, /lavish-axi poll --help|README/);
+  assert.match(open.next_step, /hilight poll --help|README/);
+  assert.match(poll.next_step, /hilight poll --help|README/);
 });
 
 test("poll help documents --agent-reply-file for longer Markdown and points at README's subset", () => {
@@ -114,8 +114,8 @@ test("poll help documents --agent-reply-file for longer Markdown and points at R
   assert.match(help, /README/);
   assert.match(help, /Feedback controls/);
   assert.doesNotMatch(help, /prefer multiline/i);
-  assert.match(help, /lavish-axi poll report\.html --agent-reply "Renamed the payment step\."/);
-  assert.match(help, /lavish-axi poll report\.html --agent-reply-file reply\.md/);
+  assert.match(help, /hilight poll report\.html --agent-reply "Renamed the payment step\."/);
+  assert.match(help, /hilight poll report\.html --agent-reply-file reply\.md/);
 });
 
 test("resolveAgentReply keeps the inline --agent-reply string", async () => {
@@ -218,8 +218,8 @@ test("poll rejects over-limit agent reply files and stdin with an actionable err
   await writeFile(replyFile, oversizedReply);
   const env = {
     ...process.env,
-    LAVISH_AXI_STATE_DIR: path.join(dir, "state"),
-    LAVISH_AXI_TELEMETRY: "0",
+    HILIGHT_STATE_DIR: path.join(dir, "state"),
+    HILIGHT_TELEMETRY: "0",
   };
   try {
     for (const result of [
@@ -256,12 +256,12 @@ test("poll --agent-reply-file and stdin land multiline Markdown in the transcrip
   });
   const env = {
     ...process.env,
-    LAVISH_AXI_STATE_DIR: stateDir,
-    LAVISH_AXI_PORT: String(server.port),
-    LAVISH_AXI_HOST: "127.0.0.1",
-    LAVISH_AXI_LINK_HOST: "127.0.0.1",
-    LAVISH_AXI_TELEMETRY: "0",
-    LAVISH_AXI_NO_OPEN: "1",
+    HILIGHT_STATE_DIR: stateDir,
+    HILIGHT_PORT: String(server.port),
+    HILIGHT_HOST: "127.0.0.1",
+    HILIGHT_LINK_HOST: "127.0.0.1",
+    HILIGHT_TELEMETRY: "0",
+    HILIGHT_NO_OPEN: "1",
   };
   try {
     const base = `http://127.0.0.1:${server.port}`;

@@ -13,7 +13,7 @@ const warningSelectionStorageKey = "lavish-axi:warning-selection:" + key;
 // destroy it unless the chrome persists what the SDK reports. Keyed per session like the queue,
 // so a draft can never reappear over a different artifact.
 const reviewStateStorageKey = "lavish-axi:review-state:" + key;
-// Drafts Lavish could not replay. The text outlives the draft that carried it, so the user can
+// Drafts Hilight could not replay. The text outlives the draft that carried it, so the user can
 // still read and copy it after the anchor it was written against is gone for good.
 const retiredDraftStorageKey = "lavish-axi:retired-drafts:" + key;
 const internalQueueKeyField = "_lavishQueueKey";
@@ -301,7 +301,7 @@ let editingDraft = "";
 let editFocusPending = false;
 // The selector list last told to the artifact, so a render that changes nothing stays quiet.
 let postedQueuedAnchors = "[]";
-// In-iframe review context (an open annotation card's unsent text, Lavish-owned question
+// In-iframe review context (an open annotation card's unsent text, Hilight-owned question
 // answers). The sandbox means the chrome cannot read it back after a reload, so the SDK reports
 // it as it changes and the chrome replays it once the new document is up. It is persisted per
 // session so a full page reload replays it too.
@@ -311,7 +311,7 @@ const ARTIFACT_SILENCE_PROBE_MS = 8000;
 const ARTIFACT_LOAD_BEGIN_RETRY_DELAYS_MS = [100, 300];
 // Backoff for retrying a whole begin-load attempt after its in-call retries ran out. The
 // in-call retries span 400ms, which only covers a slow response - not the multi-second window
-// where the server is being replaced (a version-driven restart, or another `lavish-axi <file>`
+// where the server is being replaced (a version-driven restart, or another `hilight <file>`
 // invocation restarting the shared server). Without these the chrome abandons the artifact for
 // good: the frame is never navigated, `artifact_revision` never advances, and the page sits on
 // the layout gate and then on an empty frame with nothing to click.
@@ -337,14 +337,14 @@ const TERMINAL_PREPARATION_TIMEOUT_MS = 5000;
 // answering), deliver those words without a snapshot instead of waiting forever.
 const SNAPSHOT_REQUEST_TIMEOUT_MS = 5000;
 const SEND_STALLED_COPY =
-  "Still trying to send. Your feedback is saved in this tab. Keep this tab open while Lavish catches up, and check that the server is running.";
+  "Still trying to send. Your feedback is saved in this tab. Keep this tab open while Hilight catches up, and check that the server is running.";
 const SEND_FAILED_COPY =
-  "Could not send. Your comments are still saved in this tab. Check that Lavish is running, then click Send to agent to retry.";
+  "Could not send. Your comments are still saved in this tab. Check that Hilight is running, then click Send to agent to retry.";
 const TERMINAL_SEND_FAILED_COPY =
-  "Could not send. Your comments are still saved in this tab. Check that Lavish is running, then choose Send all and end session in the More menu to retry the same batch.";
-const HEALTH_NO_ANSWER_TITLE = "Lavish did not answer.";
+  "Could not send. Your comments are still saved in this tab. Check that Hilight is running, then choose Send all and end session in the More menu to retry the same batch.";
+const HEALTH_NO_ANSWER_TITLE = "Hilight did not answer.";
 const HEALTH_NO_ANSWER_COPY =
-  "Lavish did not answer the check, so this page cannot tell whether it is running. Try again in a moment.";
+  "Hilight did not answer the check, so this page cannot tell whether it is running. Try again in a moment.";
 let artifactLoadToken = "";
 let artifactLoadRevision = Number(sessionData.initialArtifactRevision) || 0;
 let artifactLoadRequestSequence = Number(sessionData.initialArtifactLoadSequence) || 0;
@@ -657,7 +657,7 @@ const BUBBLE_THUMBNAIL_LIMIT = 4;
 
 // Thumbnails for a note's images, served straight from the same-origin attachment endpoint (the
 // ids are already server-vetted at upload time). The bubble has room for only a few, but the
-// per-prompt cap is configurable (LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT), so a note can
+// per-prompt cap is configurable (HILIGHT_MAX_ATTACHMENTS_PER_PROMPT), so a note can
 // legitimately carry more than fit: the remainder collapses into a +N badge rather than being
 // dropped from the preview, which would make the queue look like it lost the extra images (W-A).
 function bubbleAttachmentsHtml(entry) {
@@ -978,7 +978,7 @@ function syncChat(chat, revision) {
 // it is shown: `waiting` is no poll at all, `listening` is a poll that takes a send within
 // milliseconds, and `working` or an external listener is an agent whose next poll takes it.
 const AGENT_STATUS = {
-  waiting: ["Not listening", "No agent is polling this review. Ask your agent to run lavish-axi poll."],
+  waiting: ["Not listening", "No agent is polling this review. Ask your agent to run hilight poll."],
   listening: ["Listening", "Your agent is waiting for comments. Send delivers them right away."],
   working: ["Working", "Your agent is working on what you sent. New comments reach it on its next poll."],
   external: ["Listening", "An external listener holds this review. New comments reach the agent on its next poll."],
@@ -1003,16 +1003,16 @@ function setHandoffSuperseded(visible) {
 }
 
 // The server this page was connected to went away. What is true beyond that depends on why, so
-// the shutdown names its reason and each one gets its own line - a page told "Lavish was updated"
+// the shutdown names its reason and each one gets its own line - a page told "Hilight was updated"
 // after a deliberate stop is being told something false. An unnamed reason (SIGTERM, or any
 // caller that names none) claims neither.
 function chromeOutdatedCopy(reason) {
-  if (reason === "upgrade") return "Lavish was updated. This page is running the previous version.";
+  if (reason === "upgrade") return "Hilight was updated. This page is running the previous version.";
   if (reason === "local-build") {
-    return "Lavish was restarted to pick up a local build. This page is running the copy the previous server sent.";
+    return "Hilight was restarted to pick up a local build. This page is running the copy the previous server sent.";
   }
-  if (reason === "stop") return "Lavish was stopped. Reload after you start it again.";
-  return "The Lavish server this page was connected to is no longer running. Reloading will work once it is running again.";
+  if (reason === "stop") return "Hilight was stopped. Reload after you start it again.";
+  return "The Hilight server this page was connected to is no longer running. Reloading will work once it is running again.";
 }
 
 // Say so where the user can dismiss it, and never reload on their behalf - a forced reload
@@ -1068,7 +1068,7 @@ function discardUnrestorableDraft(selector) {
   setReviewState({ ...lastReviewState, card: null });
 }
 
-// Retiring a draft ends Lavish's ability to replay it, so the text itself is handed back to the
+// Retiring a draft ends Hilight's ability to replay it, so the text itself is handed back to the
 // user before it goes: it is written to the conversation panel verbatim, where it is selectable,
 // nothing overwrites what they may already be typing, and no control can discard it by accident.
 // It is persisted per session so a reload does not take the last copy with it.
@@ -2097,7 +2097,7 @@ function setLayoutGateCard(state) {
   }
 
   layoutGateTitle.innerHTML = "Checking layout.<br>One moment.";
-  layoutGateCopy.textContent = "Lavish is waiting for fonts and final geometry before revealing this artifact.";
+  layoutGateCopy.textContent = "Hilight is waiting for fonts and final geometry before revealing this artifact.";
 }
 
 function setLayoutGateActive(active) {
@@ -2557,7 +2557,7 @@ function revealWarning(warning) {
 // The agent declares what it changed in the artifact HTML itself (a
 // `data-lavish-revisions` registry plus `data-lavish-revision` marks); the SDK
 // reads it and posts it here. The legend lives entirely in the chrome, so the
-// served artifact still matches the file on disk - Lavish never paints the
+// served artifact still matches the file on disk - Hilight never paints the
 // change indicator into the page. Reveal borrows the same transient marker the
 // layout-issues drawer uses, and only when the reader asks for it.
 
@@ -2592,7 +2592,7 @@ let revisionEntries = [];
 /** @type {Map<string, number>} */
 const revisionRevealCursor = new Map();
 
-// Display-only fields. Anything Lavish merely shows can be shortened.
+// Display-only fields. Anything Hilight merely shows can be shortened.
 function revisionText(value, max) {
   if (typeof value !== "string" && typeof value !== "number") return "";
   const text = String(value).trim();
@@ -2884,7 +2884,7 @@ function renderShareResult({ url = "", siteId = "", password = "", updateKey = "
   shareUrlInput.value = url;
   shareUrlResult.hidden = !url;
   // A self-hosted backend may not return one, and an empty box with a copy button is worse than
-  // no row. Never derive it from the URL: that shape belongs to the backend, not Lavish.
+  // no row. Never derive it from the URL: that shape belongs to the backend, not Hilight.
   shareSiteIdInput.value = siteId;
   shareSiteIdResult.hidden = !siteId;
   sharePasswordOutput.value = password;
@@ -2904,7 +2904,7 @@ function renderShareResult({ url = "", siteId = "", password = "", updateKey = "
 // Wording shared with the CLI's next_step for the same condition, so the two surfaces cannot
 // drift into describing the same dead end differently.
 const NO_SITE_ID_WARNING =
-  " The host did not return a site id Lavish can use, and --site is half the republish credential, so this page can NEVER be republished or unpublished even though its update key is in hand.";
+  " The host did not return a site id Hilight can use, and --site is half the republish credential, so this page can NEVER be republished or unpublished even though its update key is in hand.";
 
 // What the page is gated behind, said only in terms of what the panel can show. A password the
 // user typed is never echoed by the server, so pointing at a row that was not rendered is the
@@ -2932,7 +2932,7 @@ function syncSharePasswordInput() {
   const generating = shareGenerateInput.checked;
   sharePasswordInput.disabled = generating;
   sharePasswordInput.placeholder = generating
-    ? "Lavish will generate one when you publish"
+    ? "Hilight will generate one when you publish"
     : "Leave blank for a public page";
   if (generating) sharePasswordInput.value = "";
 }
@@ -2959,13 +2959,13 @@ function reportIndeterminatePublish(data) {
     "ht-ml.app may or may not have published this page, so treat the outcome as unknown. If it did publish, the page is live " +
     visibility +
     ", and its URL and update key were lost with the failed response, so it can never be republished or unpublished. Publishing again creates a SECOND page rather than replacing it." +
-    (rendered.password ? " Copy the password now - it is shown once here and Lavish does not store it." : "");
+    (rendered.password ? " Copy the password now - it is shown once here and Hilight does not store it." : "");
 }
 
 // An incomplete 200 is NOT an unknown outcome: the host answered, so the page landed. Whatever
 // fields did arrive are rendered, because a url with no update_key names a live, public-by-default
 // page whose only write credential is gone - and saying "may or may not" there would throw away
-// the address Lavish is holding.
+// the address Hilight is holding.
 function reportIncompletePublish(data) {
   const rendered = renderShareResult({
     url: data.url || "",
@@ -2983,11 +2983,11 @@ function reportIncompletePublish(data) {
   shareStatus.textContent =
     "ht-ml.app accepted this publish, so the page IS live and " +
     visibility +
-    ", but its response was malformed and Lavish could not read the whole result back. " +
-    (rendered.url ? "Its address is below. " : "The response carried no URL, so Lavish cannot show the address. ") +
+    ", but its response was malformed and Hilight could not read the whole result back. " +
+    (rendered.url ? "Its address is below. " : "The response carried no URL, so Hilight cannot show the address. ") +
     updateKeyNote +
     "Publishing again creates a SECOND page rather than replacing it." +
-    (rendered.password ? " Copy the password now - it is shown once here and Lavish does not store it." : "");
+    (rendered.password ? " Copy the password now - it is shown once here and Hilight does not store it." : "");
 }
 
 async function publishShare(event) {
@@ -3041,7 +3041,7 @@ async function publishShare(event) {
             : "Published. Anyone with the link can view this page.";
     if (rendered.updateKey && !rendered.siteId) shareStatus.textContent += NO_SITE_ID_WARNING;
     if (rendered.password) {
-      shareStatus.textContent += " Copy the password now - it is shown once here and Lavish does not store it.";
+      shareStatus.textContent += " Copy the password now - it is shown once here and Hilight does not store it.";
     }
     shareUrlInput.focus();
     shareUrlInput.select();
@@ -3150,12 +3150,12 @@ async function replaceArtifactFrame({ recoveryRetry = false } = {}) {
     // already shows an artifact keeps showing it rather than losing a usable review.
     if (!artifactLoadToken) {
       setLayoutGateFailure(
-        "Lavish could not load this artifact.",
-        "The Lavish server did not answer this review's load request. It usually restarted while this page was opening. Check and reload to reconnect.",
+        "Hilight could not load this artifact.",
+        "The Hilight server did not answer this review's load request. It usually restarted while this page was opening. Check and reload to reconnect.",
         "Check and reload",
         checkServerThenReload(
-          "Lavish could not load this artifact.",
-          "Lavish is still not answering. Start it again with your agent, then use Check and reload.",
+          "Hilight could not load this artifact.",
+          "Hilight is still not answering. Start it again with your agent, then use Check and reload.",
         ),
       );
     }
@@ -3827,9 +3827,9 @@ async function probeChromeHealth() {
 }
 
 // The replacement server usually binds within a second, but it is a fresh node process competing
-// with whatever else the machine is doing, and several `lavish-axi` invocations can be racing for
+// with whatever else the machine is doing, and several `hilight` invocations can be racing for
 // the same port. Reloading on a fixed short deadline regardless of whether anything is listening
-// trades a recoverable page for the browser's connection-error page, which no Lavish code can
+// trades a recoverable page for the browser's connection-error page, which no Hilight code can
 // recover from. So wait for the port to answer, and if it never does, say so instead.
 async function reloadChromeAfterServerRestart(reason = "") {
   let sawOutage = false;
@@ -3864,12 +3864,12 @@ async function reloadChromeAfterServerRestart(reason = "") {
   if (!healthy) {
     chromeRestartReloadPromise = null;
     setLayoutGateFailure(
-      "Lavish is not running.",
-      "The Lavish server restarted and did not come back. Start it again with your agent, then check and reload this page.",
+      "Hilight is not running.",
+      "The Hilight server restarted and did not come back. Start it again with your agent, then check and reload this page.",
       "Check and reload",
       checkServerThenReload(
-        "Lavish is not running.",
-        "Lavish is still not running. Start it again with your agent, then use Check and reload.",
+        "Hilight is not running.",
+        "Hilight is still not running. Start it again with your agent, then use Check and reload.",
       ),
       { sticky: true },
     );
@@ -3917,7 +3917,7 @@ async function reloadChromeForOutdatedBanner() {
         outdatedText.textContent =
           outcome === "no-answer"
             ? HEALTH_NO_ANSWER_COPY
-            : "Lavish is still not running. Start it again, then use Check and reload.";
+            : "Hilight is still not running. Start it again, then use Check and reload.";
       }
     }
   }
@@ -3944,7 +3944,7 @@ function applyDocumentMeta(msg) {
       .trim()
       .slice(0, DOCUMENT_TITLE_MAX_CHARS)
       .trim();
-    document.title = title ? title + " · Lavish" : loadTimeTitle;
+    document.title = title ? title + " · Hilight" : loadTimeTitle;
   }
   if (msg.icon === null) setDocumentIcon(loadTimeIconHref);
   else if (
@@ -4488,7 +4488,7 @@ function visibleThreads() {
 }
 
 // The page thread's messages: the transcript outside every anchored thread, this tab's page
-// drafts, and any annotation text Lavish handed back because its anchor disappeared.
+// drafts, and any annotation text Hilight handed back because its anchor disappeared.
 function pageThreadMessages() {
   const messages = displayedChat.filter(isPageChatEntry).map((entry) => ({
     ...entry,
@@ -4819,7 +4819,7 @@ function anchorLineHtml(anchor) {
 function threadMessageHtml(message, editing, showAnchor) {
   if (message.role === "note") {
     return (
-      '<div class="thread-author">Unsent annotation</div><div class="thread-body">The artifact removed or replaced what this note was attached to, so Lavish could not keep it open. Your text is kept here:</div><div class="thread-body note-draft">' +
+      '<div class="thread-author">Unsent annotation</div><div class="thread-body">The artifact removed or replaced what this note was attached to, so Hilight could not keep it open. Your text is kept here:</div><div class="thread-body note-draft">' +
       escapeHtml(message.text) +
       "</div>" +
       (message.unstored

@@ -6,7 +6,7 @@ import { libraryIconSignature } from "./whiteboard-libraries.js";
 
 // Server-side extraction of Mermaid diagram sources from raw artifact HTML.
 //
-// The design snippet (`lavish-axi design`) renders diagrams from elements with
+// The design snippet (`hilight design`) renders diagrams from elements with
 // class="mermaid" via `mermaid.run(...)`, replacing each element's text content
 // with a rendered SVG in the live DOM. The artifact file on disk still holds
 // the original sources, so the server - which already reads the file for every

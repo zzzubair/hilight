@@ -10,8 +10,8 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import WebSocket from "ws";
 
-process.env.LAVISH_AXI_HOST = "127.0.0.1";
-process.env.LAVISH_AXI_LINK_HOST = "127.0.0.1";
+process.env.HILIGHT_HOST = "127.0.0.1";
+process.env.HILIGHT_LINK_HOST = "127.0.0.1";
 
 import {
   allowsAllHosts,
@@ -575,7 +575,7 @@ test("artifact SDK ignores Lavish-owned annotation UI", () => {
   assert.match(js, /data-lavish-ui/);
 });
 
-test("artifact SDK isolates Lavish annotation UI in Shadow DOM", () => {
+test("artifact SDK isolates Hilight annotation UI in Shadow DOM", () => {
   const js = createSdkJs("abc");
 
   assert.match(js, /attachShadow\(\{\s*mode:\s*["']open["'],?\s*\}\)/);
@@ -761,7 +761,7 @@ test("annotation card title renders selected tag as an html element name", () =>
   assert.match(js, /"Annotate &lt;" \+ c\.tag \+ "&gt;"/);
 });
 
-test("annotation card shadow styles use Lavish design-system variables", () => {
+test("annotation card shadow styles use Hilight design-system variables", () => {
   const js = createSdkJs("abc");
 
   assert.match(js, /--ink-900:#0f1115/);
@@ -790,10 +790,10 @@ test("annotate switch shows a brass track and ink knob when enabled", async () =
   assert.match(js, /annotationSwitch\.setAttribute\("aria-pressed", String\(annotation\)\)/);
 });
 
-test("chrome declares the Lavish design-system tokens", async () => {
+test("chrome declares the Hilight design-system tokens", async () => {
   const css = await chromeCssSource();
 
-  // Lavish's own identity: monochrome grays, one cool accent, system font, dark first with a
+  // Hilight's own identity: monochrome grays, one cool accent, system font, dark first with a
   // light flip. None of the cream, brass or serif tokens the old chrome shared with other tools.
   assert.match(css, /:root\{color-scheme:dark;/);
   assert.match(css, /--blue:#5aa9ff/);
@@ -851,7 +851,7 @@ test("chrome top bar is a sans wordmark, the agent status, Annotate and the over
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
   const css = await chromeCssSource();
 
-  assert.match(html, /class="brand-mark">lavish</);
+  assert.match(html, /class="brand-mark"><svg class="brand-bulb"[^>]*>.*<\/svg>hilight</);
   assert.match(html, /class="brand-file" title="\/tmp\/artifact.html">artifact.html</);
   assert.match(html, /class="agent-status" id="agentStatus" role="status"[^>]*>Not listening</);
   assert.doesNotMatch(css, /font-serif|font-style:italic/);
@@ -950,7 +950,7 @@ test("overflow menu offers publishing an ht-ml.app link via a share dialog", asy
     html,
     /Publish to <a class="share-link" href="https:\/\/ht-ml\.app" target="_blank" rel="noopener noreferrer">ht-ml\.app<\/a>/,
   );
-  assert.match(html, /third-party hosting service, not part of Lavish/);
+  assert.match(html, /third-party hosting service, not part of Hilight/);
   assert.match(html, /id="sharePassword"/);
   assert.match(html, /id="shareUpdateKey"/);
   assert.match(html, /Without a password, the page is PUBLIC/);
@@ -988,7 +988,7 @@ test("the share dialog hands back the site id alongside the update key it tells 
   // command as a way to lock a page - only --private sets one.
   assert.match(
     html,
-    /Republish this page&#39;s HTML with <code>lavish-axi share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;<\/code>/,
+    /Republish this page&#39;s HTML with <code>hilight share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;<\/code>/,
   );
   assert.match(html, /add <code>--private<\/code> to also lock it/);
   assert.doesNotMatch(html, /Republish or lock this page/);
@@ -1072,7 +1072,7 @@ test("takeover banner explains draft ownership before offering takeover", () => 
   const banner = html.match(/id="handoffBanner"[^>]*>([\s\S]*?)<\/div>/)?.[1] || "";
   assert.match(
     banner,
-    /<span>This review is open in another Lavish tab\. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along\.<\/span>/,
+    /<span>This review is open in another Hilight tab\. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along\.<\/span>/,
   );
   assert.doesNotMatch(banner, /switch back there/i);
   assert.match(banner, /id="handoffTakeover"[^>]*>Take over here/);
@@ -1223,7 +1223,7 @@ test("chrome remembers the artifact scroll position across reloads", async () =>
   assert.match(js, /x:\s*lastScroll\.x,\s*y:\s*lastScroll\.y/);
 });
 
-test("chrome ignores Lavish postMessages not sent by the artifact iframe", async () => {
+test("chrome ignores Hilight postMessages not sent by the artifact iframe", async () => {
   const js = await chromeClientSource();
 
   assert.match(js, /event\.source\s*!==\s*frame\.contentWindow/);
@@ -1308,7 +1308,7 @@ test("resolved all-interfaces aliases are rejected before listening", async () =
             port: 0,
             stateFile: path.join(dir, `${alias}.json`),
             version: "9.9.9-test",
-            env: { LAVISH_AXI_HOST: alias },
+            env: { HILIGHT_HOST: alias },
             detectTailscale: async () => null,
             lookupHost: async () => [{ address: "0.0.0.0", family: 4 }],
             idleTimeoutMs: null,
@@ -1328,7 +1328,7 @@ test("an explicit bind host overrides automatic Tailscale detection", async () =
     port: 0,
     stateFile: path.join(dir, "state.json"),
     version: "9.9.9-test",
-    env: { LAVISH_AXI_HOST: "127.0.0.1" },
+    env: { HILIGHT_HOST: "127.0.0.1" },
     detectTailscale: async () => {
       detections += 1;
       return { ipv4: "100.64.12.34", magicDnsName: "review.tailnet.ts.net" };
@@ -1560,7 +1560,7 @@ test("Tailscale mode binds concrete listeners, serves the MagicDNS link, and tea
       headers: { accept: "text/html" },
     });
     assert.equal(landing.status, 200);
-    assert.match(landing.body, /Lavish Editor is running/);
+    assert.match(landing.body, /Hilight is running/);
 
     const shutdown = await rawRequest(server.port, "/shutdown", {
       method: "POST",
@@ -2213,7 +2213,7 @@ test("allowsAllHosts detects the '*' opt-out sentinel", () => {
 
 test("serve falls back promptly when the bind host is unavailable", async () => {
   // This used to reject with EADDRNOTAVAIL, which is what took the whole server down whenever a
-  // pinned LAVISH_AXI_HOST was momentarily gone - no listener, and no agent able to heal it. The
+  // pinned HILIGHT_HOST was momentarily gone - no listener, and no agent able to heal it. The
   // property this test has always really guarded is that the attempt stays BOUNDED, so that is
   // what it asserts now; the fallback's reachability is owned by server-bind-durability.test.js.
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
@@ -3057,7 +3057,7 @@ test("a refreshed chrome receives a new handoff and establishes the newest load"
   }
 });
 
-// Issue #369: an `npx -y lavish-axi ...` that resolves a newer CLI restarts the server under a
+// Issue #369: an `npx -y hilight ...` that resolves a newer CLI restarts the server under a
 // reviewer who never asked for it. Every open review then answered 409 "Artifact load expired"
 // and the chrome showed an empty middle, which reads as the page being gone.
 test("a live artifact load survives the server restart the reviewer never asked for", async () => {
@@ -3773,8 +3773,8 @@ test("POST /api/:key/share publishes the local-inlined artifact to ht-ml.app", a
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
 
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
@@ -3811,7 +3811,7 @@ test("POST /api/:key/share publishes the local-inlined artifact to ht-ml.app", a
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -3823,8 +3823,8 @@ test("POST /api/:key/share generates a password on request and hands it back onc
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
 
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
@@ -3849,7 +3849,7 @@ test("POST /api/:key/share generates a password on request and hands it back onc
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -3874,8 +3874,8 @@ async function publishThroughShareRoute(dir, status, body) {
   const artifact = path.join(dir, "artifact.html");
   await writeFile(artifact, "<!doctype html><html><body><h1>Ship</h1></body></html>");
   const htmlApp = await startFailingHtmlApp(status);
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
     const base = `http://127.0.0.1:${server.port}`;
@@ -3894,7 +3894,7 @@ async function publishThroughShareRoute(dir, status, body) {
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
   }
 }
 
@@ -3927,12 +3927,12 @@ test("POST /api/:key/share reports an incomplete 200 as published, not as an unk
   await writeFile(artifact, "<!doctype html><html><body><h1>Ship</h1></body></html>");
 
   // The host answered 200, so the page landed. Classifying it as indeterminate contradicted the
-  // error text beside it AND dropped the url Lavish was holding for a page that is public by
+  // error text beside it AND dropped the url Hilight was holding for a page that is public by
   // default and, without the update_key, unmanageable forever.
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests, { site_id: "abc123", url: "https://abc123.ht-ml.app/" });
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
 
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
@@ -3959,7 +3959,7 @@ test("POST /api/:key/share reports an incomplete 200 as published, not as an unk
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -3988,8 +3988,8 @@ test("POST /api/:key/share never echoes a password the user typed", async () => 
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
 
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
@@ -4013,7 +4013,7 @@ test("POST /api/:key/share never echoes a password the user typed", async () => 
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -4025,8 +4025,8 @@ test("POST /api/:key/share returns unresolved local asset warnings", async () =>
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
 
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
@@ -4058,7 +4058,7 @@ test("POST /api/:key/share returns unresolved local asset warnings", async () =>
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -4140,8 +4140,8 @@ test("POST /api/:key/share rejects cross-origin browser requests", async () => {
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
 
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
@@ -4169,7 +4169,7 @@ test("POST /api/:key/share rejects cross-origin browser requests", async () => {
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -4181,8 +4181,8 @@ test("POST /api/:key/share rejects requests without provenance headers", async (
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.LAVISH_AXI_HTML_APP_API_URL;
-  process.env.LAVISH_AXI_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.HILIGHT_HTML_APP_API_URL;
+  process.env.HILIGHT_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
 
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
   try {
@@ -4207,7 +4207,7 @@ test("POST /api/:key/share rejects requests without provenance headers", async (
   } finally {
     await server.close();
     await htmlApp.close();
-    restoreEnv("LAVISH_AXI_HTML_APP_API_URL", previousApiUrl);
+    restoreEnv("HILIGHT_HTML_APP_API_URL", previousApiUrl);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -4417,27 +4417,27 @@ test("a shutdown that names no reason claims none", async () => {
 
 test("resolveIdleTimeoutMs defaults, parses, and only explicit opt-outs disable", () => {
   assert.equal(resolveIdleTimeoutMs({}), 30 * 60_000);
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "" }), 30 * 60_000);
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "5000" }), 5000);
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "0" }), null);
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "off" }), null);
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "-1" }), 30 * 60_000);
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "30000ms" }), 30 * 60_000);
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "later" }), 30 * 60_000);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "" }), 30 * 60_000);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "5000" }), 5000);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "0" }), null);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "off" }), null);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "-1" }), 30 * 60_000);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "30000ms" }), 30 * 60_000);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "later" }), 30 * 60_000);
   // Node's setTimeout ceiling is 2^31-1 ms; larger delays fire after 1ms instead.
-  assert.equal(resolveIdleTimeoutMs({ LAVISH_AXI_IDLE_TIMEOUT_MS: "3000000000" }), 2 ** 31 - 1);
+  assert.equal(resolveIdleTimeoutMs({ HILIGHT_IDLE_TIMEOUT_MS: "3000000000" }), 2 ** 31 - 1);
 });
 
 test("resolveBrowserDisconnectGraceMs defaults, parses, and only explicit opt-outs disable", () => {
   assert.equal(resolveBrowserDisconnectGraceMs({}), 10_000);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: "" }), 10_000);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: " 120000 " }), 120_000);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: "0" }), null);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: "OFF" }), null);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: "-1" }), 10_000);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: "30000ms" }), 10_000);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: "later" }), 10_000);
-  assert.equal(resolveBrowserDisconnectGraceMs({ LAVISH_AXI_DISCONNECT_GRACE_MS: "3000000000" }), 2 ** 31 - 1);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: "" }), 10_000);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: " 120000 " }), 120_000);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: "0" }), null);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: "OFF" }), null);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: "-1" }), 10_000);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: "30000ms" }), 10_000);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: "later" }), 10_000);
+  assert.equal(resolveBrowserDisconnectGraceMs({ HILIGHT_DISCONNECT_GRACE_MS: "3000000000" }), 2 ** 31 - 1);
 });
 
 async function expectDoneWithin(server, ms) {
@@ -4759,7 +4759,7 @@ test("an agent-initiated end via the file-based route reopens normally without t
       body: JSON.stringify({ file: artifact }),
     });
 
-    // `lavish-axi end <file>` uses the file-based route - agent-initiated.
+    // `hilight end <file>` uses the file-based route - agent-initiated.
     await fetch(`${base}/api/end`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -4952,12 +4952,12 @@ test("closing the last review WebSocket releases an active poll without ending t
   }
 });
 
-test("LAVISH_AXI_DISCONNECT_GRACE_MS sets the reconnect grace a served poll waits out", async () => {
+test("HILIGHT_DISCONNECT_GRACE_MS sets the reconnect grace a served poll waits out", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
   const artifact = path.join(dir, "artifact.html");
   await writeFile(artifact, "<!doctype html><html><body></body></html>");
   const server = await serve({
-    env: { ...process.env, LAVISH_AXI_DISCONNECT_GRACE_MS: "20" },
+    env: { ...process.env, HILIGHT_DISCONNECT_GRACE_MS: "20" },
     port: 0,
     stateFile: path.join(dir, "state.json"),
     version: "9.9.9-test",
@@ -4984,12 +4984,12 @@ test("LAVISH_AXI_DISCONNECT_GRACE_MS sets the reconnect grace a served poll wait
   }
 });
 
-test("LAVISH_AXI_DISCONNECT_GRACE_MS=off keeps an active poll waiting after the last review disconnects", async () => {
+test("HILIGHT_DISCONNECT_GRACE_MS=off keeps an active poll waiting after the last review disconnects", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
   const artifact = path.join(dir, "artifact.html");
   await writeFile(artifact, "<!doctype html><html><body></body></html>");
   const server = await serve({
-    env: { ...process.env, LAVISH_AXI_DISCONNECT_GRACE_MS: "off" },
+    env: { ...process.env, HILIGHT_DISCONNECT_GRACE_MS: "off" },
     port: 0,
     stateFile: path.join(dir, "state.json"),
     version: "9.9.9-test",
@@ -5955,7 +5955,7 @@ test("SSE agent-presence resets to waiting after ending and reopening a session"
   }
 });
 
-// #171: a browser tab left open across `lavish-axi end` must be told the session ended, instead
+// #171: a browser tab left open across `hilight end` must be told the session ended, instead
 // of silently keeping Send enabled for feedback nobody will ever poll for.
 test("SSE forwards an ended event to an attached chrome when the agent ends the session (#171)", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
@@ -6379,7 +6379,7 @@ test("/health and the landing page stay responsive after opening two back-to-bac
       new Promise((_, reject) => setTimeout(() => reject(new Error("/ timed out")), 1000)),
     ]);
     assert.equal(rootRes.status, 200);
-    assert.match(await rootRes.text(), /Lavish Editor/);
+    assert.match(await rootRes.text(), /Hilight/);
 
     assert.ok(Date.now() - start < 1000, "both probes should return well under one second");
   } finally {
@@ -6540,7 +6540,7 @@ test("chrome falls back to a default favicon and title when none are provided", 
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
 
   assert.match(html, /<link rel="icon" href="data:image\/svg\+xml,/);
-  assert.match(html, /<title>Lavish Editor<\/title>/);
+  assert.match(html, /<title>Hilight<\/title>/);
 });
 
 test("chrome adopts a favicon tag and tab title passed from the artifact", () => {
@@ -6548,11 +6548,11 @@ test("chrome adopts a favicon tag and tab title passed from the artifact", () =>
     '<link rel="icon" href="data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\'><text>🗂️</text></svg>">';
   const html = createChromeHtml(
     { key: "abc", file: "/tmp/artifact.html" },
-    { faviconTag, title: "Project Board · Lavish" },
+    { faviconTag, title: "Project Board · Hilight" },
   );
 
   assert.ok(html.includes(faviconTag), "artifact favicon tag is injected verbatim");
-  assert.match(html, /<title>Project Board · Lavish<\/title>/);
+  assert.match(html, /<title>Project Board · Hilight<\/title>/);
 });
 
 test("chrome tab title from the artifact is HTML-escaped", () => {

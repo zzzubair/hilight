@@ -124,7 +124,7 @@ export async function writeWhiteboardFeedbackFiles(stateDir, key, index, { scene
   const sceneJson = {
     type: "excalidraw",
     version: 2,
-    source: "lavish-axi",
+    source: "hilight",
     elements: Array.isArray(sanitizedScene?.elements) ? sanitizedScene.elements : [],
     appState: sanitizedScene?.appState || {},
     files: sanitizedScene?.files && typeof sanitizedScene.files === "object" ? sanitizedScene.files : {},

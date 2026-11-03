@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.HILIGHT_BROWSER_E2E === "1";
 
 function run(command, args, env, timeout = 45_000) {
   const result = spawnSync(command, args, {
@@ -92,12 +92,12 @@ test(
     const temp = await mkdtemp(path.join(tmpdir(), "lavish-reveal-e2e-"));
     const port = await freePort();
     const lavishEnv = {
-      LAVISH_AXI_PORT: String(port),
-      LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
-      LAVISH_AXI_NO_OPEN: "1",
-      LAVISH_AXI_TELEMETRY: "0",
-      LAVISH_AXI_HOST: "127.0.0.1",
-      LAVISH_AXI_LINK_HOST: "127.0.0.1",
+      HILIGHT_PORT: String(port),
+      HILIGHT_STATE_DIR: path.join(temp, "state"),
+      HILIGHT_NO_OPEN: "1",
+      HILIGHT_TELEMETRY: "0",
+      HILIGHT_HOST: "127.0.0.1",
+      HILIGHT_LINK_HOST: "127.0.0.1",
     };
     const chromeEnv = {
       CHROME_DEVTOOLS_AXI_SESSION: `lavish-reveal-e2e-${process.pid}`,
@@ -140,13 +140,13 @@ test(
       assert.equal(result.count, 1, JSON.stringify(result));
       assert.equal(result.visible, true, JSON.stringify(result));
       assert.ok(result.error <= 1, `marker must cover the target: ${JSON.stringify(result)}`);
-      assert.equal(result.excluded, true, "the marker stays inside excluded Lavish UI");
+      assert.equal(result.excluded, true, "the marker stays inside excluded Hilight UI");
     }
 
     try {
       const artifact = path.join(temp, "review.html");
       await writeFile(artifact, ARTIFACT_HTML);
-      const output = run(process.execPath, ["bin/lavish-axi.js", artifact, "--no-open"], lavishEnv);
+      const output = run(process.execPath, ["bin/hilight.js", artifact, "--no-open"], lavishEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
       const key = new URL(url).pathname.split("/").pop();
@@ -170,7 +170,7 @@ test(
       assert.equal(sent, 200);
       const replyFile = path.join(temp, "reply.md");
       await writeFile(replyFile, "## c1 reveal=r1\nBoth sections changed.\n");
-      run(process.execPath, ["bin/lavish-axi.js", "reply", artifact, "--agent-reply-file", replyFile], lavishEnv);
+      run(process.execPath, ["bin/hilight.js", "reply", artifact, "--agent-reply-file", replyFile], lavishEnv);
       evaluate(`async () => {
         const deadline = Date.now() + 10000;
         while (!document.querySelector('#marginThreadCanvas .thread-reveal:not([disabled])')) {
@@ -181,9 +181,9 @@ test(
       }`);
 
       const first = probe("#first", { revision: 1 });
-      if (process.env.LAVISH_AXI_REVEAL_SCREENSHOT) {
-        await mkdir(path.dirname(process.env.LAVISH_AXI_REVEAL_SCREENSHOT), { recursive: true });
-        browser("screenshot", process.env.LAVISH_AXI_REVEAL_SCREENSHOT);
+      if (process.env.HILIGHT_REVEAL_SCREENSHOT) {
+        await mkdir(path.dirname(process.env.HILIGHT_REVEAL_SCREENSHOT), { recursive: true });
+        browser("screenshot", process.env.HILIGHT_REVEAL_SCREENSHOT);
       }
       aligned(first);
       assert.equal(first.lastBehavior, "smooth");
@@ -204,7 +204,7 @@ test(
       aligned(probe("#second", { reveal: true }));
       assert.equal(probe("#second", { action: "remove" }).count, 0);
     } finally {
-      run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
+      run(process.execPath, ["bin/hilight.js", "stop", "--port", String(port)], lavishEnv, 15_000);
       browser("stop");
       await rm(temp, { recursive: true, force: true });
     }

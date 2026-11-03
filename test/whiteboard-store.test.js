@@ -109,7 +109,7 @@ test("writeWhiteboardFeedbackFiles writes a standalone .excalidraw and a PNG", a
     const scene = JSON.parse(await readFile(scenePath, "utf8"));
     assert.equal(scene.type, "excalidraw");
     assert.equal(scene.version, 2);
-    assert.equal(scene.source, "lavish-axi");
+    assert.equal(scene.source, "hilight");
     assert.equal(scene.elements[0].id, "A");
     assert.deepEqual(scene.appState, {});
     const png = await readFile(previewPath);

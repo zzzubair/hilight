@@ -10,7 +10,7 @@ session-wide signal - the `agent-presence` stream (`waiting` / `listening` / `wo
 "Working..." bubble - and a sent note looks identical whether it is sitting undelivered in
 `state.json`, has been handed to a poll, or was answered an hour ago.
 
-## What Lavish can already observe
+## What Hilight can already observe
 
 Every state below is a fact the server records anyway. None of them asks the agent to do anything new.
 
@@ -20,7 +20,7 @@ Every state below is a fact the server records anyway. None of them asks the age
 | no poll in `activePolls` | `computePresence` is `waiting`; the chrome already shows "Your agent is not listening" | nobody is there to receive it                    |
 | `takeFeedback` succeeded | the store drained the batch for a poll; a poll that closed before the write undoes it  | **Seen** - the batch was handed to a poll        |
 | artifact file changed    | chokidar `reload` for the session key after a delivery                                 | **Working** - the agent is editing the artifact  |
-| `addAgentReply`          | `lavish-axi reply` / `poll --agent-reply`, or `/api/:key/agent-reply`                  | **Replied** - the agent handed something back    |
+| `addAgentReply`          | `hilight reply` / `poll --agent-reply`, or `/api/:key/agent-reply`                     | **Replied** - the agent handed something back    |
 
 Two of Wally's three acks ("I saw it", "I'm done") fall straight out of the existing protocol.
 "I'm working on it" has no explicit message, but the file watcher sees the agent's saves. A request
@@ -64,7 +64,7 @@ the stamps with no new wire shape.
   reply. An entry that was sent but never delivered is not marked done: the agent has not seen it.
 - **Working and Done stay inside one review round.** Reopening an ended session records the last
   take so far as `session.closed_delivery_seq`, and neither stamp lands on an entry delivered at or
-  before it. A note `lavish-axi end` left at Seen stays Seen: a later round's edit or reply is about
+  before it. A note `hilight end` left at Seen stays Seen: a later round's edit or reply is about
   that round's notes.
 - **Every stamp change bumps `chat_revision`.** `syncChat` in the chrome accepts a same-revision sync
   only when it contains the displayed entries; a higher revision is what makes it take the
@@ -88,7 +88,7 @@ so a thumbnail already replaced by "Image expired" stays so.
 
 ## CLI and API changes
 
-None required for the automatic path. `lavish-axi poll`, `reply`, and the `/api/*` routes keep their
+None required for the automatic path. `hilight poll`, `reply`, and the `/api/*` routes keep their
 shapes. Two guidance strings gain one sentence each: `reply --help` and the poll `--agent-reply` row
 in README say that a reply marks every request delivered to you as Done.
 
@@ -110,12 +110,12 @@ nothing was observed about them, and an empty row would read as "never seen".
 - **Working means "the file changed", not "the agent is on your note".** An agent editing the
   artifact for an unrelated reason also ticks Working on every delivered, unanswered note. It is the
   honest automatic signal available; an explicit ack would be more precise and more work for agents.
-- **`lavish-axi end` leaves notes at Seen.** Ending says the agent is finished with the review, not
+- **`hilight end` leaves notes at Seen.** Ending says the agent is finished with the review, not
   that each note was handled, so Done is not stamped. Say if the board should treat it as Done.
 
 ## Alternatives rejected
 
-- **An explicit `lavish-axi ack <file> --working` command.** It is a new duty for every agent and
+- **An explicit `hilight ack <file> --working` command.** It is a new duty for every agent and
   harness, and the file watcher already supplies the signal for the common case. The upgrade path, if
   a progress channel is wanted, is a reply flag that posts a message without concluding the round;
   today `poll --agent-reply "still working"` stamps Done, exactly as it already clears Working.
@@ -125,6 +125,6 @@ nothing was observed about them, and an empty row would read as "never seen".
 - **Matching delivered prompts to chat entries by `prompt_id`.** Would mean keeping ids on stored
   prompts and stripping at two boundaries plus the restore path; the positional rule under the lock is
   shorter and provably equivalent.
-- **Marking Done when the agent ends the session.** `lavish-axi end` says the agent is finished with
+- **Marking Done when the agent ends the session.** `hilight end` says the agent is finished with
   the review, not that it handled each note. Those stay Seen.
 - **Session-level only.** That is today's presence stream; it cannot answer "did it see _this_".

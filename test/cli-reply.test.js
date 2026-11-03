@@ -9,14 +9,14 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import WebSocket from "ws";
 
-process.env.LAVISH_AXI_HOST = "127.0.0.1";
-process.env.LAVISH_AXI_LINK_HOST = "127.0.0.1";
+process.env.HILIGHT_HOST = "127.0.0.1";
+process.env.HILIGHT_LINK_HOST = "127.0.0.1";
 
 import { postAgentReply, VERSION } from "../src/cli.js";
 import { serve } from "../src/server.js";
 import { canonicalFile, sessionKey } from "../src/session-store.js";
 
-const CLI = fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url));
+const CLI = fileURLToPath(new URL("../bin/hilight.js", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 /**
@@ -58,12 +58,12 @@ function chromeSessionData(html) {
 function cliEnv(stateDir, port) {
   return {
     ...process.env,
-    LAVISH_AXI_STATE_DIR: stateDir,
-    LAVISH_AXI_PORT: String(port),
-    LAVISH_AXI_HOST: "127.0.0.1",
-    LAVISH_AXI_LINK_HOST: "127.0.0.1",
-    LAVISH_AXI_TELEMETRY: "0",
-    LAVISH_AXI_NO_OPEN: "1",
+    HILIGHT_STATE_DIR: stateDir,
+    HILIGHT_PORT: String(port),
+    HILIGHT_HOST: "127.0.0.1",
+    HILIGHT_LINK_HOST: "127.0.0.1",
+    HILIGHT_TELEMETRY: "0",
+    HILIGHT_NO_OPEN: "1",
   };
 }
 
@@ -164,7 +164,7 @@ test("reply help and top-level help say when to prefer reply over poll --agent-r
   try {
     const top = await runCli(["--help"], { env });
     assert.equal(top.status, 0, top.stderr || top.stdout);
-    assert.match(top.stdout, /lavish-axi reply <html-file> --agent-reply/);
+    assert.match(top.stdout, /hilight reply <html-file> --agent-reply/);
     assert.match(top.stdout, /not about to long-poll/);
     assert.match(top.stdout, /poll <html-file> --agent-reply/);
 
@@ -174,14 +174,14 @@ test("reply help and top-level help say when to prefer reply over poll --agent-r
     assert.match(reply.stdout, /--agent-reply-file <path>/);
     assert.match(reply.stdout, /Exit 0 only when the server answers that the reply was sent/);
     assert.match(reply.stdout, /not about to wait for more feedback/);
-    assert.match(reply.stdout, /lavish-axi poll <html-file> --agent-reply/);
+    assert.match(reply.stdout, /hilight poll <html-file> --agent-reply/);
     assert.match(reply.stdout, /does not exit when the reply is accepted/);
 
     const poll = await runCli(["poll", "--help"], { env });
     assert.equal(poll.status, 0, poll.stderr || poll.stdout);
-    assert.match(poll.stdout, /lavish-axi reply <html-file> --agent-reply/);
+    assert.match(poll.stdout, /hilight reply <html-file> --agent-reply/);
     assert.match(poll.stdout, /not about to long-poll/);
-    assert.match(poll.stdout, /lavish-axi poll report\.html --agent-reply "Renamed the payment step\."/);
+    assert.match(poll.stdout, /hilight poll report\.html --agent-reply "Renamed the payment step\."/);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
@@ -275,9 +275,9 @@ test("reply refuses a missing session, an unreachable server, and a non-success 
     async ({ artifact, env }) => {
       const missing = await runCli(["reply", artifact, "--agent-reply", "nobody is reviewing"], { env });
       assert.notEqual(missing.status, 0);
-      assert.match(missing.stdout, /No active Lavish Editor session for this file/);
+      assert.match(missing.stdout, /No active Hilight session for this file/);
       assert.match(missing.stdout, /NOT_FOUND/);
-      assert.match(missing.stdout, /lavish-axi/);
+      assert.match(missing.stdout, /hilight/);
       assert.doesNotMatch(missing.stdout, /status: sent/);
     },
     { open: false },
@@ -297,7 +297,7 @@ test("reply refuses a missing session, an unreachable server, and a non-success 
       env: cliEnv(path.join(dir, "state"), port),
     });
     assert.notEqual(down.status, 0);
-    assert.match(down.stdout, /occupied by a non-Lavish server|server connection failed|server did not start/);
+    assert.match(down.stdout, /occupied by a non-Hilight server|server connection failed|server did not start/);
     assert.match(down.stdout, /SERVER_ERROR/);
     assert.doesNotMatch(down.stdout, /status: sent/);
   } finally {
@@ -428,7 +428,7 @@ test("reply fails with a timeout when the server stalls before headers or mid-bo
         (/** @type {import("axi-sdk-js").AxiError} */ error) => {
           assert.equal(error.code, "SERVER_ERROR");
           assert.match(error.message, /did not confirm the agent reply within 300ms/);
-          assert.ok(error.suggestions.some((hint) => hint.includes("lavish-axi reply /tmp/artifact.html")));
+          assert.ok(error.suggestions.some((hint) => hint.includes("hilight reply /tmp/artifact.html")));
           return true;
         },
         stage,

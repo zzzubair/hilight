@@ -116,7 +116,7 @@ test("Tailscale detection reports missing MagicDNS when no complete candidate ex
     ipv4: null,
     magicDnsName: null,
     warning:
-      "Tailscale is running but MagicDNS is unavailable; there is no phone access. Lavish remains available on loopback.",
+      "Tailscale is running but MagicDNS is unavailable; there is no phone access. Hilight remains available on loopback.",
   });
 });
 

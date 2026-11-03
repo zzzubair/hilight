@@ -12,7 +12,7 @@ import {
   parseExcalidrawLibrary,
 } from "./whiteboard-libraries.js";
 
-// User-supplied libraries live next to state.json. Lavish only ever reads
+// User-supplied libraries live next to state.json. Hilight only ever reads
 // this directory; the user copies files in.
 export function excalidrawLibrariesDir(stateRoot) {
   return path.join(stateRoot, LIBRARY_DIR_NAME);

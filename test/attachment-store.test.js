@@ -228,13 +228,13 @@ test("resolveAttachmentConfig reads LAVISH_AXI_* limits with sane fallbacks", ()
   // never a separate env var, so it can only agree with the byte cap.
   assert.equal(defaults.maxObjects, Math.floor((512 * 1024 * 1024) / (2 * ATTACHMENT_ALLOC_BLOCK_BYTES)));
   // Disabling the disk cap disables the derived object bound too.
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_DISK_MB: "off" }).maxObjects, null);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_DISK_MB: "off" }).maxObjects, null);
 
   const custom = resolveAttachmentConfig({
-    LAVISH_AXI_MAX_ATTACHMENT_BYTES: "2048",
-    LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT: "2",
-    LAVISH_AXI_ATTACHMENT_TTL_MS: "off",
-    LAVISH_AXI_MAX_ATTACHMENT_DISK_MB: "50",
+    HILIGHT_MAX_ATTACHMENT_BYTES: "2048",
+    HILIGHT_MAX_ATTACHMENTS_PER_PROMPT: "2",
+    HILIGHT_ATTACHMENT_TTL_MS: "off",
+    HILIGHT_MAX_ATTACHMENT_DISK_MB: "50",
   });
   assert.equal(custom.maxBytes, 2048);
   assert.equal(custom.maxPerPrompt, 2);
@@ -242,34 +242,34 @@ test("resolveAttachmentConfig reads LAVISH_AXI_* limits with sane fallbacks", ()
   assert.equal(custom.maxDiskBytes, 50 * 1024 * 1024);
 
   // The disk quota is explicitly disable-able with off/0.
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_DISK_MB: "off" }).maxDiskBytes, null);
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_DISK_MB: "0" }).maxDiskBytes, null);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_DISK_MB: "off" }).maxDiskBytes, null);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_DISK_MB: "0" }).maxDiskBytes, null);
 
   // Non-positive / unparseable values fall back rather than throwing.
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_BYTES: "-1" }).maxBytes, 10 * 1024 * 1024);
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_ATTACHMENT_TTL_MS: "0" }).ttlMs, null);
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_DISK_MB: "-5" }).maxDiskBytes, 512 * 1024 * 1024);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_BYTES: "-1" }).maxBytes, 10 * 1024 * 1024);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_ATTACHMENT_TTL_MS: "0" }).ttlMs, null);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_DISK_MB: "-5" }).maxDiskBytes, 512 * 1024 * 1024);
 });
 
 test("a fractional limit that floors below 1 falls back instead of disabling the cap (W5)", () => {
   // `0.5` is > 0, so a bounds-check-then-floor order accepts it and then floors it
   // to 0: uploads are disabled server-side while the SDK still advertises its own
   // default, so the client and server disagree about the cap.
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT: "0.5" }).maxPerPrompt, 4);
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_BYTES: "0.9" }).maxBytes, 10 * 1024 * 1024);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENTS_PER_PROMPT: "0.5" }).maxPerPrompt, 4);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_BYTES: "0.9" }).maxBytes, 10 * 1024 * 1024);
   assert.equal(
-    resolveAttachmentConfig({ LAVISH_AXI_MAX_PROMPT_ATTACHMENT_BYTES: "0.25" }).maxPromptBytes,
+    resolveAttachmentConfig({ HILIGHT_MAX_PROMPT_ATTACHMENT_BYTES: "0.25" }).maxPromptBytes,
     25 * 1024 * 1024,
   );
   // A fractional value that still floors to >= 1 is honored, floored.
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT: "2.7" }).maxPerPrompt, 2);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENTS_PER_PROMPT: "2.7" }).maxPerPrompt, 2);
   // Same discipline for the MB-scaled disk cap: a value that rounds down to zero
   // bytes must not masquerade as a 0-byte quota that evicts everything.
   assert.equal(
-    resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_DISK_MB: "0.0000001" }).maxDiskBytes,
+    resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_DISK_MB: "0.0000001" }).maxDiskBytes,
     512 * 1024 * 1024,
   );
-  assert.equal(resolveAttachmentConfig({ LAVISH_AXI_MAX_ATTACHMENT_DISK_MB: "0.5" }).maxDiskBytes, 512 * 1024);
+  assert.equal(resolveAttachmentConfig({ HILIGHT_MAX_ATTACHMENT_DISK_MB: "0.5" }).maxDiskBytes, 512 * 1024);
 });
 
 test("writeAttachment leaves no stray temp files behind", async () => {

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { chmod, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readEnv } from "./env.js";
 
 // Content-addressed storage for annotation image attachments, kept out of
 // `state.json` on purpose: `SessionStore` rewrites the whole state file on every
@@ -101,12 +102,12 @@ function attachmentFile(stateDir, key, id) {
 // resolver: unset falls back to the default, `0`/`off` disables a duration, and a
 // non-positive or unparseable value falls back rather than throwing.
 export function resolveAttachmentConfig(env = process.env) {
-  const maxDiskBytes = diskCapEnv(env.LAVISH_AXI_MAX_ATTACHMENT_DISK_MB);
+  const maxDiskBytes = diskCapEnv(readEnv(env, "MAX_ATTACHMENT_DISK_MB"));
   return {
-    maxBytes: positiveIntEnv(env.LAVISH_AXI_MAX_ATTACHMENT_BYTES, DEFAULT_MAX_ATTACHMENT_BYTES),
-    maxPerPrompt: positiveIntEnv(env.LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT, DEFAULT_MAX_ATTACHMENTS_PER_PROMPT),
-    maxPromptBytes: positiveIntEnv(env.LAVISH_AXI_MAX_PROMPT_ATTACHMENT_BYTES, DEFAULT_MAX_PROMPT_ATTACHMENT_BYTES),
-    ttlMs: durationEnv(env.LAVISH_AXI_ATTACHMENT_TTL_MS, DEFAULT_ATTACHMENT_TTL_MS),
+    maxBytes: positiveIntEnv(readEnv(env, "MAX_ATTACHMENT_BYTES"), DEFAULT_MAX_ATTACHMENT_BYTES),
+    maxPerPrompt: positiveIntEnv(readEnv(env, "MAX_ATTACHMENTS_PER_PROMPT"), DEFAULT_MAX_ATTACHMENTS_PER_PROMPT),
+    maxPromptBytes: positiveIntEnv(readEnv(env, "MAX_PROMPT_ATTACHMENT_BYTES"), DEFAULT_MAX_PROMPT_ATTACHMENT_BYTES),
+    ttlMs: durationEnv(readEnv(env, "ATTACHMENT_TTL_MS"), DEFAULT_ATTACHMENT_TTL_MS),
     maxDiskBytes,
     // DERIVED from the disk budget, never a separate knob: the most stored objects
     // the byte cap could ever admit is the budget divided by the minimum per-object
