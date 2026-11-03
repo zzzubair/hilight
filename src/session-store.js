@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { planThreadReply, recordThreadPrompts, requireThread } from "./comment-threads.js";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -149,6 +150,7 @@ export class SessionStore {
       delivered_attachments: Array.isArray(existing.delivered_attachments) ? existing.delivered_attachments : [],
       dom_snapshot: existing.dom_snapshot || "",
       chat: existing.chat || [],
+      threads: existing.threads || [],
       chat_revision: normalizeRevision(existing.chat_revision),
       // Compact prompt_id acks for bubbles evicted by the stored-chat byte bound. Reopening
       // must keep them: they are the settlement/dedup source once the visible entry is gone.
@@ -226,6 +228,12 @@ export class SessionStore {
       });
     }
     const normalizedPrompts = normalized.map((entry) => entry.prompt);
+    const threads = session.threads || [];
+    if (!restoring) {
+      for (const prompt of normalizedPrompts) {
+        if (prompt.thread_id) requireThread(threads, prompt.thread_id);
+      }
+    }
     // Resolve every attachment BEFORE mutating anything. If any prompt's images
     // can't be fully honored - malformed, an unknown id, or over the per-prompt
     // count/byte cap - reject the WHOLE batch and persist nothing (C4). Silently
@@ -310,6 +318,8 @@ export class SessionStore {
     const userMessages = restoring
       ? []
       : acceptedPrompts.map((prompt) => chatEntryForPrompt(prompt, at)).filter(Boolean);
+    if (!restoring) recordThreadPrompts(threads, acceptedPrompts, userMessages);
+    session.threads = threads;
     const existingPrompts = Array.isArray(session.prompts) ? session.prompts : [];
     const storedPrompts = restoring ? acceptedPrompts : acceptedPrompts.map(agentFacingPrompt);
     session.prompts = restoring ? [...storedPrompts, ...existingPrompts] : [...existingPrompts, ...storedPrompts];
@@ -707,6 +717,19 @@ export class SessionStore {
     });
   }
 
+  async setThreadResolved(key, threadId, resolved) {
+    return this.runExclusive(async () => {
+      const state = await this.readState();
+      const session = state.sessions[key];
+      if (!session) return null;
+      requireThread(session.threads || [], threadId).resolved = resolved;
+      session.chat_revision = normalizeRevision(session.chat_revision) + 1;
+      session.updated_at = new Date().toISOString();
+      await this.writeState(state);
+      return session;
+    });
+  }
+
   async addAgentReply(key, text, { requireOpen = false } = {}) {
     return this.runExclusive(async () => {
       const state = await this.readState();
@@ -716,10 +739,23 @@ export class SessionStore {
       }
       if (requireOpen && session.status === "ended") return session;
       const at = new Date().toISOString();
+      // `## c1` sections route into comment threads; the rest is the chat reply. Validated before
+      // any write, so an unknown thread id never lands an answer somewhere else.
+      const plan = planThreadReply(session.threads, String(text || ""));
       // Done (docs/delivery-acks.md): the reply answers what the agent has seen. Stamped in the same
       // write as the reply, with the reply's own time, and never on an entry no poll has delivered.
       stampDone(session.chat, at, normalizeRevision(session.closed_delivery_seq));
-      session.chat = [...(session.chat || []), { role: "agent", text: String(text || ""), at }];
+      for (const section of plan.sections) {
+        section.thread.resolved = false;
+        section.thread.messages.push({
+          role: "agent",
+          text: section.text,
+          at,
+          ...(section.revisionId ? { revision_id: section.revisionId } : {}),
+        });
+      }
+      const chatText = plan.sections.length ? plan.chat : String(text || "");
+      if (chatText) session.chat = [...(session.chat || []), { role: "agent", text: chatText, at }];
       applyTranscriptBound(session);
       session.chat_revision = normalizeRevision(session.chat_revision) + 1;
       session.updated_at = at;
@@ -852,6 +888,11 @@ function normalizePrompt(prompt) {
     tag: String(prompt.tag || ""),
     text: String(prompt.text || ""),
   };
+  if (prompt.thread_id !== undefined) {
+    const threadId = normalizePromptId(prompt.thread_id);
+    if (!threadId) throw Object.assign(new Error("Invalid comment thread id"), { status: 400 });
+    normalized.thread_id = threadId;
+  }
   const promptId = normalizePromptId(prompt.prompt_id);
   if (promptId) normalized.prompt_id = promptId;
   const target = normalizeTarget(prompt.target);

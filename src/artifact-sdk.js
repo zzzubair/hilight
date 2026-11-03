@@ -2235,7 +2235,7 @@ export function createArtifactSdk(
       shadow.addEventListener(type, (event) => event.stopPropagation());
     }
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;left:0;top:0;color-scheme:dark;--ink-900:#0f1115;--ink-800:#11141a;--ink-700:#171a21;--ink-600:#1c212b;--steel-700:#2a2f3a;--steel-600:#303745;--steel-500:#3c4557;--steel-400:#8c96aa;--steel-300:#aeb6c6;--steel-200:#b9c0cf;--steel-100:#d8deea;--cream-50:#fffbf3;--cream-100:#f7f3ea;--cream-200:#e8e1cf;--brass-500:#f4c95d;--brass-400:#ffd877;--brass-ink:#17130a;--bg:var(--ink-900);--bg-panel:var(--ink-800);--bg-elevated:var(--ink-600);--fg:var(--cream-100);--fg-faint:var(--steel-300);--border:var(--steel-600);--accent:#f4c95d;--accent-hover:#ffd877;--font-sans:Geist,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--radius-md:10px;--radius-xl:14px;--shadow-floating:0 20px 70px rgba(0,0,0,.35);font-family:var(--font-sans)}*{box-sizing:border-box}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.lavish-text-highlight{position:fixed;pointer-events:none;background:rgba(244,201,93,.28);border-radius:2px;box-shadow:0 0 0 1px rgba(244,201,93,.45)}.lavish-annotation-card{position:fixed;width:min(320px,calc(100vw - 24px));padding:12px;border-radius:var(--radius-xl);background:var(--bg-panel);color:var(--fg);border:1px solid var(--accent);box-shadow:var(--shadow-floating);font:14px/1.4 var(--font-sans)}.lavish-heading{font-weight:700;margin-bottom:6px}.lavish-annotation-card textarea{width:100%;min-height:86px;resize:vertical;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg);color:var(--fg);padding:9px;font:inherit;font-family:var(--font-sans)}.lavish-annotation-card textarea::placeholder{color:var(--fg-faint)}.lavish-annotation-card .lavish-hint{margin-top:6px;font-size:11px;color:var(--fg-faint)}.lavish-annotation-card .lavish-hint-alert{color:#ff9d7a;font-weight:700}.lavish-annotation-card .lavish-row{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}.lavish-annotation-card button{border:0;border-radius:var(--radius-md);padding:8px 10px;font-family:var(--font-sans);font-size:13px;font-weight:700;cursor:pointer}.lavish-annotation-card button:active{opacity:.85}.lavish-annotation-card .lavish-send{background:var(--accent);color:var(--brass-ink)}.lavish-annotation-card .lavish-send:hover{background:var(--accent-hover)}.lavish-annotation-card .lavish-cancel{background:var(--steel-700);color:var(--fg)}.lavish-annotation-card.is-dropping{outline:2px dashed var(--accent);outline-offset:3px}.lavish-attachments{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:176px;overflow-y:auto}.lavish-attachment-chip{display:flex;align-items:center;gap:8px;padding:6px;border-radius:var(--radius-md);background:var(--bg);border:1px solid var(--border)}.lavish-attachment-chip.is-error{border-color:#e0623d}.lavish-attachment-thumb{width:32px;height:32px;border-radius:6px;object-fit:cover;background:var(--ink-700);flex:0 0 auto}.lavish-attachment-thumb-empty{display:inline-block}.lavish-attachment-body{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}.lavish-attachment-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lavish-attachment-status{font-size:11px;color:var(--fg-faint)}.lavish-attachment-status-error{color:#ff9d7a}.lavish-attachment-retry{flex:0 0 auto;padding:4px 8px;font-size:11px;font-weight:700;border-radius:8px;background:var(--steel-700);color:var(--fg);cursor:pointer;border:0}.lavish-attachment-remove{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0!important;border-radius:50%;background:transparent;color:rgba(255,255,255,.85);cursor:pointer;border:0}.lavish-attachment-remove:hover{background:rgba(255,255,255,.14);color:#fff}.lavish-attach-row{margin-top:8px}.lavish-attach{display:inline-flex;align-items:center;gap:6px;padding:6px 9px!important;background:var(--steel-700)!important;color:var(--fg)!important;font-size:12px!important}.lavish-attach:hover{background:var(--steel-600)!important}.lavish-reveal-marker{position:fixed;pointer-events:none;border:2px solid var(--accent);border-radius:4px;box-shadow:0 0 0 4px rgba(244,201,93,.22);animation:lavish-reveal-pulse 2.4s var(--ease,ease-out) forwards}@keyframes lavish-reveal-pulse{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0}}`;
+    style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;left:0;top:0;color-scheme:dark;--ink-900:#0f1115;--ink-800:#11141a;--ink-700:#171a21;--ink-600:#1c212b;--steel-700:#2a2f3a;--steel-600:#303745;--steel-500:#3c4557;--steel-400:#8c96aa;--steel-300:#aeb6c6;--steel-200:#b9c0cf;--steel-100:#d8deea;--cream-50:#fffbf3;--cream-100:#f7f3ea;--cream-200:#e8e1cf;--brass-500:#f4c95d;--brass-400:#ffd877;--brass-ink:#17130a;--bg:var(--ink-900);--bg-panel:var(--ink-800);--bg-elevated:var(--ink-600);--fg:var(--cream-100);--fg-faint:var(--steel-300);--border:var(--steel-600);--accent:#f4c95d;--accent-hover:#ffd877;--font-sans:Geist,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--radius-md:10px;--radius-xl:14px;--shadow-floating:0 20px 70px rgba(0,0,0,.35);--font-ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--card-shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.28);--mark:rgba(244,201,93,.2);--mark-edge:rgba(244,201,93,.55);--mark-active:rgba(244,201,93,.4);--mark-glow:rgba(244,201,93,.28);--mark-block:rgba(244,201,93,.07);font-family:var(--font-sans)}@media (prefers-color-scheme:light){:host{color-scheme:light;--bg:#fff;--bg-panel:#fff;--fg:#1f1f1f;--fg-faint:#5f6368;--border:#dadce0;--steel-700:#f1f3f4;--steel-600:#e8eaed;--ink-700:#f1f3f4;--accent:#e2b13c;--accent-hover:#f0c04f;--card-shadow:0 1px 2px rgba(60,64,67,.18),0 4px 14px rgba(60,64,67,.14);--mark:rgba(250,204,85,.32);--mark-edge:rgba(214,160,30,.6);--mark-active:rgba(250,196,60,.55);--mark-glow:rgba(250,196,60,.3);--mark-block:rgba(250,204,85,.1)}}*{box-sizing:border-box}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.lavish-text-highlight{position:fixed;pointer-events:none;background:rgba(244,201,93,.28);border-radius:2px;box-shadow:0 0 0 1px rgba(244,201,93,.45)}.lavish-annotation-card{position:fixed;width:min(320px,calc(100vw - 24px));padding:12px;border-radius:8px;background:var(--bg-panel);color:var(--fg);border:1px solid var(--border);box-shadow:var(--card-shadow);font:14px/1.4 var(--font-ui)}.lavish-heading{font-weight:600;font-size:13px;color:var(--fg-faint);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lavish-annotation-card textarea{width:100%;min-height:64px;resize:vertical;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--fg);padding:8px 10px;font:14px/1.4 var(--font-ui);outline:none;transition:border-color 140ms ease-out,box-shadow 140ms ease-out}.lavish-annotation-card textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--mark-glow)}.lavish-annotation-card textarea::placeholder{color:var(--fg-faint)}.lavish-annotation-card .lavish-hint{margin-top:6px;font:12px/1.35 var(--font-ui);color:var(--fg-faint)}.lavish-annotation-card .lavish-hint-alert{color:#ff9d7a;font-weight:700}.lavish-annotation-card .lavish-row{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}.lavish-annotation-card button{border:0;border-radius:8px;padding:7px 12px;font:600 13px/1.2 var(--font-ui);cursor:pointer;transition:background-color 140ms ease-out}.lavish-annotation-card button:active{opacity:.85}.lavish-annotation-card .lavish-send{background:var(--accent);color:var(--brass-ink)}.lavish-annotation-card .lavish-send:hover{background:var(--accent-hover)}.lavish-annotation-card .lavish-cancel{background:transparent;color:var(--fg-faint)}.lavish-annotation-card .lavish-cancel:hover{background:var(--steel-700);color:var(--fg)}.lavish-annotation-card.is-dropping{outline:2px dashed var(--accent);outline-offset:3px}.lavish-attachments{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:176px;overflow-y:auto}.lavish-attachment-chip{display:flex;align-items:center;gap:8px;padding:6px;border-radius:var(--radius-md);background:var(--bg);border:1px solid var(--border)}.lavish-attachment-chip.is-error{border-color:#e0623d}.lavish-attachment-thumb{width:32px;height:32px;border-radius:6px;object-fit:cover;background:var(--ink-700);flex:0 0 auto}.lavish-attachment-thumb-empty{display:inline-block}.lavish-attachment-body{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}.lavish-attachment-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lavish-attachment-status{font-size:11px;color:var(--fg-faint)}.lavish-attachment-status-error{color:#ff9d7a}.lavish-attachment-retry{flex:0 0 auto;padding:4px 8px;font-size:11px;font-weight:700;border-radius:8px;background:var(--steel-700);color:var(--fg);cursor:pointer;border:0}.lavish-attachment-remove{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0!important;border-radius:50%;background:transparent;color:var(--fg-faint);cursor:pointer;border:0}.lavish-attachment-remove:hover{background:var(--steel-700);color:var(--fg)}.lavish-attach-row{margin-top:8px}.lavish-attach{display:inline-flex;align-items:center;gap:6px;padding:6px 9px!important;background:var(--steel-700)!important;color:var(--fg)!important;font-size:12px!important}.lavish-attach:hover{background:var(--steel-600)!important}.lavish-reveal-marker{position:fixed;pointer-events:none;border:2px solid var(--accent);border-radius:4px;box-shadow:0 0 0 4px rgba(244,201,93,.22);animation:lavish-reveal-pulse 2.4s var(--ease,ease-out) forwards}.lavish-thread-highlight{position:fixed;pointer-events:none;border-radius:3px;background:var(--mark);box-shadow:inset 0 -2px 0 var(--mark-edge);transition:background-color 140ms ease-out,box-shadow 140ms ease-out}.lavish-thread-highlight.is-element{background:var(--mark-block);box-shadow:inset 0 0 0 1px var(--mark-edge);border-radius:4px}.lavish-thread-highlight.is-active{background:var(--mark-active);box-shadow:inset 0 -2px 0 var(--mark-edge),0 0 0 3px var(--mark-glow)}.lavish-thread-highlight.is-element.is-active{background:var(--mark);box-shadow:inset 0 0 0 1.5px var(--mark-edge),0 0 0 4px var(--mark-glow)}@media (prefers-reduced-motion:reduce){.lavish-thread-highlight,.lavish-annotation-card textarea,.lavish-annotation-card button{transition:none}}@keyframes lavish-reveal-pulse{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0}}`;
     shadow.appendChild(style);
     return shadow;
   }
@@ -2311,7 +2311,6 @@ export function createArtifactSdk(
           : c.tag === "mermaid-node"
             ? "Tell the agent what to change about this diagram node..."
             : "Tell the agent what to change about this element...";
-    const sendNowHint = isApplePlatform() ? "⌘" : "Ctrl";
     card.innerHTML =
       '<div class="lavish-heading">' +
       heading +
@@ -2324,10 +2323,8 @@ export function createArtifactSdk(
       '<input class="lavish-attach-input" type="file" accept="' +
       ATTACHMENT_IMAGE_TYPES.accept +
       '" multiple hidden></div>' +
-      '<div class="lavish-hint">Enter to queue &middot; ' +
-      sendNowHint +
-      "+Enter to send &middot; paste or drop an image" +
-      '</div><div class="lavish-row"><button class="lavish-cancel" type="button">Cancel</button><button class="lavish-send" type="button">Queue</button></div>';
+      '<div class="lavish-hint">Enter to send &middot; Shift+Enter for a new line &middot; Esc to close' +
+      '</div><div class="lavish-row"><button class="lavish-cancel" type="button">Cancel</button><button class="lavish-send" type="button">Send</button></div>';
     root.appendChild(card);
 
     // Clamp the card fully inside the viewport. Called again whenever its height
@@ -2436,22 +2433,21 @@ export function createArtifactSdk(
 
     cancelButton.onclick = closeCard;
     sendButton.onclick = () => {
-      tryQueue();
+      if (tryQueue()) sendQueuedPrompts();
     };
     textarea.addEventListener("keydown", (event) => {
       // WebKit fires compositionend before the IME-confirming keydown, leaving only keyCode 229 to mark it.
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault();
-        const sendNow = (event.ctrlKey || event.metaKey) && (!!textarea.value.trim() || attachments.hasReady());
+        const sendNow = !event.shiftKey && (!!textarea.value.trim() || attachments.hasReady());
         const queued = tryQueue();
         // postMessage delivery is ordered, so the queued prompt lands before the send.
         if (queued && sendNow) sendQueuedPrompts();
       } else if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
-        // Close only when there is nothing to lose; excludes isComposing since mid-IME text isn't in textarea.value yet.
-        if (textarea.value.trim() || attachments.hasPending() || attachments.hasErrors() || attachments.hasReady())
-          return;
         event.preventDefault();
-        closeCard();
+        if (attachments.hasPending() || attachments.hasErrors()) return;
+        if (textarea.value.trim() || attachments.hasReady()) tryQueue();
+        else closeCard();
       }
     });
     // Unsent annotation text is review context Lavish owns, so it is reported to the chrome and
@@ -2499,6 +2495,196 @@ export function createArtifactSdk(
     snapshot,
   };
 
+  // Margin comment highlights are overlays inside Lavish's excluded shadow root. They never wrap or
+  // modify artifact text, and a text range must still match its saved selection exactly.
+  let threadAnchors = [];
+  let threadPositions = [];
+  let threadHoverId = "";
+  let threadActiveId = "";
+  let threadLayoutFrame = 0;
+  let lastThreadGeometry = "";
+  const threadResizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleThreadLayout) : null;
+  const threadMutationObserver =
+    typeof MutationObserver === "function" ? new MutationObserver(scheduleThreadLayout) : null;
+  const threadMarkers = new Map();
+
+  function threadRange(anchor) {
+    const target = anchor.target;
+    if (target?.type !== "text-range") return null;
+    function boundary(saved) {
+      if (!saved || !Array.isArray(saved.path)) return null;
+      let node = /** @type {Node | null} */ (safeQuerySelector(saved.selector));
+      for (const index of saved.path) node = node?.childNodes[index] || null;
+      return node ? { node, offset: saved.offset } : null;
+    }
+    const start = boundary(target.start);
+    const end = boundary(target.end);
+    if (!start || !end) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      if (range.collapsed || range.toString().trim().replace(/\s+/g, " ") !== target.text) return null;
+      return range;
+    } catch {
+      return null;
+    }
+  }
+
+  function paintActiveThread() {
+    for (const [id, markers] of threadMarkers) {
+      for (const marker of markers) marker.classList.toggle("is-active", id === threadActiveId);
+    }
+  }
+
+  function layoutThreadAnchors() {
+    threadLayoutFrame = 0;
+    const root = threadAnchors.length ? ensureShadow() : null;
+    const positions = [];
+    threadPositions = [];
+    for (const anchor of threadAnchors) {
+      const isText = anchor.target?.type === "text-range";
+      const element = isText ? null : safeQuerySelector(anchor.selector);
+      const range = isText ? threadRange(anchor) : null;
+      const rects = range
+        ? [...range.getClientRects()]
+        : element && !isLavishUi(element)
+          ? [element.getBoundingClientRect()]
+          : [];
+      const visible = rects.filter((rect) => rect.width > 0 && rect.height > 0);
+      positions.push({
+        id: anchor.id,
+        top: visible.length ? Math.round(visible[0].top) : null,
+        missing: !visible.length,
+      });
+      threadPositions.push({ id: anchor.id, element, rects: visible });
+      let markers = threadMarkers.get(anchor.id);
+      if (!markers) {
+        markers = [];
+        threadMarkers.set(anchor.id, markers);
+      }
+      while (markers.length > visible.length) markers.pop().remove();
+      for (let i = 0; i < visible.length; i++) {
+        if (!markers[i]) {
+          const marker = document.createElement("div");
+          marker.className = "lavish-thread-highlight" + (isText ? "" : " is-element");
+          marker.dataset.threadId = anchor.id;
+          root.appendChild(marker);
+          markers.push(marker);
+        }
+        const rect = visible[i];
+        Object.assign(markers[i].style, {
+          left: rect.left + "px",
+          top: rect.top + "px",
+          width: rect.width + "px",
+          height: rect.height + "px",
+        });
+      }
+    }
+    paintActiveThread();
+    const serialized = JSON.stringify(positions);
+    if (serialized !== lastThreadGeometry) {
+      lastThreadGeometry = serialized;
+      postArtifactMessage("lavish:threadGeometry", { positions });
+    }
+  }
+
+  function scheduleThreadLayout() {
+    if (!threadAnchors.length || threadLayoutFrame) return;
+    threadLayoutFrame = window.requestAnimationFrame(layoutThreadAnchors);
+  }
+  window.addEventListener("scroll", scheduleThreadLayout, { capture: true, passive: true });
+  window.addEventListener("resize", scheduleThreadLayout, { passive: true });
+  document.fonts?.addEventListener?.("loadingdone", scheduleThreadLayout);
+
+  function setThreadAnchors(anchors) {
+    threadAnchors = (Array.isArray(anchors) ? anchors : []).filter(
+      (anchor) => anchor && typeof anchor.id === "string" && typeof anchor.selector === "string",
+    );
+    const ids = new Set(threadAnchors.map((anchor) => anchor.id));
+    for (const [id, markers] of threadMarkers) {
+      if (ids.has(id)) continue;
+      for (const marker of markers) marker.remove();
+      threadMarkers.delete(id);
+    }
+    threadResizeObserver?.disconnect();
+    threadMutationObserver?.disconnect();
+    if (threadAnchors.length) {
+      threadResizeObserver?.observe(document.documentElement);
+      if (document.body) {
+        threadMutationObserver?.observe(document.body, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+        });
+      }
+    }
+    if (threadLayoutFrame) window.cancelAnimationFrame(threadLayoutFrame);
+    threadLayoutFrame = 0;
+    lastThreadGeometry = threadAnchors.length ? lastThreadGeometry : "";
+    layoutThreadAnchors();
+  }
+
+  function pointInRects(event, rects) {
+    return rects.some(
+      (rect) =>
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom,
+    );
+  }
+
+  // The smallest highlight under the pointer wins, so a selection inside a commented block is
+  // reachable. Clicks are stricter than hover: an element comment takes a click only on that exact
+  // element, so the rest of a commented block can still be annotated.
+  function threadAtPoint(event, forClick = false) {
+    if (isLavishUi(event.target) || isInteractiveControl(event.target) || isLavishAction(event.target)) return "";
+    let id = "";
+    let area = Infinity;
+    const clicked = forClick ? annotationTargetEl(event.target) : null;
+    for (const position of threadPositions) {
+      if (!position.rects.length) continue;
+      const hit = forClick && position.element ? clicked === position.element : pointInRects(event, position.rects);
+      if (!hit) continue;
+      for (const rect of position.rects) {
+        const candidateArea = rect.width * rect.height;
+        if (candidateArea <= area) {
+          id = position.id;
+          area = candidateArea;
+        }
+      }
+    }
+    return id;
+  }
+
+  function setThreadHover(id) {
+    if (id === threadHoverId) return;
+    threadHoverId = id;
+    threadActiveId = id;
+    paintActiveThread();
+    postArtifactMessage("lavish:threadHover", { id });
+  }
+
+  document.addEventListener("mousemove", (event) => setThreadHover(threadAtPoint(event)), { passive: true });
+  document.addEventListener("mouseleave", () => setThreadHover(""));
+  // Registered before the annotation click handler, so in annotate mode a click on a commented
+  // passage opens its thread instead of a second, unrelated comment. Explore mode keeps the page's
+  // own click behaviour.
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!annotationMode || !threadPositions.length || window.getSelection()?.toString().trim()) return;
+      const id = threadAtPoint(event, true);
+      if (!id) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      postArtifactMessage("lavish:focusThread", { id });
+    },
+    true,
+  );
+
   window.addEventListener("message", (event) => {
     // The chrome is the only legitimate sender. This listener is on `window`, so
     // without the source check the artifact could post to itself and drive the SDK.
@@ -2519,6 +2705,15 @@ export function createArtifactSdk(
       window.scrollTo(Number(msg.x) || 0, Number(msg.y) || 0);
     }
     if (msg.type === "lavish:restoreReviewState") restoreReviewState(msg.state);
+    if (msg.type === "lavish:threadAnchors") setThreadAnchors(msg.anchors);
+    if (msg.type === "lavish:activeThread") {
+      threadActiveId = String(msg.id || "");
+      paintActiveThread();
+    }
+    if (msg.type === "lavish:revealThread") {
+      const anchor = threadAnchors.find((anchor) => anchor.id === msg.id);
+      if (anchor) revealElement(anchor.selector);
+    }
     if (msg.type === "lavish:revealElement") revealElement(msg.selector);
     if (msg.type === "lavish:queuedAnchors") {
       queuedAnchorSelectors = new Set(Array.isArray(msg.selectors) ? msg.selectors.map(String) : []);

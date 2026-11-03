@@ -441,3 +441,71 @@ test("reply fails with a timeout when the server stalls before headers or mid-bo
     await new Promise((resolve) => stalling.close(() => resolve()));
   }
 });
+
+test("reply and poll route `## <thread_id>` sections into threads and reject unknown ids", async () => {
+  await withArtifact(async ({ base, key, env, artifact, dir }) => {
+    const queued = await fetch(`${base}/api/${key}/prompts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({
+        prompts: [
+          { prompt_id: "p1", selector: "body", tag: "body", text: "ok", prompt: "Why this?" },
+          { prompt_id: "p2", tag: "message", text: "", prompt: "General question" },
+        ],
+      }),
+    });
+    assert.equal(queued.status, 200);
+    const delivered = await runCli(["poll", artifact, "--timeout-ms", "100"], { env });
+    assert.equal(delivered.status, 0, delivered.stderr || delivered.stdout);
+    assert.match(delivered.stdout, /thread_id: c1/);
+
+    const replyFile = path.join(dir, "answer.md");
+    await writeFile(replyFile, "General answer.\n\n## c1 reveal=r1\n**Specific answer**\n");
+    const reply = await runCli(["reply", artifact, "--agent-reply-file", replyFile], { env });
+    assert.equal(reply.status, 0, reply.stderr || reply.stdout);
+    assert.match(reply.stdout, /threads\[1\]: c1/);
+    const poll = await runCli(["poll", artifact, "--agent-reply", "## c1\nSecond answer", "--timeout-ms", "100"], {
+      env,
+    });
+    assert.equal(poll.status, 0, poll.stderr || poll.stdout);
+
+    let data = chromeSessionData(await (await fetch(`${base}/session/${key}`)).text());
+    assert.deepEqual(
+      data.initialThreads[0].messages.map((message) => [message.role, message.text, message.revision_id]),
+      [
+        ["user", "Why this?", undefined],
+        ["agent", "**Specific answer**", "r1"],
+        ["agent", "Second answer", undefined],
+      ],
+    );
+    assert.deepEqual(
+      data.initialChat.filter((message) => message.role === "agent").map((message) => message.text),
+      ["General answer."],
+    );
+
+    for (const args of [
+      ["reply", artifact, "--agent-reply", "## c7\nLost"],
+      ["poll", artifact, "--agent-reply", "## c7\nLost", "--timeout-ms", "100"],
+    ]) {
+      const invalid = await runCli(args, { env });
+      assert.notEqual(invalid.status, 0, args.join(" "));
+      assert.match(invalid.stdout + invalid.stderr, /Unknown comment thread c7/);
+    }
+    data = chromeSessionData(await (await fetch(`${base}/session/${key}`)).text());
+    assert.equal(data.initialThreads[0].messages.length, 3, "a rejected reply writes nothing");
+
+    const forbidden = await fetch(`${base}/api/${key}/threads/c1`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://foreign.invalid" },
+      body: JSON.stringify({ resolved: true }),
+    });
+    assert.equal(forbidden.status, 403);
+    const resolved = await fetch(`${base}/api/${key}/threads/c1`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ resolved: true }),
+    });
+    assert.equal(resolved.status, 200);
+    assert.equal((await resolved.json()).threads[0].resolved, true);
+  });
+});

@@ -199,8 +199,8 @@ function bootSdk({
     api: sandbox.window.lavish,
     // Returns the dispatched event so a test can tell whether the SDK swallowed the click.
     click(target, modifiers = {}) {
-      const listener = documentListeners.find((entry) => entry.type === "click");
-      assert.ok(listener, "the SDK registers a document click listener");
+      const listeners = documentListeners.filter((entry) => entry.type === "click");
+      assert.ok(listeners.length, "the SDK registers document click listeners");
       const event = {
         target,
         ctrlKey: false,
@@ -211,8 +211,15 @@ function bootSdk({
           event.defaultPrevented = true;
         },
         stopPropagation() {},
+        stopped: false,
+        stopImmediatePropagation() {
+          event.stopped = true;
+        },
       };
-      listener.handler(event);
+      for (const listener of listeners) {
+        listener.handler(event);
+        if (event.stopped) break;
+      }
       return event;
     },
     // Releases the mouse over `target` with `text` selected inside it, as a drag-select would.
@@ -281,7 +288,7 @@ function bootSdk({
       const card = this.card();
       card.querySelector("textarea").value = text;
       card.querySelector(".lavish-send").onclick();
-      return posted.at(-1);
+      return posted.findLast((message) => message.type === "lavish:queuePrompt");
     },
   };
 }
@@ -532,7 +539,7 @@ test("the Enter that confirms an IME conversion in WebKit leaves the annotation 
   assert.notEqual(paragraph.style.outline, "", "the card stays open");
 });
 
-test("Escape leaves an annotation card with typed text open and untouched", () => {
+test("Escape closes a typed annotation and keeps its writing in the unsent queue", () => {
   const sdk = bootSdk();
   const paragraph = appendTo(sdk.body, cell("p", "Just prose"));
 
@@ -541,8 +548,11 @@ test("Escape leaves an annotation card with typed text open and untouched", () =
   textarea.value = "keep this note";
   pressEscape(textarea);
 
-  assert.notEqual(paragraph.style.outline, "", "the card is still open, so the highlight remains");
-  assert.equal(textarea.value, "keep this note", "Escape never discards the typed text");
+  assert.equal(paragraph.style.outline, "", "Escape closes the popup");
+  assert.ok(
+    sdk.posted.some((message) => message.type === "lavish:queuePrompt" && message.prompt.prompt === "keep this note"),
+    "the draft is kept in the unsent queue",
+  );
 });
 
 test("Escape leaves an annotation card with an in-flight attachment open, even with no text", () => {

@@ -22,6 +22,22 @@ const internalQueueKeyField = "_lavishQueueKey";
 const promptIdentityField = "prompt_id";
 const PROMPT_IDENTITY_MAX = 128;
 const PROMPT_IDENTITY_RE = /^[A-Za-z0-9_-]+$/;
+let commentThreads = Array.isArray(sessionData.initialThreads) ? sessionData.initialThreads : [];
+let threadSyncRevision = Number(sessionData.initialChatRevision) || 0;
+const threadGeometry = new Map();
+const threadDraftStorageKey = "lavish-axi:thread-drafts:" + key;
+const threadDrafts = new Map(Object.entries(loadJsonState(threadDraftStorageKey, {})));
+let activeThreadId = "";
+let openThreadId = "";
+const THREAD_CARD_GAP = 10;
+const THREAD_COLLAPSE_AFTER = 3;
+const NON_THREAD_TAGS = new Set(["message", "whiteboard", "layout-warnings"]);
+const threadCardCache = new Map();
+/** @type {HTMLDetailsElement | null} */
+let threadArchive = null;
+/** @type {HTMLElement | null} */
+let threadArchiveSummary = null;
+let lastThreadAnchors = "[]";
 const initialChat = Array.isArray(sessionData.initialChat) ? sessionData.initialChat : [];
 const initialChatAckIds = Array.isArray(sessionData.initialChatAckIds) ? sessionData.initialChatAckIds : [];
 const initialChatRevision = parseChatRevision(sessionData.initialChatRevision) || 0;
@@ -707,6 +723,7 @@ function render() {
     }
   }
   postQueuedAnchors();
+  renderThreads();
   updateSendState();
   scrollPanelToBottom();
   renderSheetSummary();
@@ -988,10 +1005,12 @@ function receiptHtml(entry) {
 // Rebuilding the bubble would also rebuild its thumbnails and undo an "Image expired" placeholder.
 function refreshUnseenReceipts() {
   for (const note of chatLog.querySelectorAll(".receipt-note")) note.textContent = receiptNoteText();
+  for (const note of threadNodes(".receipt-note")) note.textContent = receiptNoteText();
 }
 
 function addChat(entry, shouldScroll = true) {
   if (!entry || typeof entry !== "object") return;
+  if (entry.thread_id) return;
   const role = entry.role === "agent" ? "agent" : "user";
   const text = String(entry.text || "");
   if (!text && !(role === "agent" ? entry.html : attachmentCount(entry) || entry.anchor)) return;
@@ -1738,6 +1757,7 @@ function enqueuePrompt(rawPrompt, /** @type {FeedbackPreparation | null} */ prep
   // The sandboxed iframe is untrusted: never accept a caller-supplied settlement identity.
   const prompt = adoptQueuedPrompt(rawPrompt, false);
   if (!prompt) return false;
+  delete prompt.thread_id;
 
   const queueKey = promptQueueKey(prompt);
   if (queueKey) {
@@ -2299,6 +2319,7 @@ async function submitQueuedOnce(submission, preserveFailureState = false) {
     }
     persistQueuedPrompts();
     if (reconciledChat) syncChat(reconciledChat, acceptedRevision);
+    syncThreads(accepted);
   }
   render();
   settleAcknowledgementGuidance(submission, preserveFailureState);
@@ -2959,6 +2980,7 @@ function applyRevisionMessage(msg) {
     if (!revisionEntries.some((entry) => entry.id === id)) revisionRevealCursor.delete(id);
   }
   renderRevisionLegend();
+  renderThreads();
 }
 
 function revisionMarkSummary(entry) {
@@ -3174,6 +3196,7 @@ function markSessionEnded() {
   annotationSwitch.disabled = true;
   moreButton.disabled = true;
   chatInput.disabled = true;
+  renderThreads();
   updateSendState();
   applySheetState();
   if (presenceBanner) presenceBanner.hidden = true;
@@ -4388,6 +4411,28 @@ window.addEventListener("message", (event) => {
     // Reconcile even if frame load replayed the old mode before this report arrived.
     postToFrame({ type: "lavish:setAnnotationMode", enabled: annotation && !ended });
   }
+  if (msg.type === "lavish:threadGeometry") {
+    const wasMissing = new Set([...threadGeometry].filter(([, position]) => position.missing).map(([id]) => id));
+    threadGeometry.clear();
+    for (const position of Array.isArray(msg.positions) ? msg.positions : []) {
+      if (typeof position?.id !== "string") continue;
+      threadGeometry.set(position.id, {
+        top: Number.isFinite(position.top) ? Number(position.top) : null,
+        missing: position.missing === true,
+      });
+    }
+    const nowMissing = [...threadGeometry].filter(([, position]) => position.missing).map(([id]) => id);
+    // A thread whose anchor appeared or vanished moves between the margin and the panel list.
+    if (nowMissing.length !== wasMissing.size || nowMissing.some((id) => !wasMissing.has(id))) renderThreads();
+    else positionThreads();
+  }
+  if (msg.type === "lavish:threadHover") {
+    const id = String(msg.id || "");
+    // Leaving a highlight hands the glow back to the open card, if any.
+    if (id) setActiveThread(id, false);
+    else setActiveThread(openThreadId);
+  }
+  if (msg.type === "lavish:focusThread") openThread(String(msg.id || ""));
   if (msg.type === "lavish:queuePrompt") {
     enqueuePrompt(msg.prompt);
     // Queued from inside the artifact, where the closed dock is the only sign it landed.
@@ -4751,6 +4796,7 @@ frame.addEventListener("load", () => {
   postToFrame({ type: "lavish:restoreScroll", x: lastScroll.x, y: lastScroll.y });
   if (lastReviewState) postToFrame({ type: "lavish:restoreReviewState", state: lastReviewState });
   postQueuedAnchors(true);
+  postThreadAnchors(true);
   if (overlayIndex !== null) {
     inlineWhiteboardChannels.delete(overlayIndex);
     postToFrame({ type: "lavish:suspendWhiteboard", diagramIndex: overlayIndex });
@@ -4758,6 +4804,446 @@ frame.addEventListener("load", () => {
 });
 
 initializeLayoutGate();
+
+// Margin comments keep only anchor ids, selectors and page-authored range targets in the artifact.
+// The reviewer's writing stays in the chrome and the store, outside the agent-authored page's reach.
+const checkIcon =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="m5 12.5 4.2 4.2L19 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const reopenIcon =
+  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 4v4.6h4.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function threadMessageIds(threads) {
+  const ids = new Set();
+  for (const thread of threads) {
+    for (const message of thread.messages || []) if (message.prompt_id) ids.add(message.prompt_id);
+  }
+  return ids;
+}
+
+// Server threads plus this tab's queued notes: an anchored note still waiting to send shows as a
+// pending thread, and a queued reply shows at the end of its thread until the server records it.
+function visibleThreads() {
+  const threads = commentThreads.map((thread) => ({ ...thread, messages: (thread.messages || []).slice() }));
+  const byId = new Map(threads.map((thread) => [thread.id, thread]));
+  const recorded = threadMessageIds(threads);
+  for (const prompt of queued) {
+    const promptId = promptIdentity(prompt);
+    if (!promptId || recorded.has(promptId)) continue;
+    let thread = prompt.thread_id ? byId.get(prompt.thread_id) : null;
+    if (!thread && !prompt.thread_id && prompt.selector && !NON_THREAD_TAGS.has(prompt.tag)) {
+      thread = { id: promptId, anchor: prompt, resolved: false, pending: true, messages: [] };
+      threads.push(thread);
+      byId.set(thread.id, thread);
+    }
+    if (!thread) continue;
+    thread.messages.push({
+      role: "user",
+      text: prompt.prompt,
+      prompt_id: promptId,
+      attachments: prompt.attachments,
+      pending: true,
+    });
+  }
+  return threads;
+}
+
+function syncThreads(data) {
+  const revision = parseChatRevision(data?.chat_revision);
+  if (!Array.isArray(data?.threads) || revision === null || revision < threadSyncRevision) return;
+  threadSyncRevision = revision;
+  commentThreads = data.threads;
+  renderThreads();
+}
+
+function postThreadAnchors(force = false) {
+  const anchors = visibleThreads()
+    .filter((thread) => !thread.resolved)
+    .map((thread) => ({ id: thread.id, selector: thread.anchor.selector, target: thread.anchor.target }));
+  const serialized = JSON.stringify(anchors);
+  if (!force && serialized === lastThreadAnchors) return;
+  lastThreadAnchors = serialized;
+  postToFrame({ type: "lavish:threadAnchors", anchors });
+}
+
+// Thread UI lives only in the margin and the panel list, so queries stay inside those two roots.
+function threadNodes(selector) {
+  return ["marginThreads", "threadList"].flatMap((id) => [
+    ...(document.getElementById(id)?.querySelectorAll(selector) || []),
+  ]);
+}
+
+function threadCards(id) {
+  return threadNodes(".comment-thread").filter((node) => node.getAttribute("data-thread-id") === id);
+}
+
+function setActiveThread(id, notify = true) {
+  activeThreadId = id;
+  for (const node of threadNodes(".comment-thread")) {
+    node.classList.toggle("is-active", node.getAttribute("data-thread-id") === id);
+  }
+  if (notify) postToFrame({ type: "lavish:activeThread", id });
+}
+
+function saveThreadDrafts() {
+  saveJsonState(threadDraftStorageKey, Object.fromEntries(threadDrafts));
+}
+
+// Open = the card shows its reply box. One card is open at a time, as in a shared document.
+function openThread(id, { focus = true } = {}) {
+  if (openThreadId !== id) {
+    openThreadId = id;
+    for (const node of threadNodes(".comment-thread")) {
+      node.classList.toggle("is-open", node.getAttribute("data-thread-id") === id);
+    }
+  }
+  const inMargin = !isMobileSheet() && !document.getElementById("marginThreads")?.hidden;
+  const card =
+    threadCards(id).find((node) => Boolean(node.closest("#marginThreads")) === inMargin) || threadCards(id)[0];
+  if (!card) return;
+  if (!inMargin || card.closest("#threadList")) {
+    if (isMobileSheet()) setSheetOpen(true);
+    const details = /** @type {HTMLDetailsElement | null} */ (card.closest("details"));
+    if (details) details.open = true;
+  }
+  positionThreads();
+  const input = /** @type {HTMLTextAreaElement | null} */ (card.querySelector(".thread-reply textarea"));
+  if (input) input.value = String(threadDrafts.get(id) || "");
+  if (focus && input && !input.disabled) input.focus({ preventScroll: true });
+  if (card.closest("#threadList")) card.scrollIntoView({ block: "nearest" });
+  setActiveThread(id);
+}
+
+function closeThread(id) {
+  if (openThreadId !== id) return;
+  openThreadId = "";
+  for (const node of threadCards(id)) node.classList.remove("is-open");
+  positionThreads();
+  setActiveThread("");
+}
+
+// Google-Docs placement: every card wants its anchor's top. The open card gets exactly that;
+// cards below it are pushed down and cards above it pushed up, so none overlap.
+function positionThreads() {
+  const canvas = document.getElementById("marginThreadCanvas");
+  if (!canvas) return;
+  const items = [...canvas.querySelectorAll(".comment-thread")]
+    .map((node) => {
+      const el = /** @type {HTMLElement} */ (node);
+      const geometry = threadGeometry.get(el.getAttribute("data-thread-id") || "");
+      const placed = Number.isFinite(geometry?.top) && geometry?.missing !== true;
+      el.classList.toggle("is-unplaced", !placed);
+      return { el, top: placed ? Number(geometry.top) : 0, height: el.offsetHeight, placed };
+    })
+    .filter((item) => item.placed)
+    .sort((a, b) => a.top - b.top);
+  const pivot = Math.max(
+    0,
+    items.findIndex((item) => item.el.getAttribute("data-thread-id") === openThreadId),
+  );
+  const tops = items.map((item) => item.top);
+  for (let i = pivot + 1; i < items.length; i++) {
+    tops[i] = Math.max(items[i].top, tops[i - 1] + items[i - 1].height + THREAD_CARD_GAP);
+  }
+  for (let i = pivot - 1; i >= 0; i--) {
+    tops[i] = Math.min(items[i].top, tops[i + 1] - THREAD_CARD_GAP - items[i].height);
+  }
+  items.forEach((item, i) => {
+    item.el.style.transform = "translateY(" + Math.round(tops[i]) + "px)";
+  });
+}
+
+async function setThreadResolved(id, resolved, card) {
+  const error = card.querySelector(".thread-error");
+  if (error) error.textContent = "";
+  try {
+    const response = await fetch("/api/" + encodeURIComponent(key) + "/threads/" + encodeURIComponent(id), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ resolved }),
+    });
+    if (!response.ok) throw new Error("request failed");
+    if (resolved) closeThread(id);
+    syncThreads(await response.json());
+  } catch {
+    if (error) error.textContent = resolved ? "Could not resolve. Try again." : "Could not reopen. Try again.";
+  }
+}
+
+function sendThreadReply(thread, input) {
+  const text = input.value.trim();
+  if (!text || ended || terminalSubmission) return;
+  const prompt = {
+    uid: "",
+    prompt: text,
+    selector: thread.anchor.selector,
+    tag: "message",
+    text: "Reply in comment thread " + thread.id,
+    thread_id: thread.id,
+  };
+  assignPromptIdentity(prompt, false);
+  queued.push(prompt);
+  persistQueuedPrompts();
+  threadDrafts.delete(thread.id);
+  saveThreadDrafts();
+  input.value = "";
+  render();
+  requestSnapshot("submit", [prompt]);
+  openThread(thread.id);
+}
+
+function threadMessageHtml(message) {
+  const agent = message.role === "agent";
+  const body = agent ? message.html || escapeHtml(message.text) : escapeHtml(message.text).replace(/\n/g, "<br>");
+  return (
+    '<div class="thread-author"><span class="thread-avatar" aria-hidden="true">' +
+    (agent ? "A" : "Y") +
+    "</span><span>" +
+    (agent ? "Agent" : "You") +
+    "</span>" +
+    (message.pending ? '<span class="thread-state">Sending</span>' : "") +
+    '</div><div class="thread-body">' +
+    body +
+    "</div>"
+  );
+}
+
+function threadChatEntry(message) {
+  return message.prompt_id ? displayedChat.find((entry) => entry.prompt_id === message.prompt_id) || null : null;
+}
+
+function threadSignature(thread, inList, missing) {
+  return JSON.stringify([
+    inList,
+    missing,
+    thread.resolved,
+    Boolean(thread.pending),
+    ended,
+    Boolean(terminalSubmission),
+    thread.anchor?.text,
+    thread.anchor?.selector,
+    (thread.messages || []).map((message) => [
+      message.role,
+      message.text,
+      Boolean(message.pending),
+      message.revision_id
+        ? Boolean(revisionEntries.find((entry) => entry.id === message.revision_id)?.marks.length)
+        : null,
+      attachmentCount(message),
+      ["delivered_at", "working_at", "done_at", "receipt"].map((field) => threadChatEntry(message)?.[field] || ""),
+    ]),
+  ]);
+}
+
+function buildThreadCard(thread, inList, missing) {
+  const card = document.createElement("article");
+  card.className = "comment-thread" + (inList ? " in-list" : "") + (thread.pending ? " is-pending" : "");
+  card.dataset.threadId = thread.id;
+  const quote = String(thread.anchor.text || thread.anchor.selector || "Comment")
+    .replace(/\s+/g, " ")
+    .trim();
+  card.setAttribute("aria-label", "Comment on " + quote.slice(0, 120));
+  const resolveLabel = thread.resolved ? "Reopen comment" : "Resolve comment";
+  card.innerHTML =
+    '<header class="thread-head"><button type="button" class="thread-anchor" title="Show in page">' +
+    escapeHtml(quote) +
+    "</button>" +
+    (thread.pending
+      ? '<span class="thread-state">Not sent</span>'
+      : '<button type="button" class="thread-resolve' +
+        (thread.resolved ? " thread-reopen" : "") +
+        '" aria-label="' +
+        resolveLabel +
+        '" title="' +
+        resolveLabel +
+        '">' +
+        (thread.resolved ? reopenIcon + "<span>Reopen</span>" : checkIcon) +
+        "</button>") +
+    "</header>" +
+    (missing ? '<p class="thread-notice">The text this comment was on is no longer on the page.</p>' : "") +
+    '<ol class="thread-messages"></ol><div class="thread-error" role="status"></div>';
+  const list = card.querySelector(".thread-messages");
+  const messages = thread.messages || [];
+  messages.forEach((message, index) => {
+    const item = document.createElement("li");
+    item.className = "thread-message " + (message.role === "agent" ? "agent" : "user");
+    // A long thread folds its middle while the card is closed, like a shared document's margin.
+    if (messages.length > THREAD_COLLAPSE_AFTER && index > 0 && index < messages.length - 1) {
+      item.classList.add("is-middle");
+    }
+    item.innerHTML = threadMessageHtml(message);
+    // The same 👀 🛠️ ✅ receipts the chat bubble used to carry, read from its transcript entry.
+    const entry = message.role === "user" && !message.pending ? threadChatEntry(message) : null;
+    if (entry) item.insertAdjacentHTML("beforeend", receiptHtml(entry));
+    if (attachmentCount(message)) {
+      const attachments = document.createElement("div");
+      attachments.innerHTML = bubbleAttachmentsHtml(message);
+      item.appendChild(attachments);
+    }
+    if (message.revision_id) {
+      const reveal = document.createElement("button");
+      reveal.type = "button";
+      reveal.className = "thread-reveal";
+      reveal.textContent = "Reveal change";
+      const revision = revisionEntries.find((entry) => entry.id === message.revision_id);
+      reveal.disabled = !revision?.marks.length;
+      reveal.title = reveal.disabled
+        ? "This revision has no marked block on the current page"
+        : "Jump to the block the agent changed";
+      reveal.addEventListener("click", (event) => {
+        event.stopPropagation();
+        revealNextRevisionMark(message.revision_id);
+      });
+      item.appendChild(reveal);
+    }
+    list.appendChild(item);
+    if (messages.length > THREAD_COLLAPSE_AFTER && index === 0) {
+      const more = document.createElement("li");
+      more.className = "thread-more";
+      const hidden = messages.length - 2;
+      more.textContent = hidden + (hidden === 1 ? " more reply" : " more replies");
+      list.appendChild(more);
+    }
+  });
+  card.querySelector(".thread-anchor").addEventListener("click", (event) => {
+    event.stopPropagation();
+    postToFrame({ type: "lavish:revealThread", id: thread.id });
+    openThread(thread.id);
+  });
+  card.querySelector(".thread-resolve")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setThreadResolved(thread.id, !thread.resolved, card);
+  });
+  if (!thread.resolved && !thread.pending && !ended) {
+    const form = document.createElement("form");
+    form.className = "thread-reply";
+    form.innerHTML =
+      '<textarea rows="1" aria-label="Reply to this comment" placeholder="Reply"></textarea><div class="thread-reply-row"><span class="thread-hint">Enter to send · Esc to close</span><button type="submit" class="thread-send">Reply</button></div>';
+    const input = /** @type {HTMLTextAreaElement} */ (form.querySelector("textarea"));
+    input.value = String(threadDrafts.get(thread.id) || "");
+    input.disabled = Boolean(terminalSubmission);
+    input.addEventListener("input", () => {
+      if (input.value) threadDrafts.set(thread.id, input.value);
+      else threadDrafts.delete(thread.id);
+      saveThreadDrafts();
+    });
+    input.addEventListener("keydown", (event) => {
+      // WebKit fires compositionend before the IME-confirming keydown, leaving only keyCode 229.
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendThreadReply(thread, input);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        input.blur();
+        closeThread(thread.id);
+      }
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      sendThreadReply(thread, input);
+    });
+    card.appendChild(form);
+  } else if (thread.pending) {
+    const send = document.createElement("button");
+    send.type = "button";
+    send.className = "thread-send thread-send-pending";
+    send.textContent = "Send";
+    send.disabled = ended || Boolean(terminalSubmission);
+    send.addEventListener("click", (event) => {
+      event.stopPropagation();
+      requestSnapshot(
+        "submit",
+        queued.filter((prompt) => promptIdentity(prompt) === thread.id),
+      );
+    });
+    card.appendChild(send);
+  }
+  card.addEventListener("click", (event) => {
+    const target = /** @type {Element} */ (event.target);
+    if (target.closest("button, a, textarea")) return;
+    if (!thread.resolved && !thread.pending) openThread(thread.id);
+  });
+  card.addEventListener("mouseenter", () => setActiveThread(thread.id));
+  card.addEventListener("mouseleave", () => {
+    if (!card.contains(document.activeElement)) setActiveThread(openThreadId);
+  });
+  card.addEventListener("focusin", () => setActiveThread(thread.id));
+  card.addEventListener("focusout", (event) => {
+    if (!card.contains(/** @type {Node | null} */ (event.relatedTarget))) setActiveThread(openThreadId);
+  });
+  return card;
+}
+
+function threadCard(thread, inList, missing) {
+  const cacheKey = (inList ? "list:" : "margin:") + thread.id;
+  const signature = threadSignature(thread, inList, missing);
+  const cached = threadCardCache.get(cacheKey);
+  const card = cached?.signature === signature ? cached.card : buildThreadCard(thread, inList, missing);
+  threadCardCache.set(cacheKey, { signature, card });
+  card.classList.toggle("is-open", openThreadId === thread.id);
+  card.classList.toggle("is-active", activeThreadId === thread.id);
+  return card;
+}
+
+function renderThreads() {
+  const margin = document.getElementById("marginThreads");
+  const canvas = document.getElementById("marginThreadCanvas");
+  const list = document.getElementById("threadList");
+  if (!margin || !canvas || !list) return;
+  const focused = /** @type {HTMLTextAreaElement | null} */ (
+    document.activeElement?.closest?.(".comment-thread") ? document.activeElement : null
+  );
+  const caret = focused?.tagName === "TEXTAREA" ? [focused.selectionStart, focused.selectionEnd] : null;
+  const focusedCard = focused?.closest?.(".comment-thread");
+  const focusedKey = focusedCard
+    ? (focusedCard.closest("#threadList") ? "list:" : "margin:") + focusedCard.getAttribute("data-thread-id")
+    : "";
+  const threads = visibleThreads();
+  const missing = (thread) => threadGeometry.get(thread.id)?.missing === true;
+  const inMargin = threads.filter((thread) => !thread.resolved && !missing(thread));
+  margin.hidden = inMargin.length === 0;
+  canvas.replaceChildren(...inMargin.map((thread) => threadCard(thread, false, false)));
+  const live = new Set(threads.map((thread) => thread.id));
+  for (const cacheKey of threadCardCache.keys()) {
+    if (!live.has(cacheKey.slice(cacheKey.indexOf(":") + 1))) threadCardCache.delete(cacheKey);
+  }
+  if (!threads.length) {
+    list.replaceChildren();
+  } else {
+    if (!threadArchive) {
+      threadArchive = /** @type {HTMLDetailsElement} */ (document.createElement("details"));
+      threadArchive.className = "thread-archive";
+      threadArchiveSummary = document.createElement("summary");
+    }
+    if (threadArchive.parentNode !== list) list.replaceChildren(threadArchive);
+    const open = threads.filter((thread) => !thread.resolved);
+    const resolved = threads.filter((thread) => thread.resolved);
+    threadArchiveSummary.textContent =
+      "Comments · " + open.length + " open" + (resolved.length ? " · " + resolved.length + " resolved" : "");
+    const nodes = [threadArchiveSummary, ...open.map((thread) => threadCard(thread, true, missing(thread)))];
+    if (resolved.length) {
+      const heading = document.createElement("div");
+      heading.className = "thread-group";
+      heading.textContent = "Resolved";
+      nodes.push(heading, ...resolved.map((thread) => threadCard(thread, true, missing(thread))));
+    }
+    threadArchive.replaceChildren(...nodes);
+  }
+  postThreadAnchors();
+  positionThreads();
+  // A card rebuilt under the reviewer's caret (say, an agent answer arriving mid-reply) hands focus
+  // and the caret to its replacement; the draft text itself is already in threadDrafts.
+  const target = focused?.isConnected
+    ? focused
+    : caret
+      ? /** @type {HTMLTextAreaElement | null} */ (threadCardCache.get(focusedKey)?.card.querySelector("textarea"))
+      : null;
+  if (target && document.activeElement !== target && target.isConnected) {
+    target.focus({ preventScroll: true });
+    if (caret) target.setSelectionRange(caret[0], caret[1]);
+  }
+}
 
 // WebSockets leave the browser's HTTP connection pool free for sends and artifact loads.
 const events = new Map();
@@ -4823,6 +5309,8 @@ events.set("agent-reply", (data) => {
 events.set("chat-sync", (data) => {
   rememberChatAckIds(data.ack_ids);
   syncChat(data.chat || [], data.chat_revision);
+  // After the transcript, so thread cards read fresh delivery receipts.
+  syncThreads(data);
 });
 events.set("agent-presence", (data) => setAgentPresence(data.mode === "external-listener" ? "external" : data.state));
 events.set("layout-warnings", (data) => setLayoutWarnings(data.warnings || []));
