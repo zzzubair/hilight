@@ -140,7 +140,7 @@ test("pack:release writes hilight-axi.tgz holding the hilight bin, dist, and ski
       stdio: "pipe",
     });
     const tarball = path.join(out, "hilight-axi.tgz");
-    const listing = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).split("\n");
+    const listing = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).split(/\r?\n/);
     for (const file of [
       "package/package.json",
       "package/dist/cli.mjs",
