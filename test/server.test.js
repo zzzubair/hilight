@@ -590,10 +590,10 @@ test("annotation card does not block its own Queue button", () => {
   assert.doesNotMatch(js, /card\.addEventListener\('click',event=>event\.stopPropagation\(\),true\)/);
 });
 
-test("annotation card labels its submit action as Queue", () => {
+test("annotation card labels its submit action as Send", () => {
   const js = createSdkJs("abc");
 
-  assert.match(js, />Queue<\/button>/);
+  assert.match(js, />Send<\/button>/);
   assert.doesNotMatch(js, /Queue Prompt/);
 });
 
@@ -1119,10 +1119,11 @@ test("chrome keeps queued notes at the tail of the one conversation, above the s
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
 
   // The queued log is the last child of the same scroll region as the transcript, so a queued
-  // note is the end of the conversation rather than a second region with its own grammar.
+  // note is the end of the conversation rather than a second region with its own grammar. The
+  // comment-thread list leads that region, ahead of the transcript.
   assert.match(
     html,
-    /<div class="panel-scroll" id="panelScroll"><div class="chat" id="chatLog"><\/div><div class="chat chat-queued" id="queuedLog"><\/div><\/div><div class="composer" id="chatComposer">/,
+    /<div class="panel-scroll" id="panelScroll"><div id="threadList" class="thread-list"><\/div><div class="chat" id="chatLog"><\/div><div class="chat chat-queued" id="queuedLog"><\/div><\/div><div class="composer" id="chatComposer">/,
   );
   assert.doesNotMatch(html, /annotation-pills/);
   assert.doesNotMatch(html, /<h2>Queued Annotations<\/h2>/);
@@ -3483,7 +3484,7 @@ test("event WebSocket preserves initial state and named live-event semantics", a
     await once(socket, "open");
     assert.deepEqual(await nextMessage(), {
       type: "chat-sync",
-      data: { chat: [], ack_ids: [], chat_revision: 0 },
+      data: { chat: [], threads: [], ack_ids: [], chat_revision: 0 },
     });
     assert.deepEqual(await nextMessage(), { type: "agent-presence", data: { state: "waiting" } });
 
@@ -6478,13 +6479,12 @@ test("annotation card queues prompt on Enter and inserts newline on Shift+Enter"
   assert.match(js, /const queued = tryQueue\(\)/);
 });
 
-test("annotation card queues and sends immediately on Ctrl+Enter or Cmd+Enter", () => {
+test("annotation card sends straight away on Enter, keeping Shift+Enter for a new line", () => {
   const js = createSdkJs("abc");
 
-  assert.match(js, /event\.ctrlKey \|\| event\.metaKey/);
-  assert.match(js, /sendQueuedPrompts\(\)/);
+  assert.match(js, /if \(queued && sendNow\) sendQueuedPrompts\(\)/);
   assert.match(js, /class="lavish-hint"/);
-  assert.match(js, /\+Enter to send/);
+  assert.match(js, /Enter to send &middot; Shift\+Enter for a new line &middot; Esc to close/);
   assert.match(js, /\.lavish-annotation-card \.lavish-hint\{/);
 });
 
@@ -6647,7 +6647,7 @@ test("the prompts route returns the transcript and syncs it live at send time", 
       body: JSON.stringify({ file: artifact }),
     }).then((response) => response.json());
     const stream = await startEventStream(base, opened.key, "chat-sync");
-    assert.deepEqual(await stream.next(), { chat: [], ack_ids: [], chat_revision: 0 });
+    assert.deepEqual(await stream.next(), { chat: [], threads: [], ack_ids: [], chat_revision: 0 });
 
     const response = await fetch(`${base}/api/${opened.key}/prompts`, {
       method: "POST",
@@ -6675,6 +6675,8 @@ test("the prompts route returns the transcript and syncs it live at send time", 
         text: "Rename this",
         prompt_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
         anchor: { kind: "element", label: "<h2>", excerpt: "Phase 1: Inventory", selector: "h2#phase-1" },
+        // An anchored note opens a margin comment thread; the chat entry records which one.
+        thread_id: "c1",
       },
     ];
     const withoutTimestamps = (chat) => chat.map(({ at: _at, ...entry }) => entry);

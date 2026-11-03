@@ -26,6 +26,8 @@ import {
   createLibrariesOutput,
   createOpenOutput,
   createPollOutput,
+  createReplyOutput,
+  isQuestionOnlyFeedback,
   createPlaybookOutput,
   createServerSpawnOptions,
   createShareOutput,
@@ -1915,7 +1917,7 @@ test("detected layout warnings never appear in poll output", () => {
 
   assert.equal("layout_warnings" in output, false);
   assert.equal("artifact_failures" in output, false);
-  assert.match(output.next_step, /Apply the requested changes/);
+  assert.match(output.next_step, /Apply the requested changes to \/tmp\/report\.html in place/);
   assert.match(output.next_step, /lavish-axi poll \/tmp\/report\.html --agent-reply/);
   assert.match(output.next_step, /continuing to wait for feedback/);
   assert.match(output.next_step, /lavish-axi reply \/tmp\/report\.html --agent-reply/);
@@ -3695,4 +3697,78 @@ test("design output owns the library icon directive and the diagram playbook poi
   assert.match(diagram, /whiteboard_tooling\.library_icons/);
   assert.doesNotMatch(diagram, /%% lavish-icon/, "the syntax has one owner surface");
   assert.doesNotMatch(JSON.stringify(createHomeOutput({ bin: "lavish-axi", sessions: [] })), /lavish-icon|libraries/);
+});
+
+function feedbackNextStep(prompts) {
+  return createPollOutput({ file: "/tmp/report.html", response: { status: "feedback", prompts } }).next_step;
+}
+
+test("question-only feedback tells the agent to answer each thread, not to apply changes", () => {
+  const nextStep = feedbackNextStep([
+    { thread_id: "c1", prompt: "Why ten teams? What would we learn?", selector: "#launch", tag: "p" },
+    { thread_id: "c2", prompt: "who owns the feedback", selector: "#owner", tag: "p" },
+    { thread_id: "c3", prompt: "Can you explain the tradeoff?", selector: "#owner", tag: "p" },
+  ]);
+  assert.match(
+    nextStep,
+    /^This feedback is only questions\. Answer each one in its own thread \(see the `## <thread_id>` reply format below\)\. Do not edit \/tmp\/report\.html unless an answer genuinely needs the page to change\. /,
+  );
+  assert.doesNotMatch(nextStep, /Apply the requested changes/);
+  assert.match(nextStep, /a line `## <thread_id>` \(for example `## c1`\) starts that thread's answer/);
+  assert.match(nextStep, /`## c1 reveal=<revision-id>`/);
+});
+
+test("feedback with any change request tells the agent to apply it in place", () => {
+  const nextStep = feedbackNextStep([
+    { thread_id: "c1", prompt: "Why ten teams?", selector: "#launch", tag: "p" },
+    { thread_id: "c2", prompt: "Can you make the title bigger?", selector: "h1", tag: "h1" },
+  ]);
+  assert.match(
+    nextStep,
+    /^Apply the requested changes to \/tmp\/report\.html in place and answer any questions in its own thread/,
+  );
+  assert.match(
+    feedbackNextStep([{ prompt: "Why?", tag: "message" }]),
+    /^This feedback is only questions\. Answer each one in your reply\./,
+  );
+});
+
+test("question detection treats requests, whiteboards and layout fixes as changes", () => {
+  const ask = (prompt, extra = {}) => isQuestionOnlyFeedback([{ prompt, ...extra }]);
+  assert.equal(ask("Why ten teams?"), true);
+  assert.equal(ask("What does this column mean"), true);
+  assert.equal(ask("Could you clarify the rollout?"), true);
+  assert.equal(ask("Make the title bigger."), false);
+  assert.equal(ask("Could you make the title bigger?"), false);
+  assert.equal(ask("Please explain this?"), false);
+  assert.equal(ask("Why ten? Change it to five."), false);
+  assert.equal(ask("Why?", { tag: "whiteboard" }), false);
+  assert.equal(ask("Why?", { tag: "layout-warnings" }), false);
+  assert.equal(isQuestionOnlyFeedback([]), false);
+});
+
+test("help, poll and reply guidance and the generated skill keep follow-ups on one page per topic", async () => {
+  const { createSkillMarkdown } = await import("../src/skill.js");
+  const texts = [
+    createSkillMarkdown(),
+    getCommandHelp("poll"),
+    getCommandHelp("reply"),
+    createOpenOutput({ file: "/tmp/report.html", url: "http://localhost/session/k", status: "opened" }).next_step,
+    feedbackNextStep([{ prompt: "Why?" }]),
+    createReplyOutput("/tmp/report.html", "Done").next_step,
+  ];
+  for (const text of texts) {
+    assert.match(text, /One page per topic: keep discussing in the same HTML file and session/);
+    assert.match(text, /edit that file in place/);
+    assert.match(text, /Never create a new HTML file or session for a follow-up unless the user explicitly asks/);
+  }
+});
+
+test("reply output lists the threads a sectioned reply answered", () => {
+  assert.deepEqual(createReplyOutput("/tmp/r.html", "Hi\n## c2\na\n## c1 reveal=r1\nb").reply, {
+    file: "/tmp/r.html",
+    status: "sent",
+    threads: ["c2", "c1"],
+  });
+  assert.deepEqual(createReplyOutput("/tmp/r.html", "Plain").reply, { file: "/tmp/r.html", status: "sent" });
 });
