@@ -121,7 +121,7 @@ const ARTIFACT_HTML = `<!doctype html>
 `;
 
 test(
-  "annotation and Conversation image uploads round-trip through the real browser chrome",
+  "annotation and page-comment image uploads round-trip through the real browser chrome",
   { skip: !runBrowserE2e, timeout: 300_000 },
   async () => {
     const temp = await mkdtemp(path.join(tmpdir(), "lavish-attach-e2e-"));
@@ -158,8 +158,14 @@ test(
       }
       return value;
     }
+    // An in-page timer: `chrome-devtools-axi wait <ms>` fails with "fn is not a function" in 0.1.34.
     function wait(ms) {
-      run("chrome-devtools-axi", ["wait", String(ms)], chromeEnv, ms + 45_000);
+      run(
+        "chrome-devtools-axi",
+        ["eval", `async()=>{await new Promise(r=>setTimeout(r,${ms}));return true}`],
+        chromeEnv,
+        ms + 45_000,
+      );
     }
     async function waitForAttachmentFile() {
       const dir = path.join(stateDir, "attachments");
@@ -214,15 +220,16 @@ test(
       assert.equal(served.status, 200);
       assert.deepEqual(Buffer.from(await served.arrayBuffer()), PNG_BYTES);
 
-      // The driver queued the prompt once the chip went ready; deliver it and
-      // require the agent-facing poll to carry the server-vetted local path.
+      // The driver saved the draft once the chip went ready; it shows as a Not sent margin card
+      // until Send to agent delivers it, and the poll must carry the server-vetted local path.
       const deadline = Date.now() + 60_000;
       for (;;) {
-        const pills = evaluate('document.querySelectorAll(".bubble.queued").length');
-        if (pills.includes("1")) break;
-        if (Date.now() > deadline) assert.fail(`queued note never appeared: ${pills}`);
+        const drafts = evaluate('document.querySelectorAll("#marginThreadCanvas .comment-thread.is-pending").length');
+        if (drafts.includes("1")) break;
+        if (Date.now() > deadline) assert.fail(`draft card never appeared: ${drafts}`);
         wait(500);
       }
+      assert.match(evaluate('document.getElementById("send").textContent'), /Send to agent \(1\)/);
       evaluate('document.getElementById("send").click()');
       const poll = run(
         process.execPath,
@@ -241,8 +248,8 @@ test(
       assert.equal(replied.status, 200);
       wait(500);
 
-      // Exercise the top-level Conversation composer separately. Image-only paste
-      // must upload, queue, and reach poll without relying on annotation-card code.
+      // Exercise the page comment box separately. Image-only paste must upload, save as a
+      // draft with Enter, and reach poll through Send without relying on annotation-card code.
       evaluate(`(() => {
         const bin = atob("${PNG_B64}");
         const bytes = new Uint8Array(bin.length);
@@ -257,9 +264,13 @@ test(
       for (;;) {
         const ready = evaluate('document.querySelectorAll(".chat-attachment-ready").length');
         if (ready.includes("1")) break;
-        if (Date.now() > conversationDeadline) assert.fail(`Conversation image never became ready: ${ready}`);
+        if (Date.now() > conversationDeadline) assert.fail(`page-comment image never became ready: ${ready}`);
         wait(500);
       }
+      evaluate(
+        'document.getElementById("chatInput").dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true}))',
+      );
+      assert.match(evaluate('document.getElementById("pageThreadStatus").textContent'), /Not sent/);
       evaluate('document.getElementById("send").click()');
       const conversationPoll = run(
         process.execPath,

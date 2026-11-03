@@ -159,7 +159,7 @@ test("review loop regressions from the desktop bug hunt", { skip: !runBrowserE2e
       page(
         `document.querySelector('.warning-select').click();document.getElementById('warningsQueueButton').click();return true`,
       );
-      until(`document.querySelectorAll('#queuedLog .bubble').length===1`);
+      until(`document.querySelectorAll('#pageMessages .thread-message.is-draft').length===1`);
 
       await review.save(1, { clipped: false });
       untilRevision(1);
@@ -169,7 +169,7 @@ test("review loop regressions from the desktop bug hunt", { skip: !runBrowserE2e
       );
       page(`const input=document.getElementById('chatInput');input.value='This ordinary question should still be sent.';
           input.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('send').click();return true`);
-      until(`document.querySelectorAll('#queuedLog .bubble').length===0`);
+      until(`document.querySelectorAll('#pageMessages .thread-message.is-draft').length===0`);
       const hint = page(`return document.getElementById('sendHint').textContent`);
       assert.match(hint, /already fixed/);
       screenshot("01-stale-layout-note-retired.png");
@@ -188,12 +188,12 @@ test("review loop regressions from the desktop bug hunt", { skip: !runBrowserE2e
       probe("click", { selector: "#section-1 .repeat" });
       probe("type", { text: "Question for repeated target ONE" });
       probe("queue");
-      until(`document.querySelectorAll('#queuedLog .bubble').length===1`);
+      until(`document.querySelectorAll('#marginThreadCanvas .comment-thread.is-pending').length===1`);
 
       const second = probe("click", { selector: "#section-2 .repeat" });
       assert.ok(second.card, "section 2 gets its own annotation card");
       assert.equal(second.card.text, "");
-      assert.equal(page(`return document.querySelectorAll('#queuedLog textarea').length`), 0);
+      assert.equal(page(`return document.querySelectorAll('.thread-edit-input').length`), 0, "no draft editor opens");
       screenshot("02-second-repeated-block-own-card.png");
       const queued = page(
         `return JSON.parse(sessionStorage.getItem([...Object.keys(sessionStorage)].find(k=>k.startsWith('lavish-axi:queued:'))))`,

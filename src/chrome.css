@@ -1,46 +1,47 @@
+/* Lavish's own chrome: sparse and monochrome, with one cool accent. Dark first; the same tokens
+   flip for a light system theme. System font, hairlines instead of fills, no page tint. The
+   artifact inside the frame keeps its own styling; nothing here reaches it. */
 :root {
-  --ink-900: #0f1115;
-  --ink-800: #11141a;
-  --ink-700: #171a21;
-  --ink-600: #1c212b;
-  --steel-700: #2a2f3a;
-  --steel-600: #303745;
-  --steel-500: #3c4557;
-  --steel-400: #8c96aa;
-  --steel-300: #aeb6c6;
-  --steel-200: #b9c0cf;
-  --steel-100: #d8deea;
-  --cream-50: #fffbf3;
-  --cream-100: #f7f3ea;
-  --cream-200: #e8e1cf;
-  --brass-500: #f4c95d;
-  --brass-400: #ffd877;
-  --brass-ink: #17130a;
-  --sage-900: #172419;
-  --sage-700: #315f3a;
-  --sage-300: #8fe39e;
-  --amber-900: #25230f;
-  --amber-700: #5d4d1b;
-  --rust-500: #f06464;
-  --bg: var(--ink-900);
-  --bg-panel: var(--ink-800);
-  --bg-bar: var(--ink-700);
-  --bg-elevated: var(--ink-600);
-  --fg: var(--cream-100);
-  --fg-muted: var(--steel-100);
-  --fg-dim: var(--steel-200);
-  --fg-faint: var(--steel-300);
-  --fg-label: var(--steel-400);
-  --border: var(--steel-600);
-  --border-subtle: var(--steel-700);
-  --border-strong: var(--steel-500);
-  --accent: var(--brass-500);
-  --accent-hover: var(--brass-400);
-  --accent-ink: var(--brass-ink);
-  --danger: var(--rust-500);
-  --font-serif: "EB Garamond", "Iowan Old Style", Georgia, serif;
-  --font-sans: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+  --gray-0: #0a0b0d;
+  --gray-1: #111215;
+  --gray-2: #17181c;
+  --gray-3: #1e2025;
+  --gray-4: #2a2d33;
+  --gray-5: #3a3e46;
+  --gray-6: #6c717b;
+  --gray-7: #9da2ab;
+  --gray-8: #c9ccd2;
+  --gray-9: #eef0f3;
+  --blue: #5aa9ff;
+  --blue-hover: #82c0ff;
+  --blue-ink: #04121f;
+  --red: #ff6b6b;
+  --bg: var(--gray-0);
+  --bg-panel: var(--gray-1);
+  --bg-bar: var(--gray-0);
+  --bg-elevated: var(--gray-2);
+  --bg-hover: var(--gray-3);
+  --fg: var(--gray-9);
+  --fg-muted: var(--gray-8);
+  --fg-dim: var(--gray-8);
+  --fg-faint: var(--gray-7);
+  --fg-label: var(--gray-6);
+  --border: var(--gray-4);
+  --border-subtle: #1b1d21;
+  --border-strong: var(--gray-5);
+  --accent: var(--blue);
+  --accent-hover: var(--blue-hover);
+  --accent-ink: var(--blue-ink);
+  --accent-soft: rgb(90 169 255 / 14%);
+  --accent-ring: rgb(90 169 255 / 45%);
+  --danger: var(--red);
+  --warn-bg: rgb(255 107 107 / 8%);
+  --warn-line: rgb(255 107 107 / 35%);
+  --scrim: rgb(0 0 0 / 62%);
+  --gloss: linear-gradient(180deg, rgb(255 255 255 / 4%), rgb(255 255 255 / 0%) 60%);
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --text-xs: 12px;
   --lh-xs: 1.35;
   --text-sm: 13px;
@@ -49,30 +50,11 @@
   --lh-base: 1.45;
   --text-md: 16px;
   --lh-md: 1.5;
-  --text-lg: 18px;
-  --lh-lg: 1.45;
-  --text-xl: 22px;
-  --lh-xl: 1.3;
-  --text-2xl: 28px;
-  --lh-2xl: 1.25;
-  --text-3xl: 36px;
-  --lh-3xl: 1.18;
-  --text-4xl: 48px;
-  --lh-4xl: 1.1;
-  --text-5xl: 64px;
-  --lh-5xl: 1.05;
-  --text-display: 92px;
-  --lh-display: 1;
   --w-regular: 400;
   --w-medium: 500;
   --w-semi: 600;
   --w-bold: 700;
-  --w-brand: 750;
-  --track-tight: -0.01em;
-  --track-normal: 0;
-  --track-brand: 0.02em;
-  --track-label: 0.08em;
-  --track-caps: 0.12em;
+  --track-label: 0.06em;
   --space-1: 2px;
   --space-2: 4px;
   --space-3: 6px;
@@ -83,21 +65,20 @@
   --space-10: 20px;
   --space-12: 24px;
   --space-16: 32px;
-  --space-20: 40px;
-  --space-24: 48px;
-  --space-32: 64px;
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 12px;
-  --radius-xl: 14px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
   --radius-pill: 999px;
   --hairline: 1px solid var(--border);
   --hairline-subtle: 1px solid var(--border-subtle);
-  --shadow-tooltip: 0 16px 44px rgba(0, 0, 0, 0.35);
-  --shadow-floating: 0 20px 70px rgba(0, 0, 0, 0.35);
-  --bar-h: 56px;
+  --shadow-tooltip: 0 12px 32px rgb(0 0 0 / 45%);
+  --shadow-floating: 0 18px 60px rgb(0 0 0 / 50%);
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 3%) inset, 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-card-open: 0 1px 0 rgb(255 255 255 / 4%) inset, 0 10px 30px rgb(0 0 0 / 45%);
+  --bar-h: 48px;
   --bar-pad: var(--space-8);
-  --panel-w: 360px;
+  --margin-w: 320px;
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
   --dur-fast: 120ms;
   --dur: 180ms;
@@ -105,6 +86,39 @@
   --annotate-outline: 2px solid var(--accent);
   --annotate-offset: 2px;
 }
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --bg-panel: #f7f8f9;
+    --bg-bar: #ffffff;
+    --bg-elevated: #ffffff;
+    --bg-hover: #eef0f2;
+    --fg: #0b0c0e;
+    --fg-muted: #2b2e34;
+    --fg-dim: #3a3e46;
+    --fg-faint: #5b616b;
+    --fg-label: #737985;
+    --border: #dfe2e6;
+    --border-subtle: #eceef1;
+    --border-strong: #c6cad1;
+    --accent: #1f6fe0;
+    --accent-hover: #185cc0;
+    --accent-ink: #ffffff;
+    --accent-soft: rgb(31 111 224 / 9%);
+    --accent-ring: rgb(31 111 224 / 40%);
+    --danger: #d12f2f;
+    --warn-bg: rgb(209 47 47 / 6%);
+    --warn-line: rgb(209 47 47 / 30%);
+    --scrim: rgb(11 12 14 / 38%);
+    --gloss: linear-gradient(180deg, rgb(255 255 255 / 70%), rgb(255 255 255 / 0%) 60%);
+    --shadow-tooltip: 0 12px 32px rgb(15 20 30 / 14%);
+    --shadow-floating: 0 18px 60px rgb(15 20 30 / 18%);
+    --shadow-card: 0 1px 2px rgb(15 20 30 / 6%);
+    --shadow-card-open: 0 10px 30px rgb(15 20 30 / 14%);
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -124,9 +138,6 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-body.lavish {
-  color-scheme: dark;
-}
 :focus-visible {
   outline: var(--annotate-outline);
   outline-offset: var(--annotate-offset);
@@ -143,28 +154,28 @@ body.lavish {
 }
 .brand {
   display: flex;
-  align-items: flex-end;
-  height: 22px;
-  gap: 8px;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 .brand-mark {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: 22px;
-  line-height: 1;
+  flex-shrink: 0;
   color: var(--fg);
+  font-size: 15px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
-.brand-support {
-  font-family: var(--font-sans);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--fg-muted);
-  position: relative;
-  top: 1px;
+.brand-mark::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 2px;
+  background: var(--accent);
+  vertical-align: 1px;
 }
 .spacer {
   flex: 1;
@@ -244,10 +255,10 @@ body.lavish {
   gap: 6px;
   height: 34px;
   padding: 0 10px;
-  border: 1px solid rgba(244, 201, 93, 0.35);
+  border: 1px solid var(--warn-line);
   border-radius: 9px;
-  background: rgba(37, 35, 15, 0.72);
-  color: var(--brass-400);
+  background: var(--warn-bg);
+  color: var(--danger);
   font-family: inherit;
   font-size: var(--text-sm);
   font-weight: var(--w-bold);
@@ -256,7 +267,7 @@ body.lavish {
 }
 .warnings-button:hover:not(:disabled),
 .warnings-button[aria-expanded="true"] {
-  border-color: rgba(244, 201, 93, 0.6);
+  border-color: var(--danger);
   background: rgba(93, 77, 27, 0.5);
   color: var(--accent-hover);
 }
@@ -293,7 +304,6 @@ body.lavish {
 }
 .warnings-title {
   margin: 0;
-  font-family: var(--font-serif);
   font-size: var(--text-md);
   font-weight: var(--w-regular);
   color: var(--fg);
@@ -363,7 +373,7 @@ body.lavish {
   border-color: var(--border-strong);
 }
 .warning-row.is-outstanding {
-  background: var(--ink-700);
+  background: var(--bg-hover);
 }
 .warning-select {
   width: 14px;
@@ -406,7 +416,7 @@ body.lavish {
   padding: 2px 6px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-subtle);
-  background: var(--ink-800);
+  background: var(--bg-panel);
   color: var(--fg-faint);
   font-size: 10px;
   line-height: 1.4;
@@ -418,7 +428,7 @@ body.lavish {
 }
 .warning-chip.status-queued,
 .warning-chip.status-unverified {
-  border-color: rgba(244, 201, 93, 0.4);
+  border-color: var(--accent-ring);
   color: var(--accent);
 }
 .warning-chip.status-recurring,
@@ -501,66 +511,12 @@ body.lavish {
 .more-button:hover:not(:disabled),
 .more-button[aria-expanded="true"] {
   border-color: var(--border-strong);
-  background: var(--steel-700);
+  background: var(--bg-hover);
   color: var(--fg);
 }
 .more-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-}
-/* Desktop-only toggle for the conversation panel. Collapsed, it carries what the hidden panel would
-   have shown: a count of queued notes, or a dot for an agent reply that has not been seen yet. */
-.sidebar-toggle {
-  position: relative;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  border: 1px solid var(--border-subtle);
-  background: transparent;
-  color: var(--fg-dim);
-  border-radius: 9px;
-  cursor: pointer;
-  padding: 0;
-}
-.sidebar-toggle:hover {
-  border-color: var(--border-strong);
-  background: var(--steel-700);
-  color: var(--fg);
-}
-.sidebar-toggle[aria-expanded="false"] {
-  color: var(--accent);
-}
-.sidebar-toggle-count {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  box-sizing: border-box;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: 11px;
-  font-weight: var(--w-bold);
-  line-height: 18px;
-  text-align: center;
-}
-.sidebar-toggle-count[hidden] {
-  display: none;
-}
-.sidebar-toggle.is-unread::after {
-  content: "";
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  box-shadow: 0 0 0 2px var(--bg-bar);
 }
 .menu {
   position: absolute;
@@ -607,7 +563,7 @@ body.lavish {
   color: var(--fg-muted);
 }
 .menu-file:hover {
-  background: var(--steel-700);
+  background: var(--bg-hover);
 }
 .menu-file > svg {
   opacity: 0.7;
@@ -679,7 +635,7 @@ body.lavish {
   color: var(--fg);
 }
 .menu-item:hover:not(:disabled) {
-  background: var(--steel-700);
+  background: var(--bg-hover);
 }
 .menu-item:disabled {
   cursor: not-allowed;
@@ -689,158 +645,6 @@ body.lavish {
   opacity: 0.8;
   flex-shrink: 0;
 }
-.revisions-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.revisions-wrap[hidden] {
-  display: none;
-}
-
-.revisions-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--fg);
-  font: 600 12px/1 var(--font-sans);
-  cursor: pointer;
-}
-
-.revisions-button:hover {
-  background: var(--bg-elevated);
-}
-
-.revisions-count {
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: var(--brass-ink);
-  font: 700 11px/18px var(--font-sans);
-  text-align: center;
-}
-
-.revisions-drawer {
-  right: 0;
-  top: 42px;
-  width: min(360px, calc(100vw - 24px));
-  padding: 0;
-}
-
-.revisions-head {
-  padding: 12px 14px 8px;
-}
-
-.revisions-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.revisions-summary {
-  margin: 4px 0 0;
-  font-size: 11px;
-  color: var(--fg-faint);
-}
-
-.revisions-list {
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 0 14px;
-}
-
-.revision-row {
-  display: flex;
-  gap: 10px;
-  padding: 10px 0;
-  border-top: 1px solid var(--border);
-}
-
-/* Colour is never the only signal: the swatch also carries the revision's
-   border style and fill pattern, so the legend still separates revisions in
-   greyscale or with a colour vision deficiency. */
-.revision-swatch {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  border-width: 2px;
-  border-radius: 4px;
-}
-
-.revision-body {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.revision-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.revision-label {
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.revision-time {
-  font-size: 11px;
-  color: var(--fg-faint);
-}
-
-.revision-summary {
-  margin: 4px 0 0;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--fg-faint);
-}
-
-.revision-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.revision-marks {
-  font-size: 11px;
-  color: var(--fg-faint);
-}
-
-.revision-reveal {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  color: var(--fg);
-  padding: 4px 8px;
-  font: 700 11px/1 var(--font-sans);
-  cursor: pointer;
-}
-
-.revision-reveal:hover {
-  background: var(--steel-700);
-}
-
-.revisions-foot {
-  padding: 10px 14px 12px;
-  border-top: 1px solid var(--border);
-}
-
-.revisions-note {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--fg-faint);
-}
-
 .menu-item.danger {
   color: var(--danger);
 }
@@ -897,7 +701,7 @@ body.lavish {
   display: grid;
   place-items: center;
   padding: var(--space-16);
-  background: rgba(15, 17, 21, 0.72);
+  background: var(--scrim);
 }
 .share-overlay[hidden] {
   display: none;
@@ -939,11 +743,9 @@ body.lavish {
 }
 .share-head h2 {
   margin: var(--space-2) 0 0;
-  font-family: var(--font-serif);
-  font-size: var(--text-2xl);
-  font-style: italic;
-  font-weight: var(--w-regular);
-  line-height: var(--lh-2xl);
+  font-size: 20px;
+  font-weight: var(--w-semi);
+  line-height: 1.25;
 }
 .share-close {
   display: flex;
@@ -1097,307 +899,6 @@ body.lavish {
   color: var(--fg);
   border-color: var(--border-strong);
 }
-.layout {
-  height: calc(100vh - var(--bar-h));
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--panel-w);
-}
-.frame {
-  min-width: 0;
-  min-height: 0;
-  background: #fff;
-  overflow: hidden;
-}
-.panel {
-  width: var(--panel-w);
-  border-left: var(--hairline-subtle);
-  background: var(--bg-panel);
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-/* A collapsed panel gives its whole column back to the artifact. Scoped to the exact complement of
-   the phone breakpoint so the stored desktop preference can never hide the phone dock. */
-@media not all and (max-width: 860px) {
-  body.panel-collapsed .layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  body.panel-collapsed .panel {
-    display: none;
-  }
-}
-/* Desktop keeps the panel's original flex children: the head wrappers exist only so the phone
-   layout can turn the heading into a dock, and they are transparent to layout everywhere else. */
-.panel-head,
-.panel-head-row {
-  display: contents;
-}
-.panel-handle,
-.panel-summary,
-.panel-toggle,
-.panel-scrim {
-  display: none;
-}
-.panel h2 {
-  font-size: 15px;
-  line-height: 1.3;
-  margin: 16px 16px 8px;
-  font-weight: var(--w-semi);
-  letter-spacing: 0;
-  flex: 0 0 auto;
-}
-.panel-scroll {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.chat {
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: visible;
-  padding: 0 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.chat:empty::before {
-  content: "Agent hasn't sent a message yet. Click an element in the artifact to annotate, or type below to start.";
-  margin-top: 2px;
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-.chat:empty:has(+ .chat-queued:not(:empty))::before,
-.thread-list:not(:empty) + .chat:empty::before {
-  display: none;
-}
-.bubble {
-  max-width: 85%;
-  border-radius: var(--radius-xl);
-  padding: 10px 12px;
-  background: var(--bg-elevated);
-  border: var(--hairline);
-  color: var(--fg);
-}
-.bubble.user {
-  align-self: flex-end;
-  background: var(--bg-elevated);
-  border-color: var(--border-strong);
-}
-.bubble.agent {
-  align-self: flex-start;
-  background: transparent;
-  border-color: var(--border-subtle);
-}
-.bubble.note {
-  align-self: stretch;
-  max-width: 100%;
-  background: transparent;
-  border-color: var(--border-strong);
-  border-style: dashed;
-}
-.bubble.note .note-draft {
-  margin-top: 6px;
-  white-space: pre-wrap;
-  user-select: text;
-}
-.bubble.note .note-warning {
-  margin-top: 6px;
-  color: var(--danger);
-}
-.bubble.agent-working {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--fg-muted);
-}
-.spinner {
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-pill);
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
-  animation: spin 0.8s linear infinite;
-  flex: 0 0 auto;
-}
-.bubble small {
-  display: block;
-  color: var(--fg-faint);
-  margin-bottom: 4px;
-  font-size: 10px;
-  font-weight: var(--w-bold);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-}
-.bubble.user small {
-  text-align: right;
-}
-.bubble-text {
-  white-space: pre-wrap;
-}
-/* Consecutive items from one send sit closer, so a batch reads as a group. */
-.bubble.user + .bubble.user {
-  margin-top: -4px;
-}
-/* A queued note is the user bubble in its not-yet-sent state. Dashed is the panel's word for
-   "not delivered" (the Unsent annotation note uses it); the steel treatment stays. */
-.chat.chat-queued {
-  padding-top: 0;
-}
-.chat.chat-queued:empty {
-  display: none;
-}
-.bubble.queued {
-  background: transparent;
-  border-style: dashed;
-}
-.bubble.queued small {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-}
-.bubble.queued:not(.editing) {
-  cursor: pointer;
-}
-.bubble.queued.editing {
-  align-self: stretch;
-  max-width: 100%;
-  border-color: var(--accent);
-}
-.queued-edit,
-.queued-remove {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  padding: 0;
-  background: var(--border);
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-.queued-edit:disabled,
-.queued-remove:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.queued-edit svg,
-.queued-remove svg {
-  display: block;
-}
-.queued-edit-input {
-  display: block;
-  width: 100%;
-  min-height: 64px;
-  resize: vertical;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  padding: 8px;
-  font: inherit;
-  box-sizing: border-box;
-}
-.queued-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
-}
-.queued-edit-actions button {
-  border: 0;
-  border-radius: var(--radius-md);
-  padding: 6px 10px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: var(--w-bold);
-  cursor: pointer;
-}
-.queued-edit-cancel {
-  background: var(--border);
-  color: var(--fg);
-}
-.queued-edit-save {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-/* The anchor line names what a note is attached to, in the annotation card's words. */
-.anchor {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-bottom: 6px;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--fg-faint);
-}
-.anchor-kind {
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-dim);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 1px 6px;
-}
-.anchor-excerpt {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* A selected range keeps the artifact's own highlight: brass means attention is here. */
-.anchor-excerpt.text {
-  background: rgba(244, 201, 93, 0.22);
-  box-shadow: 0 0 0 1px rgba(244, 201, 93, 0.35);
-  color: var(--fg);
-  border-radius: 3px;
-  padding: 0 3px;
-}
-/* Delivery receipt: the per-note view of agent presence (docs/delivery-acks.md). Three emoji
-   (seen, working, done) that light up as the server observes each step; a step that has not
-   happened is the same glyph greyed and dimmed, so the row always shows what is still to come. */
-.receipt {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px 8px;
-  margin-top: 6px;
-  font-size: 13px;
-  line-height: 1.3;
-  color: var(--fg-faint);
-}
-.receipt-step {
-  display: inline-block;
-  filter: grayscale(1);
-  opacity: 0.3;
-  transition:
-    opacity 0.3s ease,
-    filter 0.3s ease;
-}
-.receipt-step.is-done {
-  filter: none;
-  opacity: 1;
-}
-.receipt-note {
-  font-size: 11px;
-  flex-basis: 100%;
-  text-align: right;
-  font-style: italic;
-}
 .bubble-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -1439,7 +940,7 @@ body.lavish {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-/* Agent prose: the Markdown subset src/chat-messages.js renders, sized for a 360px column. */
+/* Agent prose: the Markdown subset src/chat-messages.js renders, sized for a 300px margin card. */
 .chat-md > :first-child {
   margin-top: 0;
 }
@@ -1477,7 +978,7 @@ body.lavish {
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: var(--cream-200);
+  color: var(--fg-muted);
 }
 .chat-md code {
   font-family: var(--font-mono);
@@ -1486,7 +987,7 @@ body.lavish {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 5px;
-  color: var(--cream-200);
+  color: var(--fg-muted);
 }
 .chat-md pre code {
   background: none;
@@ -1507,77 +1008,6 @@ body.lavish {
   to {
     transform: rotate(360deg);
   }
-}
-.composer {
-  display: grid;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: var(--hairline-subtle);
-  background: var(--bg-panel);
-  min-width: 0;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-}
-.presence-banner {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: var(--w-medium);
-  line-height: 1.4;
-  padding: 8px 10px;
-}
-.presence-banner[hidden] {
-  display: none;
-}
-.handoff-banner {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-}
-.handoff-takeover {
-  background: transparent;
-  border: 0;
-  color: var(--accent);
-  cursor: pointer;
-  font: inherit;
-  font-weight: var(--w-semibold);
-  padding: 0;
-  white-space: nowrap;
-}
-.handoff-takeover:hover {
-  color: var(--fg);
-}
-.outdated-actions {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-}
-.composer textarea {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  min-height: 82px;
-  resize: vertical;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  padding: 10px;
-  font: inherit;
-  font-family: var(--font-sans);
-  box-sizing: border-box;
-}
-.composer textarea::placeholder {
-  color: var(--fg-label);
-}
-.composer.is-dropping {
-  background: var(--bg-elevated);
 }
 .chat-attachments {
   display: grid;
@@ -1647,14 +1077,6 @@ body.lavish {
   font-size: 11px;
   line-height: 1.35;
 }
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: flex-end;
-  min-width: 0;
-  position: relative;
-}
 .send-hint {
   color: var(--fg-faint);
   font-size: 11px;
@@ -1662,24 +1084,18 @@ body.lavish {
 }
 .send-hint.persistent {
   padding: var(--space-4);
-  border: 1px solid var(--amber-700);
-  border-radius: var(--radius-sm);
-  background: var(--amber-900);
-  color: var(--accent-hover);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-md);
+  background: var(--warn-bg);
+  color: var(--fg);
 }
 .send-hint[hidden] {
   display: none;
 }
-@media (max-width: 320px) {
-  .composer {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-}
 .ended-overlay {
   position: fixed;
   inset: var(--bar-h) 0 0 0;
-  background: rgba(15, 17, 21, 0.86);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1697,8 +1113,7 @@ body.lavish {
   text-align: center;
 }
 .ended-title {
-  font-family: var(--font-serif);
-  font-style: italic;
+  font-weight: var(--w-semi);
   font-size: 22px;
   line-height: 1.3;
   color: var(--fg);
@@ -1736,9 +1151,6 @@ body.layout-gate-active iframe#artifact {
     gap: 10px;
     --bar-pad: var(--space-6);
   }
-  .brand-support {
-    display: none;
-  }
   .warnings-drawer {
     position: fixed;
     top: calc(var(--bar-h) + 6px);
@@ -1748,249 +1160,6 @@ body.layout-gate-active iframe#artifact {
     max-height: min(70vh, 460px);
   }
 }
-/* Phone-width chrome: the artifact takes the whole viewport above a persistent conversation dock,
-   and the conversation itself is a bottom sheet the dock raises over a scrim. A side-by-side or
-   stacked split leaves neither half usable on a phone - the composer alone is taller than the
-   strip a split gives the panel - so the two surfaces take turns owning the height instead.
-   The sheet is sized from the visual viewport (`--vv-top`/`--vv-height`, kept current by
-   chrome-client.js) rather than the layout viewport, so an on-screen keyboard shrinks it instead
-   of covering the composer, and every edge that can meet a notch or home indicator pads by the
-   matching safe-area inset. */
-@media (max-width: 860px) {
-  :root {
-    --bar-h: calc(56px + env(safe-area-inset-top, 0px));
-    --dock-h: 60px;
-    --sheet-peek: 16px;
-    --composer-reserve: calc(1px + var(--space-4) + 34px + var(--space-6) + env(safe-area-inset-bottom, 0px));
-    --sheet-top: max(var(--bar-h) + var(--sheet-peek) - var(--vv-top, 0px), var(--sheet-peek));
-  }
-  .bar {
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-right: calc(var(--bar-pad) + env(safe-area-inset-right, 0px));
-    padding-left: calc(var(--bar-pad) + env(safe-area-inset-left, 0px));
-  }
-  .layout {
-    height: calc(100vh - var(--bar-h));
-    height: calc(100dvh - var(--bar-h));
-    grid-template-columns: minmax(0, 1fr);
-    /* The second row only reserves the dock's footprint so the artifact is never underneath it;
-       the panel itself is fixed. */
-    grid-template-rows: minmax(0, 1fr) calc(var(--dock-h) + env(safe-area-inset-bottom, 0px));
-  }
-  /* The sheet has its own dock and chevron; the desktop panel toggle has nothing to do here. */
-  .sidebar-toggle {
-    display: none;
-  }
-  .frame {
-    padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
-    background: var(--bg-bar);
-  }
-  .panel {
-    position: fixed;
-    z-index: 30;
-    top: calc(var(--vv-top, 0px) + var(--sheet-top));
-    right: 0;
-    left: 0;
-    width: auto;
-    height: calc(var(--vv-height, 100dvh) - var(--sheet-top));
-    padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
-    border-left: 0;
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-    /* The hairline is a shadow, not a border: a border would add to the sheet's box and push
-       the docked head one pixel past the viewport edge. */
-    box-shadow:
-      0 -1px 0 var(--border-subtle),
-      var(--shadow-floating);
-    /* Collapsed: slide everything but the dock below the viewport. The sheet keeps its full
-       height, so opening it is one transform and the chat never reflows mid-gesture. */
-    transform: translateY(calc(100% - var(--dock-h) - env(safe-area-inset-bottom, 0px)));
-    transition: transform var(--dur-slow) var(--ease);
-    will-change: transform;
-  }
-  body.sheet-open .panel {
-    transform: none;
-  }
-  .panel.is-dragging {
-    transition: none;
-  }
-  .panel-head {
-    display: flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    height: var(--dock-h);
-    padding: 6px 16px 0;
-    cursor: pointer;
-    user-select: none;
-    -webkit-user-select: none;
-    touch-action: none;
-  }
-  body:not(.sheet-open) .panel-head {
-    height: calc(var(--dock-h) + env(safe-area-inset-bottom, 0px));
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
-  .panel-handle {
-    display: block;
-    width: 36px;
-    height: 4px;
-    margin: 0 auto 6px;
-    border-radius: var(--radius-pill);
-    background: var(--border-strong);
-  }
-  .panel-head-row {
-    display: flex;
-    flex: 1 1 auto;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .panel h2 {
-    flex: 0 0 auto;
-    margin: 0;
-  }
-  .panel-summary {
-    display: block;
-    flex: 1 1 auto;
-    min-width: 0;
-    color: var(--fg-faint);
-    font-size: 12px;
-    line-height: 1.35;
-    text-align: right;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .panel-summary:empty {
-    display: none;
-  }
-  .panel-summary.is-accent {
-    color: var(--accent);
-    font-weight: var(--w-semi);
-  }
-  .panel-summary.is-unread::before {
-    content: "";
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    margin-right: 6px;
-    border-radius: var(--radius-pill);
-    background: var(--accent);
-    vertical-align: 1px;
-  }
-  .panel-toggle {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    background: var(--bg-elevated);
-    color: var(--fg-muted);
-    cursor: pointer;
-  }
-  .panel-toggle svg {
-    display: block;
-    transition: transform var(--dur) var(--ease);
-  }
-  body.sheet-open .panel-toggle svg {
-    transform: rotate(180deg);
-  }
-  .panel-head.is-fresh .panel-toggle {
-    animation: dock-pulse 700ms var(--ease);
-  }
-  .panel-scroll {
-    flex: 1 1 56px;
-    min-height: clamp(
-      0px,
-      calc(var(--vv-height, 100dvh) - var(--sheet-top) - var(--dock-h) - var(--composer-reserve)),
-      56px
-    );
-    overscroll-behavior: contain;
-  }
-  .chat {
-    padding-bottom: 10px;
-  }
-  .composer {
-    position: static;
-    min-height: min(
-      var(--composer-reserve),
-      max(0px, calc(var(--vv-height, 100dvh) - var(--sheet-top) - var(--dock-h)))
-    );
-    flex: 0 1 auto;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  }
-  .chat-attachments {
-    max-height: min(176px, 25dvh);
-  }
-  .composer .actions {
-    position: sticky;
-    bottom: 0;
-    z-index: 1;
-    padding-top: 8px;
-    background: var(--bg-panel);
-    box-shadow: 0 -1px 0 var(--border-subtle);
-  }
-  .panel-scrim {
-    display: block;
-    position: fixed;
-    inset: var(--bar-h) 0 0 0;
-    z-index: 29;
-    background: rgba(15, 17, 21, 0.72);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--dur-slow) var(--ease);
-  }
-  body.sheet-open .panel-scrim {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .share-overlay {
-    align-items: start;
-    padding: var(--space-8);
-  }
-  .share-copy-row {
-    flex-direction: column;
-  }
-}
-/* A phone on its side has no height to share: the raised sheet covers the bar as well (the sheet
-   carries its own close control) and the composer gives up its tall default. */
-@media (max-width: 860px) and (max-height: 520px) {
-  :root {
-    --sheet-top: var(--sheet-peek);
-  }
-  .panel-scrim {
-    inset: 0;
-  }
-  .composer textarea {
-    min-height: 48px;
-  }
-  .chat-attachments {
-    max-height: 44px;
-  }
-}
-@media (max-width: 860px) and (prefers-reduced-motion: reduce) {
-  .panel,
-  .panel-scrim,
-  .panel-toggle svg {
-    transition: none;
-  }
-  .panel-head.is-fresh .panel-toggle {
-    animation: none;
-  }
-}
-@keyframes dock-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(244, 201, 93, 0.55);
-  }
-  100% {
-    box-shadow: 0 0 0 10px rgba(244, 201, 93, 0);
-  }
-}
-
 /* Whiteboard overlay: a full-viewport layer above the chrome hosting the
    sandboxed Excalidraw frame. The frame owns all whiteboard UI; this layer
    only provides the backdrop, a fallback close control, and an error card
@@ -1998,7 +1167,7 @@ body.layout-gate-active iframe#artifact {
 .whiteboard-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 17, 21, 0.92);
+  background: var(--scrim);
   z-index: 80;
   display: flex;
 }
@@ -2058,388 +1227,855 @@ body.layout-gate-active iframe#artifact {
   display: none;
 }
 
-/* Margin comment threads. Calm, document-style cards beside the artifact; the Conversation panel
-   keeps the full list, including resolved threads. One accent (brass), system font, soft shadow. */
+/* Top-bar extras: the agent's status as one quiet word, the resolved/off-page drawer, and the
+   notices that used to sit in the conversation panel. */
+.brand-file {
+  min-width: 0;
+  max-width: 32ch;
+  overflow: hidden;
+  color: var(--fg-label);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.agent-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--fg-label);
+}
+.agent-status[data-state="listening"]::before,
+.agent-status[data-state="external"]::before {
+  background: var(--accent);
+}
+.agent-status[data-state="working"]::before {
+  background: var(--accent);
+  animation: status-breathe 1.6s var(--ease) infinite alternate;
+}
+.agent-status[data-state="ended"]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--fg-label);
+}
+@keyframes status-breathe {
+  to {
+    opacity: 0.35;
+  }
+}
+.resolved-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.resolved-wrap[hidden] {
+  display: none;
+}
+.resolved-button {
+  height: 28px;
+  padding: 0 10px;
+  border: var(--hairline);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.resolved-button:hover,
+.resolved-button[aria-expanded="true"] {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.resolved-drawer {
+  right: 0;
+  width: min(380px, calc(100vw - 20px));
+  max-height: min(72vh, 640px);
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+.resolved-head {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.resolved-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: var(--w-semi);
+}
+.resolved-list {
+  display: grid;
+  /* A grid track defaults to its content's width, so a long one-line quote would push the card
+     past the drawer edge instead of ellipsizing. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+.resolved-list .comment-thread {
+  position: static;
+  width: auto;
+  min-width: 0;
+  transform: none;
+}
+.notices {
+  position: fixed;
+  z-index: 50;
+  top: calc(var(--bar-h) + 8px);
+  left: 50%;
+  display: grid;
+  gap: 8px;
+  width: min(560px, calc(100vw - 24px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  background-image: var(--gloss);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  box-shadow: var(--shadow-tooltip);
+  pointer-events: auto;
+}
+.notice[hidden] {
+  display: none;
+}
+.notice-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.notice-action {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border: var(--hairline);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-weight: var(--w-semi);
+  cursor: pointer;
+}
+.notice-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.text-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.text-button:hover:not(:disabled) {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.text-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Layout: the artifact and, beside it, the comments margin. The margin is the only review
+   surface; there is no conversation panel. */
+.layout {
+  height: calc(100vh - var(--bar-h));
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--margin-w);
+}
 .frame {
   display: flex;
+  min-width: 0;
+  min-height: 0;
+  background: #fff;
+  overflow: hidden;
 }
 .frame > #artifact {
   flex: 1 1 0;
   min-width: 0;
 }
-.margin-threads,
-.thread-list {
-  --c-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --c-ease: 140ms ease-out;
-  --c-accent: #b7860f;
-  --c-accent-soft: rgb(226 177 60 / 16%);
-  --c-ring: rgb(226 177 60 / 45%);
-}
-.margin-threads {
-  --c-surface: #f8f9fa;
-  --c-card: #fff;
-  --c-fg: #1f1f1f;
-  --c-muted: #5f6368;
-  --c-line: #e3e5e8;
-  --c-input: #fff;
-  --c-shadow: 0 1px 2px rgb(60 64 67 / 14%), 0 2px 8px rgb(60 64 67 / 8%);
-  --c-shadow-active: 0 1px 3px rgb(60 64 67 / 20%), 0 6px 18px rgb(60 64 67 / 14%);
-  position: relative;
-  flex: 0 0 300px;
-  width: 300px;
-  overflow: hidden;
-  background: var(--c-surface);
-  border-left: 1px solid var(--c-line);
-}
-.margin-threads[hidden] {
+.sheet-scrim,
+.sheet-head {
   display: none;
 }
-#marginThreadCanvas {
+.comments {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-panel);
+  border-left: var(--hairline);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+.comments-body {
+  position: absolute;
+  inset: 0;
+}
+/* Cards are absolutely placed in a canvas that shares the artifact's top edge, so a card's
+   translateY is exactly its anchor's top inside the frame. */
+.margin-threads {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.margin-canvas {
   position: absolute;
   inset: 0 0 auto;
 }
-.thread-list {
-  --c-card: var(--bg-elevated);
-  --c-fg: var(--fg);
-  --c-muted: var(--fg-faint);
-  --c-line: var(--border);
-  --c-input: var(--bg);
-  --c-accent: var(--accent);
-  --c-shadow: none;
-  --c-shadow-active: 0 0 0 1px var(--c-ring);
-  padding: 0 var(--space-6, 12px);
-}
+
+/* A thread card: hairline, near-flat, the anchor quote on top and the state as one word. */
 .comment-thread {
-  box-sizing: border-box;
-  padding: 10px 12px 12px;
-  background: var(--c-card);
-  color: var(--c-fg);
-  border: 1px solid var(--c-line);
-  border-radius: 8px;
-  box-shadow: var(--c-shadow);
-  font: 13px/1.45 var(--c-font);
-  overflow-wrap: anywhere;
-  cursor: default;
-  transition:
-    box-shadow var(--c-ease),
-    border-color var(--c-ease),
-    transform var(--c-ease);
-}
-.margin-threads .comment-thread {
   position: absolute;
   top: 0;
   left: 12px;
   right: 12px;
-  will-change: transform;
-}
-.margin-threads .comment-thread.is-unplaced {
-  visibility: hidden;
-}
-.comment-thread:not(.is-open):not(.is-pending) {
+  padding: 9px 11px 10px;
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  background-image: var(--gloss);
+  box-shadow: var(--shadow-card);
+  color: var(--fg);
   cursor: pointer;
+  will-change: transform;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+/* Cards follow a scroll frame-for-frame; only opening or closing one animates the restack. */
+.margin-canvas.is-animating .comment-thread {
+  transition:
+    transform var(--dur) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.comment-thread:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .comment-thread.is-active {
-  border-color: var(--c-ring);
-  box-shadow: var(--c-shadow-active);
+  border-color: var(--accent-ring);
 }
 .comment-thread.is-open {
-  z-index: 1;
-  border-color: var(--c-ring);
-  box-shadow: var(--c-shadow-active);
+  z-index: 3;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-card-open);
+  cursor: default;
 }
 .comment-thread.is-pending {
   border-style: dashed;
 }
-.comment-thread button {
-  font: inherit;
-  cursor: pointer;
-}
-.comment-thread button:disabled {
-  opacity: 0.45;
-  cursor: default;
+.comment-thread.is-unplaced {
+  visibility: hidden;
 }
 .thread-head {
   display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.thread-anchor {
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
-  flex: 1;
-  padding: 0 0 0 8px;
+}
+.thread-quote {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
   border: 0;
-  border-left: 2px solid var(--c-ring);
   background: none;
-  color: var(--c-muted);
+  color: var(--fg-label);
+  font: inherit;
+  font-size: var(--text-xs);
   text-align: left;
-  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
 }
-.thread-anchor:hover {
-  color: var(--c-fg);
+.thread-quote:hover {
+  color: var(--fg);
 }
-.thread-resolve {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  flex: none;
-  min-width: 28px;
-  height: 28px;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--c-muted);
-  transition:
-    background-color var(--c-ease),
-    color var(--c-ease);
+.page-thread .thread-quote {
+  color: var(--fg-faint);
+  font-weight: var(--w-semi);
 }
-.thread-resolve:hover {
-  background: var(--c-accent-soft);
-  color: var(--c-accent);
-}
-.thread-reopen {
-  font-size: 12px;
-}
-.thread-state {
-  margin-left: auto;
+.thread-status {
+  flex: 0 0 auto;
+  color: var(--fg-label);
   font-size: 11px;
-  color: var(--c-muted);
+  white-space: nowrap;
+}
+.thread-status:empty {
+  display: none;
+}
+.comment-thread.is-pending .thread-status,
+.thread-status .thread-retry {
+  color: var(--accent);
+}
+.thread-retry {
+  font-size: 11px;
 }
 .thread-messages {
-  margin: 0;
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
 }
-.comment-thread.is-open .thread-messages {
-  max-height: 360px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+.thread-message {
+  min-width: 0;
 }
-.thread-message + .thread-message,
-.thread-more + .thread-message {
-  margin-top: 10px;
-}
-.comment-thread:not(.is-open) .thread-message.is-middle {
-  display: none;
-}
-.thread-more {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--c-accent);
-}
-.comment-thread.is-open .thread-more {
-  display: none;
+.thread-message.is-draft {
+  padding-left: 8px;
+  box-shadow: inset 2px 0 0 var(--accent-ring);
 }
 .thread-author {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
-  font-size: 12px;
-  font-weight: 600;
-}
-.thread-author .thread-state {
-  margin-left: 0;
-  font-weight: 400;
-}
-.thread-avatar {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--c-line);
-  color: var(--c-muted);
+  align-items: baseline;
+  gap: 8px;
+  color: var(--fg-faint);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--w-semi);
 }
-.thread-message.agent .thread-avatar {
-  background: var(--c-accent-soft);
-  color: var(--c-accent);
+.thread-message.agent .thread-author {
+  color: var(--accent);
+}
+.thread-message-actions {
+  display: none;
+  gap: 10px;
+  margin-left: auto;
+  font-weight: var(--w-regular);
+}
+.comment-thread.is-open .thread-message-actions {
+  display: inline-flex;
+}
+.thread-anchor-line {
+  margin-top: 2px;
+  color: var(--fg-label);
+  font-size: 11px;
 }
 .thread-body {
-  padding-left: 26px;
-  font-size: 13px;
+  margin-top: 2px;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
-.comment-thread:not(.is-open) .thread-body {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  overflow: hidden;
+.thread-body.note-draft {
+  padding: 6px 8px;
+  border: var(--hairline);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
 }
-.thread-body p {
-  margin: 4px 0;
+.thread-body.note-warning {
+  color: var(--danger);
 }
-.thread-body > :first-child {
-  margin-top: 0;
-}
-.thread-body > :last-child {
-  margin-bottom: 0;
-}
-.thread-body a {
-  color: inherit;
-  text-decoration: underline;
-}
-.thread-body pre {
-  overflow-x: auto;
-}
-.thread-body ul,
-.thread-body ol {
-  margin: 4px 0;
-  padding-left: 18px;
-}
-.comment-thread .receipt {
-  justify-content: flex-start;
-  margin: 4px 0 0 26px;
+.thread-more {
+  color: var(--fg-label);
   font-size: 11px;
-  color: var(--c-muted);
 }
-.comment-thread .receipt-note {
-  flex-basis: auto;
-  text-align: left;
-}
-.thread-reveal,
-.thread-send {
-  border: 0;
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  transition: background-color var(--c-ease);
+.thread-empty {
+  color: var(--fg-label);
+  font-size: var(--text-sm);
 }
 .thread-reveal {
-  margin: 6px 0 0 26px;
-  background: var(--c-accent-soft);
-  color: var(--c-accent);
-}
-.thread-reveal:not(:disabled):hover {
-  background: var(--c-ring);
+  margin-top: 4px;
+  color: var(--accent);
 }
 .thread-notice {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: var(--c-muted);
-}
-.thread-reply {
-  display: none;
-  margin-top: 10px;
-}
-.comment-thread.is-open .thread-reply {
-  display: block;
-}
-.thread-reply textarea {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  min-height: 34px;
-  max-height: 160px;
-  padding: 7px 10px;
-  resize: vertical;
-  border: 1px solid var(--c-line);
-  border-radius: 8px;
-  outline: none;
-  background: var(--c-input);
-  color: inherit;
-  font: 13px/1.4 var(--c-font);
-  transition:
-    border-color var(--c-ease),
-    box-shadow var(--c-ease);
-}
-.thread-reply textarea:focus {
-  border-color: var(--c-accent);
-  box-shadow: 0 0 0 3px var(--c-accent-soft);
-}
-.thread-reply textarea::placeholder {
-  color: var(--c-muted);
-}
-.thread-reply-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 6px;
-}
-.thread-hint {
+  margin: 6px 0 0;
+  color: var(--fg-faint);
   font-size: 11px;
-  color: var(--c-muted);
-}
-.thread-send {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-.thread-send:not(:disabled):hover {
-  background: var(--accent-hover);
-}
-.thread-send-pending {
-  margin-top: 10px;
-}
-.thread-error {
-  font-size: 12px;
-  color: var(--danger);
 }
 .thread-error:empty {
   display: none;
 }
-.thread-archive > summary {
-  padding: 12px 0;
-  color: var(--fg-faint);
-  font: 13px/1.4 var(--c-font);
-  cursor: pointer;
-}
-.thread-list .comment-thread {
-  margin-bottom: 8px;
+.thread-error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 11px;
 }
 .thread-group {
-  margin: 14px 0 8px;
-  font: 600 12px/1.3 var(--c-font);
+  padding: 8px 4px 2px;
+  color: var(--fg-label);
+  font-size: 11px;
+  font-weight: var(--w-semi);
+}
+.thread-actions {
+  display: none;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.thread-reply {
+  display: none;
+  margin-top: 8px;
+}
+.comment-thread.is-open .thread-reply,
+.comment-thread.is-open .thread-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.comment-thread.is-open .thread-actions {
+  flex-direction: row;
+}
+.thread-reply textarea,
+.thread-edit-input {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  max-height: 220px;
+  margin: 0;
+  padding: 7px 9px;
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  resize: none;
+  outline: none;
+}
+.thread-edit-input {
+  margin-top: 4px;
+}
+.thread-reply textarea:focus,
+.thread-edit-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.thread-reply textarea::placeholder {
+  color: var(--fg-label);
+}
+.thread-reply-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 4px;
+}
+.thread-hint {
+  margin-right: auto;
+  color: var(--fg-label);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.chat-attachment-notice:empty {
+  display: none;
+}
+
+/* Resting cards show the root comment and the latest message, three lines each, with the middle
+   folded behind a count. The open card shows its whole history and scrolls inside itself. */
+.comment-thread:not(.is-open) .thread-message.is-middle {
+  display: none;
+}
+.comment-thread:not(.is-open) .thread-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.comment-thread.is-open .thread-more {
+  display: none;
+}
+.comment-thread.is-open .thread-messages {
+  max-height: min(56vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Crowded cards collapse to one line. chrome-client.js places them at THREAD_COMPACT_HEIGHT, so
+   this height is the contract, not a suggestion. */
+.comment-thread.is-compact {
+  height: 34px;
+  padding-top: 8px;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.comment-thread.is-compact .thread-messages,
+.comment-thread.is-compact .thread-notice,
+.comment-thread.is-compact .thread-quote {
+  display: none;
+}
+.thread-snippet {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comment-thread.is-compact .thread-snippet {
+  display: block;
+}
+
+/* The whole-page thread: a bar at the top of the margin that opens over the cards below it. */
+.page-thread {
+  top: 8px;
+  z-index: 4;
+  cursor: pointer;
+}
+.page-thread:not(.is-open) .thread-messages {
+  margin-top: 3px;
+}
+.page-thread:not(.is-open) .thread-message:not(:last-child),
+.page-thread:not(.is-open) .thread-more {
+  display: none;
+}
+.page-thread:not(.is-open) .thread-body {
+  -webkit-line-clamp: 2;
+}
+.page-thread:not(.is-open) .thread-author {
+  display: none;
+}
+.page-thread.is-open .thread-messages {
+  max-height: min(48vh, 460px);
+}
+.page-thread.is-open .thread-empty {
+  display: none;
+}
+.page-thread.is-dropping {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+.page-thread .chat-attachments {
+  margin-top: 4px;
+}
+
+/* The one way anything reaches the agent: every draft on the page, in one batch. */
+.comments-foot {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: linear-gradient(180deg, transparent, var(--bg-panel) 28%);
+  pointer-events: none;
+}
+.comments-foot > * {
+  pointer-events: auto;
+}
+.send-button {
+  width: 100%;
+  height: 36px;
+  justify-content: center;
+}
+.send-button:not(.has-drafts) {
+  border: var(--hairline);
+  background: var(--bg-elevated);
   color: var(--fg-faint);
 }
-.comment-thread :focus-visible {
-  outline: 2px solid var(--c-accent);
-  outline-offset: 2px;
+.send-button:not(.has-drafts):hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
-@media (prefers-color-scheme: dark) {
-  .margin-threads {
-    --c-surface: #17191d;
-    --c-card: #202227;
-    --c-fg: #e8eaed;
-    --c-muted: #9aa0a6;
-    --c-line: #34373d;
-    --c-input: #17191d;
-    --c-accent: #f4c95d;
-    --c-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 25%);
-    --c-shadow-active: 0 1px 3px rgb(0 0 0 / 50%), 0 8px 22px rgb(0 0 0 / 35%);
-  }
+.resolve-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: center;
+  padding: 6px 12px;
+  border: var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  box-shadow: var(--shadow-tooltip);
 }
-@media (max-width: 1100px) {
-  .margin-threads {
-    flex-basis: 260px;
-    width: 260px;
-  }
+.resolve-toast[hidden] {
+  display: none;
 }
-@media (max-width: 860px) {
-  .margin-threads {
-    display: none;
-  }
-  .thread-list .comment-thread {
-    font-size: 14px;
-  }
-  /* 16px keeps phone browsers from zooming the page when the reply box takes focus. */
-  .thread-reply textarea {
-    font-size: 16px;
+.resolve-toast .text-button {
+  color: var(--accent);
+  font-weight: var(--w-semi);
+}
+.send-hint {
+  padding: 8px 10px;
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+@media (max-width: 1100px) and (min-width: 861px) {
+  :root {
+    --margin-w: 280px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .comment-thread,
-  .thread-resolve,
-  .thread-reveal,
-  .thread-send,
-  .thread-reply textarea {
+  .agent-status::before {
     transition: none;
+    animation: none;
+  }
+}
+
+/* Phone-width chrome: the artifact takes the whole viewport above a persistent comments dock, and
+   the comments themselves are a bottom sheet the dock raises over a scrim, with every thread
+   stacked in page order. A side-by-side margin leaves neither half usable on a phone, so the two
+   surfaces take turns owning the height instead. The sheet is sized from the visual viewport
+   (`--vv-top`/`--vv-height`, kept current by chrome-client.js) rather than the layout viewport,
+   so an on-screen keyboard shrinks it instead of covering a reply box, and every edge that can
+   meet a notch or home indicator pads by the matching safe-area inset. */
+@media (max-width: 860px) {
+  :root {
+    --bar-h: calc(48px + env(safe-area-inset-top, 0px));
+    --dock-h: 56px;
+    --sheet-peek: 16px;
+    --sheet-top: max(var(--bar-h) + var(--sheet-peek) - var(--vv-top, 0px), var(--sheet-peek));
+  }
+  .bar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-right: calc(var(--bar-pad) + env(safe-area-inset-right, 0px));
+    padding-left: calc(var(--bar-pad) + env(safe-area-inset-left, 0px));
+  }
+  .brand-file,
+  .agent-status {
+    display: none;
+  }
+  .layout {
+    height: calc(100vh - var(--bar-h));
+    height: calc(100dvh - var(--bar-h));
+    grid-template-columns: minmax(0, 1fr);
+    /* The second row only reserves the dock's footprint so the artifact is never underneath it;
+       the sheet itself is fixed. */
+    grid-template-rows: minmax(0, 1fr) calc(var(--dock-h) + env(safe-area-inset-bottom, 0px));
+  }
+  .frame {
+    padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+    background: var(--bg-bar);
+  }
+  .comments {
+    position: fixed;
+    z-index: 30;
+    top: calc(var(--vv-top, 0px) + var(--sheet-top));
+    right: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    height: calc(var(--vv-height, 100dvh) - var(--sheet-top));
+    padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+    border-left: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    /* The hairline is a shadow, not a border: a border would add to the sheet's box and push
+       the docked head one pixel past the viewport edge. */
+    box-shadow:
+      0 -1px 0 var(--border),
+      var(--shadow-floating);
+    /* Collapsed: slide everything but the dock below the viewport. The sheet keeps its full
+       height, so opening it is one transform and nothing reflows mid-gesture. */
+    transform: translateY(calc(100% - var(--dock-h) - env(safe-area-inset-bottom, 0px)));
+    transition: transform var(--dur-slow) var(--ease);
+    will-change: transform;
+  }
+  body.sheet-open .comments {
+    transform: none;
+  }
+  .comments.is-dragging {
+    transition: none;
+  }
+  .sheet-head {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    height: var(--dock-h);
+    padding: 6px 16px 0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  body:not(.sheet-open) .sheet-head {
+    height: calc(var(--dock-h) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .sheet-handle {
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 0 auto 6px;
+    border-radius: var(--radius-pill);
+    background: var(--border-strong);
+  }
+  .sheet-head-row {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .sheet-head h2 {
+    flex: 0 0 auto;
+    margin: 0;
+    font-size: var(--text-base);
+    font-weight: var(--w-semi);
+  }
+  .sheet-summary {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--fg-faint);
+    font-size: 12px;
+    line-height: 1.35;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sheet-summary:empty {
+    display: none;
+  }
+  .sheet-summary.is-accent {
+    color: var(--accent);
+    font-weight: var(--w-semi);
+  }
+  .sheet-summary.is-unread::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    vertical-align: 1px;
+  }
+  .sheet-toggle {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: var(--hairline);
+    border-radius: var(--radius-pill);
+    background: var(--bg-elevated);
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .sheet-toggle svg {
+    display: block;
+    transition: transform var(--dur) var(--ease);
+  }
+  body.sheet-open .sheet-toggle svg {
+    transform: rotate(180deg);
+  }
+  .sheet-head.is-fresh .sheet-toggle {
+    animation: dock-pulse 700ms var(--ease);
+  }
+  /* Stacked, in page order: the page thread first, then every placed card. */
+  .comments-body {
+    position: static;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 12px 12px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .margin-threads,
+  .margin-canvas {
+    position: static;
+    overflow: visible;
+  }
+  .margin-canvas {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .comment-thread,
+  .page-thread {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    min-width: 0;
+    transform: none;
+  }
+  .comment-thread.is-unplaced {
+    visibility: visible;
+  }
+  .comments-foot {
+    position: static;
+    flex: 0 0 auto;
+    padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-panel);
+    box-shadow: 0 -1px 0 var(--border-subtle);
+  }
+  .sheet-scrim {
+    display: block;
+    position: fixed;
+    inset: var(--bar-h) 0 0 0;
+    z-index: 29;
+    background: var(--scrim);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-slow) var(--ease);
+  }
+  body.sheet-open .sheet-scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .share-overlay {
+    align-items: start;
+    padding: var(--space-8);
+  }
+  .share-copy-row {
+    flex-direction: column;
+  }
+  .resolved-drawer {
+    position: fixed;
+    top: calc(var(--bar-h) + 6px);
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+}
+/* A phone on its side has no height to share: the raised sheet covers the bar as well (the sheet
+   carries its own close control). */
+@media (max-width: 860px) and (max-height: 520px) {
+  :root {
+    --sheet-top: var(--sheet-peek);
+  }
+  .sheet-scrim {
+    inset: 0;
+  }
+}
+@media (max-width: 860px) and (prefers-reduced-motion: reduce) {
+  .comments,
+  .sheet-scrim,
+  .sheet-toggle svg {
+    transition: none;
+  }
+  .sheet-head.is-fresh .sheet-toggle {
+    animation: none;
+  }
+}
+@keyframes dock-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-ring);
+  }
+  100% {
+    box-shadow: 0 0 0 10px transparent;
   }
 }

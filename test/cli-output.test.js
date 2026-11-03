@@ -294,7 +294,7 @@ test("home output warns agents that poll needs an observable wake path", () => {
   assert.doesNotMatch(pollHelp, /Codex/);
   assert.match(pollHelp, /re-run/);
   assert.match(pollHelp, /feedback remains queued until delivery/);
-  assert.match(pollHelp, /`Send & End` ends the session/);
+  assert.match(pollHelp, /`Send all and end session` ends the session/);
   assert.match(pollHelp, /final feedback is still delivered once/);
   assert.doesNotMatch(pollHelp, /above 10 minutes/);
 });
@@ -1741,7 +1741,7 @@ test("poll help requires an observable wake path", () => {
   assert.match(help, /feedback remains queued until delivery/);
   assert.match(help, /Do not pass --timeout-ms/);
   assert.match(help, /tests and debugging only/);
-  assert.match(help, /`Send & End` ends the session/);
+  assert.match(help, /`Send all and end session` ends the session/);
   assert.match(help, /final feedback is still delivered once/);
   assert.doesNotMatch(help, /above 10 minutes/);
 });

@@ -731,7 +731,7 @@ function main() {
       if (msg.ok) {
         const note = /** @type {HTMLInputElement | null} */ (document.getElementById("wbNote"));
         if (note) note.value = "";
-        showStatus("Queued. Review it in the conversation panel, then Send to Agent.");
+        showStatus("Saved as a page comment. Review it in the margin, then Send to agent.");
       } else {
         showStatus(`Queue failed: ${String(msg.error || "unknown error")}`, { transient: false });
       }
