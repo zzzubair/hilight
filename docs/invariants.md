@@ -242,6 +242,8 @@ The client is best-effort and must never affect CLI behavior - all errors are sw
   - The legend's per-row cap (`entries` in both `revisionLimits()` and the chrome's `REVISION_LIMITS`) must derive from the shared `revisionPalette()` length, not a second hardcoded number - a cap that outgrows the palette hands two revisions the same colour, border, and pattern.
   - The chrome re-validates the postMessage payload as untrusted input from a sandboxed frame: an id or selector over its length limit is rejected outright, never truncated, because a truncated id can collide with another revision's and a truncated selector is still valid CSS pointing somewhere else. `__proto__` is a legal revision id, so lookups use a `Map`/`Set`, never a plain object key.
 
+- The shared Revisions/Layout issues Reveal marker stays inside the excluded `[data-lavish-ui]` shadow host. It tracks the target's live viewport bounds for its whole flash, cancels prior tracking on another Reveal, and uses instant scrolling without a pulse for reduced motion. `test/reveal-element.browser.test.js` pins this against real scrolling.
+
 - The whiteboard has six easy-to-reintroduce failure modes, all covered by tests or explained in comments:
   - Mermaid skeletons must be materialized again after Excalidraw's scene fonts load; the first synchronous materialization uses a narrower browser-serif fallback and stores text bounds that clip the eventual Excalifont glyphs.
     Keep the font-load and second-conversion ordering in `convertExcalidrawSkeletonsAfterFontsLoad`, and keep the versioned saved-scene repair expansion-only so it never overwrites user geometry or content.
