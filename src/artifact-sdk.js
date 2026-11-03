@@ -2531,21 +2531,41 @@ export function createArtifactSdk(
 
   // Bring a warning's element into view and flash it. The marker is Lavish UI, so it is excluded
   // from the layout audit and never becomes a finding of its own.
+  let clearRevealMarker = () => {};
   function revealElement(selector) {
+    clearRevealMarker();
     const target = selector === "html" ? document.documentElement : safeQuerySelector(selector);
     if (!(target instanceof Element)) return;
-    target.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ block: "center", inline: "center", behavior: reducedMotion ? "instant" : "smooth" });
     const root = ensureShadow();
-    for (const el of [...root.querySelectorAll(".lavish-reveal-marker")]) el.remove();
-    const rect = target.getBoundingClientRect();
     const marker = document.createElement("div");
     marker.className = "lavish-reveal-marker";
-    marker.style.left = rect.left + "px";
-    marker.style.top = rect.top + "px";
-    marker.style.width = Math.max(rect.width, 4) + "px";
-    marker.style.height = Math.max(rect.height, 4) + "px";
+    if (reducedMotion) marker.style.animation = "none";
     root.appendChild(marker);
-    window.setTimeout(() => marker.remove(), 2400);
+    let frame = 0;
+    const timeout = window.setTimeout(() => clearRevealMarker(), 2400);
+    clearRevealMarker = () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+      marker.remove();
+      clearRevealMarker = () => {};
+    };
+    // Follow smooth scrolling, nested scrollports, and layout/viewport changes for the whole
+    // flash. A single pre-scroll rect is stale as soon as the browser starts scrolling.
+    function positionMarker() {
+      if (!target.isConnected) {
+        clearRevealMarker();
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      marker.style.left = rect.left + "px";
+      marker.style.top = rect.top + "px";
+      marker.style.width = Math.max(rect.width, 4) + "px";
+      marker.style.height = Math.max(rect.height, 4) + "px";
+      frame = window.requestAnimationFrame(positionMarker);
+    }
+    positionMarker();
   }
 
   // Capture phase so the mode hotkey fires no matter where focus is inside the artifact -
