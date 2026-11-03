@@ -237,7 +237,7 @@ export function createDesignOutput() {
     },
     revision_marking: {
       use_when:
-        "Opt-in only: on a regeneration that answers the reviewer's feedback, declare what you changed so the browser can show a Revisions legend. Skip it on a first draft, and skip it when you rewrote the whole artifact - a legend that marks everything says nothing.",
+        "Opt-in only: on a regeneration that answers the reviewer's feedback, declare what you changed so a thread reply can offer Reveal change (`## c1 reveal=<id>`). Skip it on a first draft, and skip it when you rewrote the whole artifact - a revision that marks everything says nothing.",
       registry_snippet: REVISION_REGISTRY_SNIPPET,
       how: 'Append one entry per round to the `data-lavish-revisions` JSON (oldest first, stable `id`s), and put `data-lavish-revision="<id>"` on each block you actually edited or added. Lavish reads them and never restyles the page, so the saved file looks the same opened directly.',
     },

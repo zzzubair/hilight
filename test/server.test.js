@@ -590,11 +590,12 @@ test("annotation card does not block its own Queue button", () => {
   assert.doesNotMatch(js, /card\.addEventListener\('click',event=>event\.stopPropagation\(\),true\)/);
 });
 
-test("annotation card labels its submit action as Send", () => {
+test("annotation card labels its submit action as Save, because Enter only saves a draft", () => {
   const js = createSdkJs("abc");
 
-  assert.match(js, />Send<\/button>/);
-  assert.doesNotMatch(js, /Queue Prompt/);
+  assert.match(js, /class="lavish-send" type="button">Save<\/button>/);
+  assert.match(js, /Enter saves a draft/);
+  assert.doesNotMatch(js, />Send<\/button>/);
 });
 
 test("annotation card keeps the selected element highlighted while open", () => {
@@ -764,7 +765,7 @@ test("annotation card shadow styles use Lavish design-system variables", () => {
   const js = createSdkJs("abc");
 
   assert.match(js, /--ink-900:#0f1115/);
-  assert.match(js, /--accent:#f4c95d/);
+  assert.match(js, /--accent:#5aa9ff/);
   assert.match(js, /--font-sans:/);
   assert.match(js, /font-family:var\(--font-sans\)/);
   assert.match(js, /:focus-visible\{outline:2px solid var\(--accent\);outline-offset:2px/);
@@ -792,27 +793,26 @@ test("annotate switch shows a brass track and ink knob when enabled", async () =
 test("chrome declares the Lavish design-system tokens", async () => {
   const css = await chromeCssSource();
 
-  assert.match(css, /--ink-900:#0f1115/);
-  assert.match(css, /--cream-100:#f7f3ea/);
-  assert.match(css, /--brass-500:#f4c95d/);
-  assert.match(css, /--font-serif:/);
-  assert.match(css, /--font-sans:/);
-  assert.match(css, /--text-display:92px/);
-  assert.match(css, /--lh-display:1/);
-  assert.match(css, /--space-32:64px/);
-  assert.match(css, /--shadow-floating:0 20px 70px rgba\(0,0,0,.35\)/);
+  // Lavish's own identity: monochrome grays, one cool accent, system font, dark first with a
+  // light flip. None of the cream, brass or serif tokens the old chrome shared with other tools.
+  assert.match(css, /:root\{color-scheme:dark;/);
+  assert.match(css, /--blue:#5aa9ff/);
+  assert.match(css, /--accent:var\(--blue\)/);
+  assert.match(css, /--font-sans:system-ui,/);
+  assert.match(css, /@media \(prefers-color-scheme:light\)\{:root\{color-scheme:light;/);
   assert.match(css, /--ease:cubic-bezier\(.2,.6,.2,1\)/);
   assert.match(css, /--dur-slow:320ms/);
-  assert.match(css, /--bar-h:56px/);
-  assert.match(css, /--panel-w:360px/);
+  assert.match(css, /--bar-h:48px/);
+  assert.match(css, /--margin-w:320px/);
+  assert.doesNotMatch(css, /--font-serif|--brass-|--cream-|--panel-w|EB Garamond/);
 });
 
 test("artifact SDK uses design-token aliases for annotation highlight and shadow UI", () => {
   const js = createSdkJs("abc");
 
-  assert.match(js, /--lavish-accent:#f4c95d/);
+  assert.match(js, /--lavish-accent:#5aa9ff/);
   assert.match(js, /--lavish-annotate-outline:2px solid var\(--lavish-accent\)/);
-  assert.match(js, /el\.style\.outline\s*=\s*["']var\(--lavish-annotate-outline,2px solid #f4c95d\)["']/);
+  assert.match(js, /el\.style\.outline\s*=\s*["']var\(--lavish-annotate-outline,2px solid #5aa9ff\)["']/);
   assert.match(js, /el\.style\.outlineOffset\s*=\s*["']var\(--lavish-annotate-offset,2px\)["']/);
   assert.match(js, /--fg-faint:var\(--steel-300\)/);
   assert.match(js, /textarea::placeholder\{color:var\(--fg-faint\)\}/);
@@ -827,39 +827,41 @@ test("chrome uses the annotation outline as the keyboard focus outline", async (
   assert.match(css, /--annotate-offset:2px/);
 });
 
-test("chrome page ships the phone conversation dock and the viewport contract it relies on", () => {
+test("chrome page ships the phone comments dock and the viewport contract it relies on", () => {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
 
   // Safe-area insets are zero unless the page opts into the full screen, and an on-screen
-  // keyboard covers a bottom-anchored composer on Android unless the layout viewport resizes.
+  // keyboard covers a bottom-anchored reply box on Android unless the layout viewport resizes.
   const viewport = html.match(/<meta name="viewport" content="([^"]+)">/)?.[1] || "";
   assert.match(viewport, /\bviewport-fit=cover\b/);
   assert.match(viewport, /\binteractive-widget=resizes-content\b/);
 
   // The dock is a real disclosure control: a labelled button with expanded state over the
-  // panel it reveals, a live summary, and a scrim the sheet rises over.
-  assert.match(html, /<aside class="panel" id="panel">/);
-  assert.match(html, /<div class="panel-scrim" id="panelScrim"><\/div>/);
+  // comments it reveals, a live summary, and a scrim the sheet rises over.
+  assert.match(html, /<aside class="comments" id="comments" aria-label="Comments">/);
+  assert.match(html, /<div class="sheet-scrim" id="sheetScrim"><\/div>/);
   assert.match(
     html,
-    /<button class="panel-toggle" id="panelToggle" type="button" aria-expanded="false" aria-controls="panel" aria-label="Show conversation">/,
+    /<button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="comments" aria-label="Show comments">/,
   );
-  assert.match(html, /<span class="panel-summary" id="panelSummary" role="status" aria-live="polite"><\/span>/);
+  assert.match(html, /<span class="sheet-summary" id="sheetSummary" role="status" aria-live="polite"><\/span>/);
 });
 
-test("chrome top bar follows the design mock wordmark and overflow menu treatment", async () => {
+test("chrome top bar is a sans wordmark, the agent status, Annotate and the overflow menu", async () => {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
   const css = await chromeCssSource();
 
-  assert.match(html, /class="brand-mark">Lavish/);
-  assert.match(html, /class="brand-support">Editor/);
-  assert.match(css, /font-family:var\(--font-serif\)/);
-  assert.match(css, /letter-spacing:\.18em/);
+  assert.match(html, /class="brand-mark">lavish</);
+  assert.match(html, /class="brand-file" title="\/tmp\/artifact.html">artifact.html</);
+  assert.match(html, /class="agent-status" id="agentStatus" role="status"[^>]*>Not listening</);
+  assert.doesNotMatch(css, /font-serif|font-style:italic/);
   assert.match(html, /class="more-button" id="moreButton"/);
   assert.match(html, /class="menu more-menu" id="moreMenu" hidden/);
-  assert.doesNotMatch(html, /class="file-input"/);
-  assert.doesNotMatch(html, /class="divider"/);
-  assert.doesNotMatch(html, /class="file-icon"/);
+  // What the conversation panel used to hold now lives in the overflow menu.
+  assert.match(html, /id="attachImages"[^>]*>.*Attach images to a page comment/);
+  assert.match(html, /id="sendAndEnd"[^>]*>.*Send all and end session/);
+  // Revisions live only in thread replies (`reveal=<rev>`); the bar has no legend or panel toggle.
+  assert.doesNotMatch(html, /revisionsButton|revisionsDrawer|sidebarToggle|id="panel"/);
 });
 
 test("overflow menu shows the artifact path with a copy affordance", async () => {
@@ -1013,33 +1015,30 @@ test("clipboard copy falls back when navigator clipboard rejects", async () => {
   assert.doesNotMatch(js, /navigator\.clipboard\.writeText\(text\)\.catch/);
 });
 
-test("chrome centers the top bar row while bottom-aligning the identity cluster", async () => {
+test("chrome centers the top bar row while baseline-aligning the identity cluster", async () => {
   const css = await chromeCssSource();
 
   assert.match(css, /\.bar\{[^}]*align-items:center/);
-  assert.match(css, /\.brand\{[^}]*height:22px/);
-  assert.match(css, /\.brand\{[^}]*align-items:flex-end/);
+  assert.match(css, /\.brand\{[^}]*align-items:baseline/);
 });
 
-test("chrome chat bubbles follow the preview mock shades", async () => {
+test("a compact margin card is exactly the height the placement code reserves for it", async () => {
   const css = await chromeCssSource();
+  const js = await chromeClientSource();
 
-  assert.match(css, /\.bubble\.user\{[^}]*background:var\(--bg-elevated\)/);
-  assert.match(css, /\.bubble\.user\{[^}]*border-color:var\(--border-strong\)/);
-  assert.match(css, /\.bubble\.agent\{[^}]*background:transparent/);
-  assert.match(css, /\.bubble\.agent\{[^}]*border-color:var\(--border-subtle\)/);
-  assert.match(css, /border-top-color:var\(--accent\)/);
+  const compact = css.match(/\.comment-thread\.is-compact\{[^}]*height:(\d+)px/)?.[1];
+  assert.ok(compact, "compact cards pin a height");
+  assert.match(js, new RegExp("const THREAD_COMPACT_HEIGHT = " + compact + ";"));
 });
 
-test("chrome includes a chat-like prompt composer and agent reply listener", async () => {
+test("chrome has no conversation panel: general notes go to the page thread", async () => {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
   const js = await chromeClientSource();
 
-  assert.match(html, /id="chatLog"/);
-  const css = await chromeCssSource();
-  assert.match(css, /\.chat:empty::before\{/);
-  assert.match(css, /Agent hasn't sent a message yet/);
-  assert.match(html, /id="chatInput"/);
+  assert.doesNotMatch(html, /id="chatLog"|id="queuedLog"|>Conversation</);
+  assert.match(html, /<section class="comment-thread page-thread" id="pageThread" data-thread-id="page"/);
+  assert.match(html, /id="pageThread"[\s\S]*id="chatInput"[\s\S]*<\/section>/);
+  assert.match(html, /<button class="button send-button" id="send" type="button">Send to agent<\/button>/);
   assert.match(js, /agent-reply/);
 });
 
@@ -1054,18 +1053,18 @@ test("chrome bootstraps persisted chat history so missed replies still appear", 
   assert.match(html, /Persisted reply/);
 });
 
-test("chrome client renders persisted chat history", async () => {
+test("chrome client renders persisted chat history in the page thread", async () => {
   const js = await chromeClientSource();
 
-  assert.match(js, /initialChat\.forEach/);
+  assert.match(js, /displayedChat\.filter\(isPageChatEntry\)/);
 });
 
-test("chrome shows agent working state when a previous poll has released", async () => {
+test("chrome shows the agent's state as one word in the top bar", async () => {
   const js = await chromeClientSource();
 
   assert.match(js, /agent-presence/);
-  assert.match(js, /Working\.\.\./);
-  assert.match(js, /spinner/);
+  for (const word of ["Not listening", "Listening", "Working", "Ended"]) assert.match(js, new RegExp('"' + word + '"'));
+  assert.doesNotMatch(js, /Working\.\.\.|class="spinner"/);
 });
 
 test("takeover banner explains draft ownership before offering takeover", () => {
@@ -1073,27 +1072,22 @@ test("takeover banner explains draft ownership before offering takeover", () => 
   const banner = html.match(/id="handoffBanner"[^>]*>([\s\S]*?)<\/div>/)?.[1] || "";
   assert.match(
     banner,
-    /<span>This review is open in another Lavish tab\. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along\.<\/span>/,
+    /<span>This review is open in another Lavish tab\. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along\.<\/span>/,
   );
   assert.doesNotMatch(banner, /switch back there/i);
   assert.match(banner, /id="handoffTakeover"[^>]*>Take over here/);
 });
 
-test("composer offers two always-visible top-level send actions", async () => {
+test("one Send to agent button at the foot of the margin delivers every draft", async () => {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
-  const css = await chromeCssSource();
 
-  assert.match(html, /class="button" id="send">Send to Agent</);
-  assert.match(html, /class="button button-danger" id="sendAndEnd"[^<]*>.*Send &amp; End</);
   assert.match(
     html,
-    /<div class="send-hint" id="sendHint" hidden>Nothing queued in this tab\. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along\.<\/div><div class="actions" id="sendActions"><button class="button button-danger" id="sendAndEnd" type="button">.*<button class="button" id="send">Send to Agent<\/button><\/div>/,
+    /<div class="comments-foot" id="commentsFoot">.*<div class="send-hint" id="sendHint" hidden>Nothing to send yet\. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along\.<\/div><button class="button send-button" id="send" type="button">Send to agent<\/button><\/div><\/aside>/,
   );
-  assert.doesNotMatch(html, /id="sendCaret"/);
-  assert.doesNotMatch(html, /id="sendMenu"/);
-  assert.doesNotMatch(html, /id="sendFromMenu"/);
-  assert.match(css, /\.button-danger\{[^}]*color:var\(--danger\)/);
-  assert.match(css, /\.actions\{[^}]*min-width:0/);
+  // Ending is rarer than sending, so it waits in the overflow menu rather than beside Send.
+  assert.match(html, /id="moreMenu"[\s\S]*id="sendAndEnd"/);
+  assert.doesNotMatch(html, /id="sendCaret"|id="sendMenu"|id="sendFromMenu"|id="sendActions"/);
 });
 
 test("chrome only marks session ended after the end request succeeds", async () => {
@@ -1104,29 +1098,23 @@ test("chrome only marks session ended after the end request succeeds", async () 
   assert.match(js, /if \(!response\.ok\) throw new Error\("failed to end session"\);\n {2}markSessionEnded\(\)/);
 });
 
-test("chrome shows a waiting banner when no agent has attached", async () => {
+test("chrome says Not listening in the bar when no agent has attached", async () => {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
   const js = await chromeClientSource();
-  const css = await chromeCssSource();
 
-  assert.match(html, /id="presenceBanner"/);
-  assert.match(html, /Your agent is not listening/);
-  assert.match(js, /presenceBanner\.hidden = ended \|\| agentPresence !== "waiting"/);
-  assert.match(css, /\.presence-banner\{/);
+  assert.match(html, /id="agentStatus"[^>]*data-state="waiting"[^>]*>Not listening</);
+  assert.match(js, /agentStatus\.dataset\.state = ended \? "ended" : agentPresence/);
+  assert.doesNotMatch(html, /id="presenceBanner"/);
 });
 
-test("chrome keeps queued notes at the tail of the one conversation, above the sticky composer", async () => {
+test("chrome stacks the page thread over the margin canvas inside one comments column", async () => {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
 
-  // The queued log is the last child of the same scroll region as the transcript, so a queued
-  // note is the end of the conversation rather than a second region with its own grammar. The
-  // comment-thread list leads that region, ahead of the transcript.
   assert.match(
     html,
-    /<div class="panel-scroll" id="panelScroll"><div id="threadList" class="thread-list"><\/div><div class="chat" id="chatLog"><\/div><div class="chat chat-queued" id="queuedLog"><\/div><\/div><div class="composer" id="chatComposer">/,
+    /<div class="comments-body" id="commentsBody"><section class="comment-thread page-thread" id="pageThread"[\s\S]*<\/section><div id="marginThreads" class="margin-threads"><div id="marginThreadCanvas" class="margin-canvas"><\/div><\/div><\/div><div class="comments-foot" id="commentsFoot">/,
   );
-  assert.doesNotMatch(html, /annotation-pills/);
-  assert.doesNotMatch(html, /<h2>Queued Annotations<\/h2>/);
+  assert.doesNotMatch(html, /annotation-pills|Queued Annotations|id="threadList"/);
 });
 
 test("chrome client script is valid JavaScript", async () => {
@@ -1141,16 +1129,13 @@ test("chrome omits the extra conversation description copy", () => {
   assert.doesNotMatch(html, /Annotate elements in the artifact, or write a freeform message below/);
 });
 
-test("composer textarea is sized within the right panel", async () => {
+test("the comments column and its boxes are sized within the layout", async () => {
   const css = await chromeCssSource();
 
   assert.match(css, /\.layout\{[^}]*min-height:0/);
-  assert.match(css, /\.panel\{[^}]*min-height:0/);
-  assert.match(css, /\.panel-scroll\{[^}]*min-height:0/);
-  assert.match(css, /\.chat\{[^}]*min-height:0/);
-  assert.match(css, /\.composer\{[^}]*min-width:0/);
-  assert.match(css, /\.composer\{[^}]*flex-shrink:0/);
-  assert.match(css, /\.composer textarea\{[^}]*box-sizing:border-box/);
+  assert.match(css, /\.layout\{[^}]*grid-template-columns:minmax\(0,1fr\) var\(--margin-w\)/);
+  assert.match(css, /\.comments\{[^}]*min-height:0/);
+  assert.match(css, /\.thread-reply textarea,\.thread-edit-input\{[^}]*width:100%/);
 });
 
 test("hot reload navigates the iframe by URL, replacing its history entry, never by reloading it", async () => {
@@ -3592,10 +3577,10 @@ test("/chrome.css serves the extracted chrome stylesheet", async () => {
 
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /text\/css/);
-    assert.match(normalizeCssForAssertions(body), /--ink-900:#0f1115/);
+    assert.match(normalizeCssForAssertions(body), /--accent:var\(--blue\)/);
     assert.match(
       normalizeCssForAssertions(body),
-      /\.layout\{[^}]*grid-template-columns:minmax\(0,1fr\) ?var\(--panel-w\)/,
+      /\.layout\{[^}]*grid-template-columns:minmax\(0,1fr\) ?var\(--margin-w\)/,
     );
   } finally {
     await server.close();
@@ -6449,8 +6434,8 @@ test("ended session shows an overlay card over the dimmed chrome", async () => {
   assert.match(html, /class="ended-copy">\/tmp\/artifact\.html</);
   assert.doesNotMatch(html, /The agent polling loop can stop\./);
   assert.match(css, /\.ended-overlay\{[^}]*inset:var\(--bar-h\) 0 0 0/);
-  assert.match(css, /\.ended-overlay\{[^}]*background:rgba\(15,17,21,.86\)/);
-  assert.match(css, /\.ended-title\{[^}]*font-family:var\(--font-serif\)/);
+  assert.match(css, /\.ended-overlay\{[^}]*background:var\(--scrim\)/);
+  assert.match(css, /\.ended-title\{[^}]*font-weight:var\(--w-semi\)/);
   assert.match(js, /endedOverlay\.hidden = false/);
   assert.match(js, /annotationSwitch\.disabled = true/);
   assert.match(js, /moreButton\.disabled = true/);
@@ -6487,15 +6472,18 @@ test("annotation card queues prompt on Enter and inserts newline on Shift+Enter"
   assert.match(js, /event\.key === ["']Enter["'] && !event\.shiftKey/);
   assert.match(js, /event\.preventDefault\(\)/);
   // Enter routes through tryQueue(), which gates on in-flight uploads (R2.4).
-  assert.match(js, /const queued = tryQueue\(\)/);
+  assert.match(js, /event\.preventDefault\(\);\s*tryQueue\(\);/);
 });
 
-test("annotation card sends straight away on Enter, keeping Shift+Enter for a new line", () => {
+test("annotation card saves a draft on Enter and never sends from the card", () => {
   const js = createSdkJs("abc");
 
-  assert.match(js, /if \(queued && sendNow\) sendQueuedPrompts\(\)/);
+  // Batch review: Enter (and the Save button) only queue the comment. The reviewer sends every
+  // draft at once from the chrome's margin.
+  assert.doesNotMatch(js, /sendNow/);
+  assert.match(js, /sendButton\.onclick = \(\) => \{\s*tryQueue\(\);\s*\};/);
   assert.match(js, /class="lavish-hint"/);
-  assert.match(js, /Enter to send &middot; Shift\+Enter for a new line &middot; Esc to close/);
+  assert.match(js, /Enter saves a draft &middot; Shift\+Enter for a new line &middot; Esc to close/);
   assert.match(js, /\.lavish-annotation-card \.lavish-hint\{/);
 });
 

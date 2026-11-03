@@ -16,8 +16,6 @@ const reviewStateStorageKey = "lavish-axi:review-state:" + key;
 // Drafts Lavish could not replay. The text outlives the draft that carried it, so the user can
 // still read and copy it after the anchor it was written against is gone for good.
 const retiredDraftStorageKey = "lavish-axi:retired-drafts:" + key;
-/** @type {any[]} */
-const retiredDraftNodes = [];
 const internalQueueKeyField = "_lavishQueueKey";
 const promptIdentityField = "prompt_id";
 const PROMPT_IDENTITY_MAX = 128;
@@ -29,15 +27,29 @@ const threadDraftStorageKey = "lavish-axi:thread-drafts:" + key;
 const threadDrafts = new Map(Object.entries(loadJsonState(threadDraftStorageKey, {})));
 let activeThreadId = "";
 let openThreadId = "";
-const THREAD_CARD_GAP = 10;
-const THREAD_COLLAPSE_AFTER = 3;
+// The whole-page thread: notes not tied to an element and agent replies outside any `## c<n>`
+// section. It is the transcript minus the anchored threads, so it needs no server-side record.
+const PAGE_THREAD_ID = "page";
+const THREAD_CARD_GAP = 8;
+// A resting card shows its root comment and its latest reply; the middle folds behind a count.
+const THREAD_COLLAPSE_AFTER = 2;
+// A compact card is one header line. chrome.css pins `.comment-thread.is-compact` to this height,
+// so placement never has to measure one.
+const THREAD_COMPACT_HEIGHT = 34;
 const NON_THREAD_TAGS = new Set(["message", "whiteboard", "layout-warnings"]);
 const threadCardCache = new Map();
-/** @type {HTMLDetailsElement | null} */
-let threadArchive = null;
-/** @type {HTMLElement | null} */
-let threadArchiveSummary = null;
+// Measured resting heights by thread id. Placement runs on every artifact scroll frame, so it
+// reads only these and the open card; a rebuilt card or a resize clears its entry.
+/** @type {Map<string, number>} */
+const threadHeights = new Map();
+let pageBarHeight = 0;
 let lastThreadAnchors = "[]";
+let pageSignature = "";
+let resolvedDrawerOpen = false;
+let resolveToastTimer;
+let resolveToastThreadId = "";
+const RESOLVE_TOAST_MS = 6000;
+const pageDraftStorageKey = "lavish-axi:page-draft:" + key;
 const initialChat = Array.isArray(sessionData.initialChat) ? sessionData.initialChat : [];
 const initialChatAckIds = Array.isArray(sessionData.initialChatAckIds) ? sessionData.initialChatAckIds : [];
 const initialChatRevision = parseChatRevision(sessionData.initialChatRevision) || 0;
@@ -121,22 +133,31 @@ function isModeToggleHotkeyEvent(event) {
 }
 
 const frame = /** @type {HTMLIFrameElement} */ (document.getElementById("artifact"));
-const panelScroll = /** @type {HTMLDivElement} */ (document.getElementById("panelScroll"));
-const queuedLog = /** @type {HTMLDivElement} */ (document.getElementById("queuedLog"));
-const chatLog = /** @type {HTMLDivElement} */ (document.getElementById("chatLog"));
-const chatComposer = /** @type {HTMLDivElement} */ (document.getElementById("chatComposer"));
 const chatInput = /** @type {HTMLTextAreaElement} */ (document.getElementById("chatInput"));
 const chatAttachments = /** @type {HTMLDivElement} */ (document.getElementById("chatAttachments"));
 const chatAttachButton = /** @type {HTMLButtonElement} */ (document.getElementById("chatAttach"));
 const chatAttachInput = /** @type {HTMLInputElement} */ (document.getElementById("chatAttachInput"));
 const chatAttachmentNotice = /** @type {HTMLSpanElement} */ (document.getElementById("chatAttachmentNotice"));
-const panel = /** @type {HTMLElement} */ (document.getElementById("panel"));
-const panelHead = /** @type {HTMLDivElement} */ (document.getElementById("panelHead"));
-const panelSummary = /** @type {HTMLSpanElement} */ (document.getElementById("panelSummary"));
-const panelToggle = /** @type {HTMLButtonElement} */ (document.getElementById("panelToggle"));
-const panelScrim = /** @type {HTMLDivElement} */ (document.getElementById("panelScrim"));
-const sidebarToggle = /** @type {HTMLButtonElement} */ (document.getElementById("sidebarToggle"));
-const sidebarToggleCount = /** @type {HTMLSpanElement} */ (document.getElementById("sidebarToggleCount"));
+const comments = /** @type {HTMLElement} */ (document.getElementById("comments"));
+const commentsBody = /** @type {HTMLDivElement} */ (document.getElementById("commentsBody"));
+const commentsFoot = /** @type {HTMLDivElement} */ (document.getElementById("commentsFoot"));
+const sheetHead = /** @type {HTMLDivElement} */ (document.getElementById("sheetHead"));
+const sheetSummaryText = /** @type {HTMLSpanElement} */ (document.getElementById("sheetSummary"));
+const sheetToggle = /** @type {HTMLButtonElement} */ (document.getElementById("sheetToggle"));
+const sheetScrim = /** @type {HTMLDivElement} */ (document.getElementById("sheetScrim"));
+const pageThread = /** @type {HTMLElement} */ (document.getElementById("pageThread"));
+const pageMessages = /** @type {HTMLOListElement} */ (document.getElementById("pageMessages"));
+const pageThreadStatus = /** @type {HTMLSpanElement} */ (document.getElementById("pageThreadStatus"));
+const agentStatus = /** @type {HTMLSpanElement} */ (document.getElementById("agentStatus"));
+const resolvedWrap = /** @type {HTMLDivElement} */ (document.getElementById("resolvedWrap"));
+const resolvedButton = /** @type {HTMLButtonElement} */ (document.getElementById("resolvedButton"));
+const resolvedCount = /** @type {HTMLSpanElement} */ (document.getElementById("resolvedCount"));
+const resolvedDrawer = /** @type {HTMLDivElement} */ (document.getElementById("resolvedDrawer"));
+const resolvedList = /** @type {HTMLDivElement} */ (document.getElementById("resolvedList"));
+const resolveToast = /** @type {HTMLDivElement} */ (document.getElementById("resolveToast"));
+const resolveToastText = /** @type {HTMLSpanElement} */ (document.getElementById("resolveToastText"));
+const resolveUndoButton = /** @type {HTMLButtonElement} */ (document.getElementById("resolveUndo"));
+const attachImagesButton = /** @type {HTMLButtonElement} */ (document.getElementById("attachImages"));
 const sendButton = /** @type {HTMLButtonElement} */ (document.getElementById("send"));
 const sendAndEndButton = /** @type {HTMLButtonElement} */ (document.getElementById("sendAndEnd"));
 const annotationSwitch = /** @type {HTMLButtonElement} */ (document.getElementById("annotation"));
@@ -173,7 +194,6 @@ const endButton = /** @type {HTMLButtonElement} */ (document.getElementById("end
 const copyPathButton = /** @type {HTMLButtonElement} */ (document.getElementById("copyPath"));
 const copyHint = /** @type {HTMLSpanElement} */ (document.getElementById("copyHint"));
 const copyHintText = /** @type {HTMLSpanElement} */ (document.getElementById("copyHintText"));
-const presenceBanner = /** @type {HTMLDivElement} */ (document.getElementById("presenceBanner"));
 const handoffBanner = /** @type {HTMLDivElement} */ (document.getElementById("handoffBanner"));
 const handoffTakeoverButton = /** @type {HTMLButtonElement} */ (document.getElementById("handoffTakeover"));
 const outdatedBanner = /** @type {HTMLDivElement} */ (document.getElementById("outdatedBanner"));
@@ -196,12 +216,6 @@ const warningsSelectAll = /** @type {HTMLInputElement} */ (document.getElementBy
 const warningsSelected = /** @type {HTMLSpanElement} */ (document.getElementById("warningsSelected"));
 const warningsList = /** @type {HTMLDivElement} */ (document.getElementById("warningsList"));
 const warningsQueueButton = /** @type {HTMLButtonElement} */ (document.getElementById("warningsQueueButton"));
-const revisionsWrap = /** @type {HTMLDivElement} */ (document.getElementById("revisionsWrap"));
-const revisionsButton = /** @type {HTMLButtonElement} */ (document.getElementById("revisionsButton"));
-const revisionsCount = /** @type {HTMLSpanElement} */ (document.getElementById("revisionsCount"));
-const revisionsDrawer = /** @type {HTMLDivElement} */ (document.getElementById("revisionsDrawer"));
-const revisionsSummary = /** @type {HTMLParagraphElement} */ (document.getElementById("revisionsSummary"));
-const revisionsList = /** @type {HTMLDivElement} */ (document.getElementById("revisionsList"));
 const sendHint = /** @type {HTMLDivElement} */ (document.getElementById("sendHint"));
 const whiteboardOverlay = /** @type {HTMLDivElement} */ (document.getElementById("whiteboardOverlay"));
 const whiteboardFrame = /** @type {HTMLIFrameElement} */ (document.getElementById("whiteboardFrame"));
@@ -259,7 +273,6 @@ let warningsDrawerOpen = false;
 const snapshotRequests = new Map();
 let nextSnapshotRequestId = 0;
 let nextSendOperationOrder = 0;
-let workingBubble = null;
 let displayedChat = initialChat.slice();
 let chatRevision = initialChatRevision;
 // Settlement is by per-submission identity, not displayed content: two tabs can queue notes
@@ -326,9 +339,9 @@ const SNAPSHOT_REQUEST_TIMEOUT_MS = 5000;
 const SEND_STALLED_COPY =
   "Still trying to send. Your feedback is saved in this tab. Keep this tab open while Lavish catches up, and check that the server is running.";
 const SEND_FAILED_COPY =
-  "Could not send. Your feedback is still queued in this tab. Check that Lavish is running, then click Send to Agent to retry.";
+  "Could not send. Your comments are still saved in this tab. Check that Lavish is running, then click Send to agent to retry.";
 const TERMINAL_SEND_FAILED_COPY =
-  "Could not send. Your terminal feedback is still queued in this tab. Check that Lavish is running, then click Send & End to retry the same batch.";
+  "Could not send. Your comments are still saved in this tab. Check that Lavish is running, then choose Send all and end session in the More menu to retry the same batch.";
 const HEALTH_NO_ANSWER_TITLE = "Lavish did not answer.";
 const HEALTH_NO_ANSWER_COPY =
   "Lavish did not answer the check, so this page cannot tell whether it is running. Try again in a moment.";
@@ -511,10 +524,6 @@ function persistTerminalReservation(reserved) {
   }
 }
 
-const REMOVE_ICON_SVG =
-  '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
-const EDIT_ICON_SVG =
-  '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M6.5 1.5L8.5 3.5L3.5 8.5H1.5V6.5L6.5 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
 const ANCHOR_EXCERPT_MAX = 120;
 const ANCHOR_SELECTOR_MAX = 512;
 const ANCHOR_LABEL_MAX = 40;
@@ -580,87 +589,11 @@ function promptAnchor(prompt) {
   });
 }
 
-// The anchor line: a mono chip naming the kind (`<h2>`, `text`, `cell`, ...) and a quoted
-// excerpt, with the full excerpt and selector on hover.
-function anchorHtml(anchor) {
-  if (!anchor || typeof anchor !== "object") return "";
-  const excerpt = String(anchor.excerpt || "");
-  const title = [excerpt, anchor.selector].filter(Boolean).join("\n");
-  return (
-    '<div class="anchor" title="' +
-    escapeHtml(title) +
-    '"><span class="anchor-kind">' +
-    escapeHtml(anchor.label || "") +
-    "</span>" +
-    (excerpt
-      ? '<span class="anchor-excerpt' +
-        (anchor.kind === "text" ? " text" : "") +
-        '">\u201C' +
-        escapeHtml(excerpt) +
-        "\u201D</span>"
-      : "") +
-    "</div>"
-  );
-}
-
 // What a note with images and no words says for itself. A queued prompt keeps its words in
 // `prompt` (`text` is the element's excerpt); a transcript entry keeps them in `text`.
 function attachmentOnlyText(entry) {
   if (!attachmentCount(entry)) return "";
   return entry.tag === "message" || entry.kind === "message" ? "Image message" : "Image annotation";
-}
-
-function userBubbleTextHtml(entry, text) {
-  const displayText = String(text || attachmentOnlyText(entry));
-  return displayText ? '<div class="bubble-text">' + escapeHtml(displayText) + "</div>" : "";
-}
-
-// A queued note is the user bubble in its not-yet-sent state: dashed, labelled Queued (Sending
-// while its batch is in flight), and editable and removable until then. It settles in place as a
-// sent bubble once the server's transcript carries it, so nothing moves between regions.
-function queuedBubbleHtml(prompt, index) {
-  const sending = isPromptSending(prompt);
-  if (!sending && editingPromptId && promptIdentity(prompt) === editingPromptId) {
-    return queuedEditorHtml(prompt, index);
-  }
-  return (
-    '<div class="bubble user queued" data-index="' +
-    index +
-    '"><small>' +
-    (sending ? "Sending\u2026" : "Queued") +
-    ' <button class="queued-edit" type="button" aria-label="Edit queued prompt" data-index="' +
-    index +
-    '">' +
-    EDIT_ICON_SVG +
-    '</button><button class="queued-remove" type="button" aria-label="Remove queued prompt" data-index="' +
-    index +
-    '">' +
-    REMOVE_ICON_SVG +
-    "</button></small>" +
-    anchorHtml(promptAnchor(prompt)) +
-    userBubbleTextHtml(prompt, prompt.prompt) +
-    bubbleAttachmentsHtml(prompt) +
-    "</div>"
-  );
-}
-
-// The same bubble while its words are being revised. The anchor and images stay as they were:
-// an edit changes what the note says, not what it points at.
-function queuedEditorHtml(prompt, index) {
-  return (
-    '<div class="bubble user queued editing" data-index="' +
-    index +
-    '"><small>Editing</small>' +
-    anchorHtml(promptAnchor(prompt)) +
-    '<textarea class="queued-edit-input" aria-label="Edit queued prompt" data-index="' +
-    index +
-    '">' +
-    escapeHtml(editingDraft) +
-    '</textarea><div class="queued-edit-actions"><button class="queued-edit-cancel" type="button">Cancel</button>' +
-    '<button class="queued-edit-save" type="button">Save</button></div>' +
-    bubbleAttachmentsHtml(prompt) +
-    "</div>"
-  );
 }
 
 // Whether a queued prompt is committed to a send that has not been answered yet: waiting for its
@@ -684,49 +617,16 @@ function render() {
   const editing = editingPromptId ? queued.find((prompt) => promptIdentity(prompt) === editingPromptId) : null;
   // A note that left the queue or started sending takes its editor with it.
   if (editingPromptId && (!editing || !isPromptEditable(editing))) endQueuedEdit();
-  const keepEditFocus = editFocusPending || queuedLog.contains(document.activeElement);
-  // A re-render while the reviewer is typing keeps their caret and scroll; only a freshly opened
-  // edit starts at the end of its words.
-  const previousInput = /** @type {HTMLTextAreaElement | null} */ (queuedLog.querySelector(".queued-edit-input"));
-  const caret =
-    !editFocusPending && previousInput && previousInput === document.activeElement
-      ? {
-          start: previousInput.selectionStart,
-          end: previousInput.selectionEnd,
-          direction: previousInput.selectionDirection,
-          scrollTop: previousInput.scrollTop,
-        }
-      : null;
-  editFocusPending = false;
-  queuedLog.innerHTML = queued.map((prompt, index) => queuedBubbleHtml(prompt, index)).join("");
-
-  for (const button of queuedLog.querySelectorAll(".queued-remove")) {
-    const removeButton = /** @type {HTMLButtonElement} */ (button);
-    const prompt = queued[Number(removeButton.dataset.index)];
-    removeButton.disabled = terminalSubmission !== null || isPromptSending(prompt);
-    removeButton.addEventListener("click", (event) => removeQueuedPrompt(Number(removeButton.dataset.index), event));
-  }
-  for (const button of queuedLog.querySelectorAll(".queued-edit")) {
-    const editButton = /** @type {HTMLButtonElement} */ (button);
-    editButton.disabled = !isPromptEditable(queued[Number(editButton.dataset.index)]);
-  }
-  if (editingPromptId && keepEditFocus) {
-    const input = /** @type {HTMLTextAreaElement | null} */ (queuedLog.querySelector(".queued-edit-input"));
-    if (input) {
-      input.focus();
-      if (caret) {
-        input.setSelectionRange?.(caret.start, caret.end, caret.direction);
-        input.scrollTop = caret.scrollTop;
-      } else {
-        input.setSelectionRange?.(input.value.length, input.value.length);
-      }
-    }
-  }
   postQueuedAnchors();
   renderThreads();
   updateSendState();
-  scrollPanelToBottom();
   renderSheetSummary();
+}
+
+// How many drafts one press of Send delivers: every queued note plus words still in the page
+// comment box, which Send saves first.
+function draftCount() {
+  return queued.length + (chatInput.value.trim() ? 1 : 0);
 }
 
 function updateSendState() {
@@ -735,11 +635,15 @@ function updateSendState() {
   // artifact without disabling annotation mode. Disabling annotation mode closes the
   // SDK card and destroys an unsent draft before delivery has actually succeeded.
   frame.inert = ended || terminalReserved;
+  const count = draftCount();
+  sendButton.textContent = count ? "Send to agent (" + count + ")" : "Send to agent";
+  sendButton.classList.toggle("has-drafts", count > 0);
   sendButton.disabled = ended || terminalReserved;
   sendAndEndButton.disabled = ended || Boolean(terminalSubmission?.inFlight);
   annotationSwitch.disabled = ended || terminalReserved;
   chatInput.disabled = ended || terminalReserved;
   chatAttachButton.disabled = ended || terminalReserved;
+  attachImagesButton.disabled = ended || terminalReserved;
   endButton.disabled = ended || terminalReserved;
   if (warningsQueueButton) updateWarningSelectionState();
 }
@@ -808,11 +712,11 @@ function replaceExpiredThumbnail(event) {
   image.replaceWith(expired);
 }
 
-chatLog.addEventListener("error", replaceExpiredThumbnail, true);
+comments.addEventListener("error", replaceExpiredThumbnail, true);
 
 const UNSENT_OWNERSHIP_COPY =
-  "Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along.";
-const DEFAULT_SEND_HINT = "Nothing queued in this tab. " + UNSENT_OWNERSHIP_COPY;
+  "Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.";
+const DEFAULT_SEND_HINT = "Nothing to send yet. " + UNSENT_OWNERSHIP_COPY;
 const EMPTY_SEND_HINT_HOLD_MS = 9000;
 const EMPTY_END_HINT = "Nothing to send. To end without feedback, use End session in the More menu (⋮).";
 
@@ -831,7 +735,7 @@ function showSendHint(message = DEFAULT_SEND_HINT, holdMs = 2600, focusInput = t
   sendHint.classList.toggle("persistent", sendHintPersistent);
   if (sendHintPersistent) {
     sendHintTimer = undefined;
-    if (focusInput) chatInput.focus();
+    if (focusInput && openThreadId === PAGE_THREAD_ID) chatInput.focus();
     return;
   }
   sendHintTimer = setTimeout(() => {
@@ -839,7 +743,7 @@ function showSendHint(message = DEFAULT_SEND_HINT, holdMs = 2600, focusInput = t
     sendHint.textContent = DEFAULT_SEND_HINT;
     sendHintPersistent = false;
   }, holdMs);
-  if (focusInput) chatInput.focus();
+  if (focusInput && openThreadId === PAGE_THREAD_ID) chatInput.focus();
 }
 
 function hideSendHint(force = false) {
@@ -929,105 +833,23 @@ async function copyText(text) {
   return true;
 }
 
-// One transcript entry, as the server serialized it (src/chat-messages.js). An agent entry's
-// `html` is the server's rendering of the agent's text and is the only html ever set here; a
-// user entry is always escaped text, with its anchor line and thumbnails when it carries them.
-function chatBubbleHtml(entry) {
-  if (entry.role === "agent") {
-    return (
-      "<small>Agent</small>" +
-      (typeof entry.html === "string" && entry.html
-        ? '<div class="chat-md">' + entry.html + "</div>"
-        : '<div class="bubble-text">' + escapeHtml(entry.text) + "</div>")
-    );
-  }
-  return (
-    "<small>You</small>" +
-    anchorHtml(entry.anchor) +
-    userBubbleTextHtml(entry, entry.text) +
-    bubbleAttachmentsHtml(entry) +
-    receiptHtml(entry)
-  );
+// Delivery state (docs/delivery-acks.md) as one plain word per thread. Seen, Working and Done are
+// stamps the server puts on a sent note's transcript entry, so the word is derived from that entry
+// on every render and never tracked here. Only the latest state shows.
+function deliveryLabel(entry) {
+  if (!entry || entry.receipt === "none") return "Sent";
+  if (entry.done_at) return "Replied";
+  if (entry.working_at) return "Working";
+  if (entry.delivered_at) return "Seen";
+  return "Sent";
 }
 
-// Delivery receipt (docs/delivery-acks.md): the per-note view of what the server observed. Seen,
-// Working, and Done are stamps on the entry, so the row is derived from it on every render and
-// never tracked here. Before Seen, the row says why, from the presence the live stream reports.
-// The three steps are the emoji of the Telegram ack protocol the receipt mirrors (seen, working,
-// done); a step that has not happened is the same glyph dimmed, and every step carries its label
-// and time as `title` and `aria-label`, so hover and screen readers both say the word.
-const RECEIPT_EMOJI = { Seen: "\u{1F440}", Working: "\u{1F6E0}️", Done: "✅" };
-
-function receiptTime(at) {
-  const date = new Date(String(at));
-  return Number.isNaN(date.getTime())
-    ? String(at)
-    : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function receiptStepHtml(label, at) {
-  const ticked = Boolean(at);
-  const text = ticked ? label + " " + receiptTime(at) : label + ": not yet";
-  return (
-    '<span class="receipt-step' +
-    (ticked ? " is-done" : "") +
-    '" role="img" aria-label="' +
-    escapeHtml(text) +
-    '" title="' +
-    escapeHtml(text) +
-    '">' +
-    RECEIPT_EMOJI[label] +
-    "</span>"
-  );
-}
-
-// Every branch must be true where it is shown: `waiting` is no poll at all, `listening` is a poll
-// that will take the note within milliseconds, and `working` or an external listener is an agent
-// whose next poll will take it.
-function receiptNoteText() {
-  if (agentPresence === "waiting") return "No agent is listening";
-  if (agentPresence === "listening") return "Delivering";
-  return "Agent is busy; delivered on its next poll";
-}
-
-// A transcript entry from before receipts existed (`receipt: "none"`, marked by the server once at
-// load) gets no row: nothing was ever observed about it, and an empty row would read as "never seen".
-function hasReceipt(entry) {
-  return Boolean(entry) && entry.receipt !== "none";
-}
-
-function receiptHtml(entry) {
-  if (!hasReceipt(entry)) return "";
-  return (
-    '<div class="receipt">' +
-    receiptStepHtml("Seen", entry.delivered_at) +
-    receiptStepHtml("Working", entry.working_at) +
-    receiptStepHtml("Done", entry.done_at) +
-    (entry.delivered_at ? "" : '<span class="receipt-note">' + escapeHtml(receiptNoteText()) + "</span>") +
-    "</div>"
-  );
-}
-
-// Only the pre-Seen line names the live presence, so a presence change rewrites that line alone.
-// Rebuilding the bubble would also rebuild its thumbnails and undo an "Image expired" placeholder.
-function refreshUnseenReceipts() {
-  for (const note of chatLog.querySelectorAll(".receipt-note")) note.textContent = receiptNoteText();
-  for (const note of threadNodes(".receipt-note")) note.textContent = receiptNoteText();
-}
-
-function addChat(entry, shouldScroll = true) {
-  if (!entry || typeof entry !== "object") return;
-  if (entry.thread_id) return;
-  const role = entry.role === "agent" ? "agent" : "user";
-  const text = String(entry.text || "");
-  if (!text && !(role === "agent" ? entry.html : attachmentCount(entry) || entry.anchor)) return;
-
-  const el = document.createElement("div");
-  el.className = "bubble " + role;
-  el.innerHTML = chatBubbleHtml({ ...entry, role, text });
-  chatLog.appendChild(el);
-  if (shouldScroll) scrollElementIntoView(el);
-  return el;
+// A transcript entry the page thread shows: agent replies outside any `## c<n>` section, and the
+// reviewer's own notes that did not open or join a margin thread.
+function isPageChatEntry(entry) {
+  if (!entry || typeof entry !== "object" || entry.thread_id) return false;
+  if (entry.role === "agent") return Boolean(String(entry.text || "") || entry.html);
+  return Boolean(String(entry.text || "") || attachmentCount(entry) || entry.anchor);
 }
 
 function chatEntryDisplayKey(entry) {
@@ -1147,44 +969,33 @@ function syncChat(chat, revision) {
   }
   if (nextRevision !== null) chatRevision = nextRevision;
   displayedChat = nextChat.slice();
-  for (const el of [...chatLog.querySelectorAll(".bubble.user,.bubble.agent:not(.agent-working)")]) {
-    el.remove();
-  }
-
-  let lastChatBubble = null;
-  for (const item of nextChat) lastChatBubble = addChat(item, false) || lastChatBubble;
-  if (workingBubble) chatLog.appendChild(workingBubble);
-  // Handed-back drafts were written at the end of the conversation, and a rebuild re-appends the
-  // whole transcript - so without this they end up above it, where the scroll below would leave
-  // them off-screen. They are the one thing here the user cannot recover anywhere else.
-  for (const note of retiredDraftNodes) chatLog.appendChild(note);
-  const anchor = retiredDraftNodes[retiredDraftNodes.length - 1] || workingBubble || lastChatBubble;
-  if (anchor) scrollElementIntoView(anchor);
+  // The page thread re-renders in place; nothing here moves the reader's scroll position.
+  renderThreads();
   return true;
 }
+
+// The bar's one-word answer to "will my comments reach the agent?". Every word must be true where
+// it is shown: `waiting` is no poll at all, `listening` is a poll that takes a send within
+// milliseconds, and `working` or an external listener is an agent whose next poll takes it.
+const AGENT_STATUS = {
+  waiting: ["Not listening", "No agent is polling this review. Ask your agent to run lavish-axi poll."],
+  listening: ["Listening", "Your agent is waiting for comments. Send delivers them right away."],
+  working: ["Working", "Your agent is working on what you sent. New comments reach it on its next poll."],
+  external: ["Listening", "An external listener holds this review. New comments reach the agent on its next poll."],
+};
 
 function setAgentPresence(state) {
   agentPresence = state === "listening" || state === "external" || state === "working" ? state : "waiting";
   updateSendState();
   renderSheetSummary();
-  refreshUnseenReceipts();
-  if (presenceBanner) presenceBanner.hidden = ended || agentPresence !== "waiting";
+  renderAgentStatus();
+}
 
-  // A supervisor-owned process-only listener is busy on the agent's behalf. It must not make the
-  // composer look like an idle captain turn while the owning agent is offline.
-  if (agentPresence !== "working" && agentPresence !== "external") {
-    if (workingBubble) workingBubble.remove();
-    workingBubble = null;
-    return;
-  }
-
-  if (!workingBubble) {
-    workingBubble = document.createElement("div");
-    workingBubble.className = "bubble agent agent-working";
-    workingBubble.innerHTML = '<span class="spinner"></span><span>Working...</span>';
-    chatLog.appendChild(workingBubble);
-  }
-  scrollElementIntoView(workingBubble);
+function renderAgentStatus() {
+  const [text, title] = ended ? ["Ended", "This review session has ended."] : AGENT_STATUS[agentPresence];
+  agentStatus.textContent = text;
+  agentStatus.title = title;
+  agentStatus.dataset.state = ended ? "ended" : agentPresence;
 }
 
 function setHandoffSuperseded(visible) {
@@ -1276,21 +1087,12 @@ function keepRetiredDraft(text) {
   renderRetiredDraft(text, saveJsonState(retiredDraftStorageKey, retiredDrafts));
 }
 
+// Handed-back drafts show in the page thread, where they stay readable and selectable. Whether the
+// browser stored the copy is per-entry, so a refused write keeps its warning.
+const unstoredRetiredDrafts = new Set();
 function renderRetiredDraft(text, stored = true) {
-  if (!chatLog) return;
-  const el = document.createElement("div");
-  el.className = "bubble note";
-  el.innerHTML =
-    "<small>Unsent annotation</small><div>The artifact removed or replaced what this note was attached to, so Lavish could not keep it open. Your text is kept here:</div>" +
-    '<div class="note-draft">' +
-    escapeHtml(text) +
-    "</div>" +
-    (stored
-      ? ""
-      : '<div class="note-warning">This browser refused to store it, so copy it before you reload this page.</div>');
-  retiredDraftNodes.push(el);
-  chatLog.appendChild(el);
-  scrollElementIntoView(el);
+  if (!stored) unstoredRetiredDrafts.add(text);
+  renderThreads();
 }
 
 async function refreshChromeLoadHandoff(requestSequence) {
@@ -1310,22 +1112,18 @@ async function refreshChromeLoadHandoff(requestSequence) {
   return true;
 }
 
-function scrollPanelToBottom() {
-  panelScroll.scrollTop = panelScroll.scrollHeight;
-}
-
-// ---- Phone-width conversation sheet ----
-// Below this width chrome.css turns the conversation panel into a dock the user raises as a
-// bottom sheet over the artifact. This controller owns intent, accessibility state, gestures,
-// visual-viewport measurements, and the dock summary; CSS owns the geometry. The query must match
-// the one chrome.css lays the sheet out under.
+// ---- Phone-width comments sheet ----
+// Below this width chrome.css turns the comments margin into a dock the user raises as a bottom
+// sheet over the artifact, with every thread stacked in page order. This controller owns intent,
+// accessibility state, gestures, visual-viewport measurements, and the dock summary; CSS owns the
+// geometry. The query must match the one chrome.css lays the sheet out under.
 const MOBILE_SHEET_MEDIA = "(max-width: 860px)";
 // How far a drag on the dock must travel before it counts as a gesture rather than a tap.
 const SHEET_DRAG_THRESHOLD_PX = 48;
 const sheetStorageKey = "lavish-axi:sheet-open:" + key;
 const sheetMedia = typeof window.matchMedia === "function" ? window.matchMedia(MOBILE_SHEET_MEDIA) : null;
 // The user's intent, kept across a chrome reload so a live-reload or server upgrade does not drop
-// them back onto a closed dock mid-conversation.
+// them back onto a closed dock mid-review.
 let sheetOpen = readSheetOpen();
 // The latest agent reply that landed while the sheet was closed: the dock previews it until the
 // user opens the sheet, so a reply never arrives silently behind the artifact.
@@ -1347,9 +1145,7 @@ function isMobileSheet() {
 }
 
 function setSheetOpen(open) {
-  const next = Boolean(open);
-  const changed = next !== sheetOpen;
-  sheetOpen = next;
+  sheetOpen = Boolean(open);
   try {
     if (sheetOpen) sessionStorage.setItem(sheetStorageKey, "1");
     else sessionStorage.removeItem(sheetStorageKey);
@@ -1358,38 +1154,37 @@ function setSheetOpen(open) {
   }
   if (sheetOpen) unreadAgentReply = "";
   applySheetState();
-  if (!changed || !isMobileSheet()) return;
-  if (sheetOpen) scrollPanelToBottom();
 }
 
 // Re-derives every sheet attribute from the phone layout, sheet-open, and session-ended state so a
-// viewport crossing the breakpoint in either direction cannot make an ended panel interactive or
+// viewport crossing the breakpoint in either direction cannot make an ended sheet interactive or
 // leave a closed dock trapping focus.
 function applySheetState() {
   const mobile = isMobileSheet();
   const open = mobile && sheetOpen;
   document.body.classList.toggle("sheet-open", open);
   const docked = mobile && !open;
-  panelScroll.inert = ended || docked;
-  chatComposer.inert = ended || docked;
+  commentsBody.inert = ended || docked;
+  // The footer's Send sits below the viewport with the rest of the docked sheet.
+  commentsFoot.inert = docked;
   const activeElement = document.activeElement;
-  if (docked && activeElement && (panelScroll.contains(activeElement) || chatComposer.contains(activeElement))) {
-    panelToggle.focus();
+  if (docked && activeElement && (commentsBody.contains(activeElement) || commentsFoot.contains(activeElement))) {
+    sheetToggle.focus();
   }
-  panelToggle.setAttribute("aria-expanded", open ? "true" : "false");
-  panelToggle.setAttribute("aria-label", open ? "Hide conversation" : "Show conversation");
+  sheetToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  sheetToggle.setAttribute("aria-label", open ? "Hide comments" : "Show comments");
   renderSheetSummary();
+  positionThreads();
 }
 
-// What the closed dock says. One line, most actionable state first: work the user has queued,
+// What the closed dock says. One line, most actionable state first: drafts the user has not sent,
 // then a reply they have not seen, then whether the agent is there to receive a send.
 function sheetSummary() {
   if (ended) return { text: "Session ended", accent: false, unread: false };
-  if (queued.length > 0) {
-    return { text: queued.length === 1 ? "1 queued" : queued.length + " queued", accent: true, unread: false };
-  }
+  const drafts = draftCount();
+  if (drafts > 0) return { text: drafts === 1 ? "1 not sent" : drafts + " not sent", accent: true, unread: false };
   if (unreadAgentReply) return { text: unreadAgentReply, accent: false, unread: true };
-  if (agentPresence === "working") return { text: "Agent is working…", accent: false, unread: false };
+  if (agentPresence === "working") return { text: "Agent is working", accent: false, unread: false };
   if (agentPresence === "external") return { text: "External listener active", accent: false, unread: false };
   if (agentPresence === "listening") return { text: "Agent listening", accent: false, unread: false };
   return { text: "Agent not listening", accent: false, unread: false };
@@ -1397,24 +1192,32 @@ function sheetSummary() {
 
 function renderSheetSummary() {
   const summary = sheetSummary();
-  panelSummary.textContent = summary.text;
-  panelSummary.classList.toggle("is-accent", summary.accent);
-  panelSummary.classList.toggle("is-unread", summary.unread);
-  renderSidebarToggle();
+  sheetSummaryText.textContent = summary.text;
+  sheetSummaryText.classList.toggle("is-accent", summary.accent);
+  sheetSummaryText.classList.toggle("is-unread", summary.unread);
 }
 
 // A brief pulse on the dock when something the user should notice lands while the sheet is
-// closed: a prompt they queued from the artifact, or an agent reply.
+// closed: a comment they saved from the artifact, or an agent reply.
 function pulseSheetDock() {
   if (!isMobileSheet() || sheetOpen) return;
-  panelHead.classList.remove("is-fresh");
+  sheetHead.classList.remove("is-fresh");
   // Restart the animation even when the previous pulse is still running.
-  void panelHead.offsetWidth;
-  panelHead.classList.add("is-fresh");
+  void sheetHead.offsetWidth;
+  sheetHead.classList.add("is-fresh");
+}
+
+// Only the closed phone dock hides comments; on desktop the margin is always beside the page.
+function isCommentsHidden() {
+  return isMobileSheet() && !sheetOpen;
+}
+
+function revealComments() {
+  if (isMobileSheet()) setSheetOpen(true);
 }
 
 function noteAgentReply(text) {
-  if (!isConversationHidden()) return;
+  if (!isCommentsHidden()) return;
   unreadAgentReply = String(text || "");
   renderSheetSummary();
   pulseSheetDock();
@@ -1441,8 +1244,8 @@ function sheetDragOffset(event) {
 
 function clearSheetDrag() {
   sheetDrag = null;
-  panel.classList.remove("is-dragging");
-  panel.style.transform = "";
+  comments.classList.remove("is-dragging");
+  comments.style.transform = "";
 }
 
 function finishSheetDrag(event) {
@@ -1457,7 +1260,7 @@ function finishSheetDrag(event) {
   else if (!sheetOpen && offset < -SHEET_DRAG_THRESHOLD_PX) setSheetOpen(true);
 }
 
-panelHead.addEventListener("click", () => {
+sheetHead.addEventListener("click", () => {
   if (!isMobileSheet()) return;
   if (suppressSheetClick) {
     suppressSheetClick = false;
@@ -1465,25 +1268,25 @@ panelHead.addEventListener("click", () => {
   }
   setSheetOpen(!sheetOpen);
 });
-panelScrim.addEventListener("click", () => setSheetOpen(false));
-panelHead.addEventListener("pointerdown", (event) => {
+sheetScrim.addEventListener("click", () => setSheetOpen(false));
+sheetHead.addEventListener("pointerdown", (event) => {
   if (!isMobileSheet() || event.button) return;
   sheetDrag = { pointerId: event.pointerId, startY: Number(event.clientY), moved: false };
-  if (typeof panelHead.setPointerCapture === "function") panelHead.setPointerCapture(event.pointerId);
+  if (typeof sheetHead.setPointerCapture === "function") sheetHead.setPointerCapture(event.pointerId);
 });
-panelHead.addEventListener("pointermove", (event) => {
+sheetHead.addEventListener("pointermove", (event) => {
   if (!sheetDrag || event.pointerId !== sheetDrag.pointerId) return;
   const offset = sheetDragOffset(event);
   if (Math.abs(offset) > 6) sheetDrag.moved = true;
   if (!sheetDrag.moved) return;
-  panel.classList.add("is-dragging");
+  comments.classList.add("is-dragging");
   // Follow the finger: an open sheet only moves down, a closed dock only up.
-  panel.style.transform = sheetOpen
+  comments.style.transform = sheetOpen
     ? "translateY(" + Math.max(0, offset) + "px)"
     : "translateY(calc(100% - var(--dock-h) - env(safe-area-inset-bottom, 0px) + " + Math.min(0, offset) + "px))";
 });
-panelHead.addEventListener("pointerup", finishSheetDrag);
-panelHead.addEventListener("pointercancel", (event) => {
+sheetHead.addEventListener("pointerup", finishSheetDrag);
+sheetHead.addEventListener("pointercancel", (event) => {
   if (!sheetDrag || event.pointerId !== sheetDrag.pointerId) return;
   clearSheetDrag();
   suppressSheetClick = false;
@@ -1498,94 +1301,34 @@ if (sheetMedia && typeof sheetMedia.addEventListener === "function") {
         // Storage refusal only prevents persistence; the in-memory state is already reset.
       }
     }
-    // A reply previewed while one layout hid the conversation is no longer owed once the other
-    // layout shows it.
-    if (!isConversationHidden()) unreadAgentReply = "";
+    // A reply previewed while the dock hid the comments is no longer owed once they show.
+    if (!isCommentsHidden()) unreadAgentReply = "";
+    threadHeights.clear();
     applySheetState();
-    applyPanelCollapsed();
   });
 }
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", syncVisualViewport);
   window.visualViewport.addEventListener("scroll", syncVisualViewport);
 }
-window.addEventListener("resize", syncVisualViewport);
+window.addEventListener("resize", () => {
+  syncVisualViewport();
+  // Card heights depend on the margin's width; measure again before the next placement.
+  threadHeights.clear();
+  positionThreads();
+});
 syncVisualViewport();
-
-// ---- Desktop conversation panel collapse ----
-// Above the phone breakpoint the conversation is a fixed side column; the bar's sidebar toggle
-// hides it so the artifact gets the full width. The choice is a per-viewer preference rather than
-// per-review state, so it lives in localStorage under one key for every session. chrome.css only
-// honours `panel-collapsed` outside the phone breakpoint, and this controller never sets it there,
-// so a stored preference cannot hide the phone dock.
-const panelCollapsedStorageKey = "lavish-axi:panel-collapsed";
-let panelCollapsed = readPanelCollapsed();
-
-function readPanelCollapsed() {
-  try {
-    return localStorage.getItem(panelCollapsedStorageKey) === "1";
-  } catch {
-    return false;
-  }
-}
-
-// Whether the conversation is out of sight right now, in whichever layout is active.
-function isConversationHidden() {
-  return isMobileSheet() ? !sheetOpen : panelCollapsed;
-}
-
-function revealConversation() {
-  if (isMobileSheet()) setSheetOpen(true);
-  else if (panelCollapsed) setPanelCollapsed(false);
-}
-
-function setPanelCollapsed(collapsed) {
-  panelCollapsed = Boolean(collapsed);
-  try {
-    if (panelCollapsed) localStorage.setItem(panelCollapsedStorageKey, "1");
-    else localStorage.removeItem(panelCollapsedStorageKey);
-  } catch {
-    // Storage refused only means the preference does not survive a reload.
-  }
-  if (!panelCollapsed) unreadAgentReply = "";
-  applyPanelCollapsed();
-  if (!panelCollapsed && !isMobileSheet()) scrollPanelToBottom();
-}
-
-function applyPanelCollapsed() {
-  const collapsed = panelCollapsed && !isMobileSheet();
-  document.body.classList.toggle("panel-collapsed", collapsed);
-  // Focus inside a panel that just went display:none would be lost to the document body.
-  const activeElement = document.activeElement;
-  if (collapsed && activeElement && panel.contains(activeElement)) sidebarToggle.focus();
-  sidebarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-  renderSidebarToggle();
-}
-
-// While collapsed the toggle stands in for the panel: it counts queued notes (the thing still to
-// send) or, failing that, marks an agent reply that arrived out of sight.
-function renderSidebarToggle() {
-  const collapsed = panelCollapsed && !isMobileSheet();
-  const count = collapsed ? queued.length : 0;
-  const unread = collapsed && count === 0 && Boolean(unreadAgentReply);
-  sidebarToggleCount.textContent = count > 0 ? String(count) : "";
-  sidebarToggleCount.hidden = count === 0;
-  sidebarToggle.classList.toggle("is-unread", unread);
-  let label = collapsed ? "Show conversation" : "Hide conversation";
-  if (count > 0) label += count === 1 ? " (1 queued)" : " (" + count + " queued)";
-  else if (unread) label += " (new reply)";
-  sidebarToggle.setAttribute("aria-label", label);
-  sidebarToggle.title = label;
-}
-
-sidebarToggle.addEventListener("click", () => setPanelCollapsed(!panelCollapsed));
-
-function scrollElementIntoView(el) {
-  el.scrollIntoView({ block: "nearest", inline: "nearest" });
-}
 
 function isPromptEditable(prompt) {
   return Boolean(prompt) && !terminalSubmission && !isPromptSending(prompt);
+}
+
+// Which card shows a queued note: its thread when it replies in one, its own pending card when
+// it is a new anchored comment, and the page thread otherwise.
+function draftThreadId(prompt) {
+  if (prompt?.thread_id) return String(prompt.thread_id);
+  if (prompt?.selector && !NON_THREAD_TAGS.has(prompt.tag)) return promptIdentity(prompt);
+  return PAGE_THREAD_ID;
 }
 
 function editQueuedPrompt(index, { reveal = true } = {}) {
@@ -1593,21 +1336,15 @@ function editQueuedPrompt(index, { reveal = true } = {}) {
   if (ended || !isPromptEditable(prompt)) return;
   const id = promptIdentity(prompt);
   if (!id) return;
-  if (id === editingPromptId) {
-    // Collapsing keeps the open edit, so asking for it again brings it back into view.
-    if (isConversationHidden()) {
-      editFocusPending = true;
-      revealConversation();
-      render();
-    }
-    return;
+  if (id !== editingPromptId) {
+    // Moving to another note keeps what was typed into the first, the way leaving a field does.
+    commitQueuedEdit();
+    editingPromptId = id;
+    editingDraft = String(prompt.prompt || "");
   }
-  // Moving to another note keeps what was typed into the first, the way leaving a field does.
-  commitQueuedEdit();
-  editingPromptId = id;
-  editingDraft = String(prompt.prompt || "");
   editFocusPending = true;
-  revealConversation();
+  revealComments();
+  openThread(draftThreadId(prompt), { focus: false });
   render();
   if (reveal && prompt.selector) postToFrame({ type: "lavish:revealElement", selector: String(prompt.selector) });
 }
@@ -1639,11 +1376,6 @@ function commitQueuedEdit() {
 
 function saveQueuedEdit() {
   commitQueuedEdit();
-  render();
-}
-
-function cancelQueuedEdit() {
-  endQueuedEdit();
   render();
 }
 
@@ -1690,37 +1422,6 @@ function postQueuedAnchors(force = false) {
   postedQueuedAnchors = signature;
   postToFrame({ type: "lavish:queuedAnchors", selectors });
 }
-
-queuedLog.addEventListener("click", (event) => {
-  const target = /** @type {Element | null} */ (event.target);
-  if (!target || typeof target.closest !== "function") return;
-  // The remove control owns its own click, and an editor's textarea is for typing.
-  if (target.closest(".queued-remove") || target.closest(".queued-edit-input")) return;
-  if (target.closest(".queued-edit-save")) return saveQueuedEdit();
-  if (target.closest(".queued-edit-cancel")) return cancelQueuedEdit();
-  const bubble = /** @type {HTMLElement | null} */ (target.closest(".queued-edit") || target.closest(".bubble.queued"));
-  if (bubble) editQueuedPrompt(Number(bubble.dataset.index));
-});
-queuedLog.addEventListener("input", (event) => {
-  const target = /** @type {HTMLTextAreaElement | null} */ (event.target);
-  if (target && typeof target.closest === "function" && target.closest(".queued-edit-input")) {
-    editingDraft = String(target.value || "");
-  }
-});
-queuedLog.addEventListener("keydown", (event) => {
-  const target = /** @type {Element | null} */ (event.target);
-  if (!target || typeof target.closest !== "function" || !target.closest(".queued-edit-input")) return;
-  // The annotation card's keys: Enter keeps the words, Shift+Enter breaks the line.
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
-    event.preventDefault();
-    event.stopPropagation();
-    saveQueuedEdit();
-  } else if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
-    event.preventDefault();
-    event.stopPropagation();
-    cancelQueuedEdit();
-  }
-});
 
 function removeQueuedPrompt(index, event) {
   if (event) event.stopPropagation();
@@ -2049,6 +1750,35 @@ function createChatAttachmentsController() {
 
 const chatAttachmentController = createChatAttachmentsController();
 
+// Saves the page comment box as a draft: words and ready images become one queued note, which
+// Send delivers with every other draft. Returns false while a pending or failed image holds the
+// box back. A held chip holds back only THIS message (and an explicit end, which would strand
+// the chips) - queued notes still deliver, mirroring how the annotation card holds only its own
+// card open.
+function queueComposerMessage() {
+  const chipsBlocked = chatAttachmentController.hasPending() || chatAttachmentController.hasErrors();
+  if (chipsBlocked) {
+    chatAttachmentController.noteSendBlocked();
+    return false;
+  }
+  const text = chatInput.value.trim();
+  const attachments = chatAttachmentController.collectReady();
+  if (text || attachments.length) {
+    const prompt = { uid: "", prompt: text, selector: "", tag: "message", text: "Freeform message" };
+    if (attachments.length) prompt.attachments = attachments;
+    assignPromptIdentity(prompt, false);
+    queued.push(prompt);
+    persistQueuedPrompts();
+    // The draft is stored and shown before the box is cleared, so if anything after this point
+    // fails, the words are already both persisted and visibly recoverable in the tab.
+    chatInput.value = "";
+    savePageDraft();
+    chatAttachmentController.reset();
+    render();
+  }
+  return true;
+}
+
 function sendQueued(endAfter) {
   if (ended) return;
   if (terminalSubmission) {
@@ -2056,34 +1786,10 @@ function sendQueued(endAfter) {
     return;
   }
   closeMenus();
-  // Send delivers what the panel shows, so an open edit is kept rather than sent stale.
+  // Send delivers what the margin shows, so an open edit is kept rather than sent stale.
   if (commitQueuedEdit()) render();
 
-  // A pending or failed chip holds back only the COMPOSER message (and an
-  // explicit end, which would strand the chips) - queued annotation prompts
-  // still deliver, mirroring how the annotation card holds only its own card
-  // open. Gating the whole pipeline here made Send and Send & End silently
-  // deliver nothing while the only signal sat in the composer toolbar.
-  const chipsBlocked = chatAttachmentController.hasPending() || chatAttachmentController.hasErrors();
-  if (chipsBlocked) chatAttachmentController.noteSendBlocked();
-
-  if (!chipsBlocked) {
-    const text = chatInput.value.trim();
-    const attachments = chatAttachmentController.collectReady();
-    if (text || attachments.length) {
-      const prompt = { uid: "", prompt: text, selector: "", tag: "message", text: "Freeform message" };
-      if (attachments.length) prompt.attachments = attachments;
-      assignPromptIdentity(prompt, false);
-      queued.push(prompt);
-      persistQueuedPrompts();
-      // Render the durable queued bubble before clearing the editor. If anything after this point
-      // fails, the user's words are already both stored and visibly recoverable in the tab. It
-      // becomes a sent bubble only when the server's transcript carries it (see submitQueuedOnce).
-      render();
-      chatInput.value = "";
-      chatAttachmentController.reset();
-    }
-  }
+  const chipsBlocked = !queueComposerMessage();
   const shouldEnd = Boolean(endAfter && !chipsBlocked);
   const preparations = shouldEnd ? [...feedbackPreparations] : [];
   if (!queued.length && preparations.length === 0) {
@@ -2881,17 +2587,12 @@ const REVISION_LIMITS = {
   excerpt: 120,
   selector: 400,
 };
-const REVISION_BORDER_STYLES = ["solid", "dashed", "dotted", "double"];
-
 /** @type {any[]} */
 let revisionEntries = [];
-/** @type {any[]} */
-let revisionMarks = [];
 /** @type {Map<string, number>} */
 const revisionRevealCursor = new Map();
-let revisionsDrawerOpen = false;
 
-// Display-only fields. Anything the legend merely shows can be shortened.
+// Display-only fields. Anything Lavish merely shows can be shortened.
 function revisionText(value, max) {
   if (typeof value !== "string" && typeof value !== "number") return "";
   const text = String(value).trim();
@@ -2900,7 +2601,7 @@ function revisionText(value, max) {
 
 // Identity fields, mirroring `exactRevisionText` in src/artifact-revisions.js.
 // The message is untrusted here, so shortening an id or a selector is worse
-// than dropping it: two distinct overlong ids collapse into one legend row, and
+// than dropping it: two distinct overlong ids collapse into one revision, and
 // the first 400 characters of a long selector are a different valid selector
 // that Reveal would resolve to some other block.
 function revisionExact(value, max) {
@@ -2909,29 +2610,8 @@ function revisionExact(value, max) {
   return text.length > 0 && text.length <= max ? text : "";
 }
 
-function revisionPatternFill(pattern) {
-  if (pattern === "diagonal") return "repeating-linear-gradient(45deg, currentColor 0 2px, transparent 2px 5px)";
-  if (pattern === "dots") return "radial-gradient(currentColor 1px, transparent 1px)";
-  return "";
-}
-
-// The swatch for a revision's position in the registry. Position is the only
-// thing the artifact influences, and it cannot repeat one: ids are deduplicated
-// before this runs, so each accepted revision gets a distinct index and
-// therefore a distinct swatch.
-function revisionPresentation(index) {
-  const entry = REVISION_PALETTE.length > 0 ? REVISION_PALETTE[index % REVISION_PALETTE.length] : null;
-  return {
-    color: entry ? String(entry.hex) : "#0072b2",
-    borderStyle: REVISION_BORDER_STYLES.includes(String(entry && entry.borderStyle))
-      ? String(entry.borderStyle)
-      : "solid",
-    pattern: revisionPatternFill(entry && entry.pattern),
-  };
-}
-
-// Only text crosses from the artifact into the legend, and it crosses as
-// textContent. Nothing the message carries reaches a style property.
+// The registry the artifact declares (data-lavish-revisions) and the blocks it marked. Thread
+// answers name a revision (`## c1 reveal=r2`), and their Reveal button walks its marked blocks.
 function normalizeRevisionMessage(msg) {
   const rawRevisions = Array.isArray(msg && msg.revisions) ? msg.revisions : [];
   const revisions = [];
@@ -2948,7 +2628,6 @@ function normalizeRevisionMessage(msg) {
       label: revisionText(raw.label, REVISION_LIMITS.label) || id,
       timestamp: revisionText(raw.timestamp, REVISION_LIMITS.timestamp),
       summary: revisionText(raw.summary, REVISION_LIMITS.summary),
-      ...revisionPresentation(revisions.length),
       marks: [],
     };
     byId.set(id, entry);
@@ -2979,118 +2658,18 @@ function normalizeRevisionMessage(msg) {
   return { revisions, marks };
 }
 
-function resetRevisionLegend() {
+function resetRevisionRegistry() {
   revisionEntries = [];
-  revisionMarks = [];
   revisionRevealCursor.clear();
-  renderRevisionLegend();
 }
 
 function applyRevisionMessage(msg) {
   const normalized = normalizeRevisionMessage(msg);
   revisionEntries = normalized.revisions;
-  revisionMarks = normalized.marks;
   for (const id of [...revisionRevealCursor.keys()]) {
     if (!revisionEntries.some((entry) => entry.id === id)) revisionRevealCursor.delete(id);
   }
-  renderRevisionLegend();
   renderThreads();
-}
-
-function revisionMarkSummary(entry) {
-  if (entry.marks.length === 0) return "no marked blocks";
-  return entry.marks.length === 1 ? "1 marked block" : entry.marks.length + " marked blocks";
-}
-
-function buildRevisionRow(entry) {
-  const row = document.createElement("div");
-  row.className = "revision-row";
-
-  const swatch = document.createElement("span");
-  swatch.className = "revision-swatch";
-  swatch.setAttribute("aria-hidden", "true");
-  swatch.style.color = entry.color;
-  swatch.style.borderColor = entry.color;
-  swatch.style.borderStyle = entry.borderStyle;
-  if (entry.pattern) swatch.style.backgroundImage = entry.pattern;
-  row.appendChild(swatch);
-
-  const body = document.createElement("div");
-  body.className = "revision-body";
-
-  const head = document.createElement("div");
-  head.className = "revision-head";
-  const label = document.createElement("span");
-  label.className = "revision-label";
-  label.textContent = entry.label;
-  head.appendChild(label);
-  if (entry.timestamp) {
-    const time = document.createElement("span");
-    time.className = "revision-time";
-    time.textContent = entry.timestamp;
-    head.appendChild(time);
-  }
-  body.appendChild(head);
-
-  if (entry.summary) {
-    const summary = document.createElement("p");
-    summary.className = "revision-summary";
-    summary.textContent = entry.summary;
-    body.appendChild(summary);
-  }
-
-  const foot = document.createElement("div");
-  foot.className = "revision-foot";
-  const count = document.createElement("span");
-  count.className = "revision-marks";
-  count.textContent = revisionMarkSummary(entry);
-  foot.appendChild(count);
-  if (entry.marks.length > 0) {
-    const reveal = document.createElement("button");
-    reveal.type = "button";
-    reveal.className = "revision-reveal";
-    const position = (revisionRevealCursor.get(entry.id) || 0) % entry.marks.length;
-    reveal.textContent = entry.marks.length === 1 ? "Reveal" : "Reveal " + (position + 1) + "/" + entry.marks.length;
-    reveal.setAttribute("aria-label", "Reveal the next block changed in " + entry.label);
-    // Bound per row rather than delegated from the list: the rows are rebuilt
-    // on every render anyway, so there is no listener to accumulate, and the
-    // button carries the revision it belongs to without a data attribute round
-    // trip through the DOM.
-    reveal.onclick = () => revealNextRevisionMark(entry.id);
-    foot.appendChild(reveal);
-  }
-  body.appendChild(foot);
-
-  row.appendChild(body);
-  return row;
-}
-
-function renderRevisionLegend() {
-  if (!revisionsWrap) return;
-  const count = revisionEntries.length;
-  revisionsWrap.hidden = count === 0 || ended;
-  if (revisionsWrap.hidden && revisionsDrawerOpen) setRevisionsDrawerOpen(false);
-  revisionsCount.textContent = String(count);
-  revisionsButton.setAttribute("aria-label", count === 1 ? "1 revision" : count + " revisions");
-  revisionsSummary.textContent =
-    (count === 1 ? "1 revision" : count + " revisions") +
-    " · " +
-    (revisionMarks.length === 1 ? "1 marked block" : revisionMarks.length + " marked blocks");
-
-  revisionsList.replaceChildren(...revisionEntries.map(buildRevisionRow));
-}
-
-function setRevisionsDrawerOpen(open) {
-  revisionsDrawerOpen = open && !ended;
-  revisionsDrawer.hidden = !revisionsDrawerOpen;
-  revisionsButton.setAttribute("aria-expanded", String(revisionsDrawerOpen));
-  if (revisionsDrawerOpen) closeMenus();
-}
-
-function closeRevisionsDrawer({ restoreFocus = false } = {}) {
-  if (!revisionsDrawerOpen) return;
-  setRevisionsDrawerOpen(false);
-  if (restoreFocus) revisionsButton.focus();
 }
 
 // Step through a revision's marked blocks one at a time. The existing reveal
@@ -3102,7 +2681,6 @@ function revealNextRevisionMark(id) {
   const position = (revisionRevealCursor.get(id) || 0) % entry.marks.length;
   postToFrame({ type: "lavish:revealElement", selector: entry.marks[position].selector });
   revisionRevealCursor.set(id, (position + 1) % entry.marks.length);
-  renderRevisionLegend();
 }
 
 async function dismissWarning(id) {
@@ -3204,8 +2782,7 @@ function markSessionEnded() {
   closeShareDialog();
   closeWarningsDrawer();
   renderWarnings();
-  closeRevisionsDrawer();
-  renderRevisionLegend();
+  closeResolvedDrawer();
   closeWhiteboard();
   annotationSwitch.disabled = true;
   moreButton.disabled = true;
@@ -3213,7 +2790,7 @@ function markSessionEnded() {
   renderThreads();
   updateSendState();
   applySheetState();
-  if (presenceBanner) presenceBanner.hidden = true;
+  renderAgentStatus();
   if (handoffBanner) handoffBanner.hidden = true;
   if (outdatedBanner) outdatedBanner.hidden = true;
   layoutGateManuallyBypassed = true;
@@ -3538,7 +3115,7 @@ async function replaceArtifactFrame({ recoveryRetry = false } = {}) {
     // previous revision's legend would point at blocks that may no longer exist.
     // Only clear it here, right before the frame is actually replaced - a preserved
     // load (superseded/out-of-order/exhausted retries below) must leave it intact.
-    resetRevisionLegend();
+    resetRevisionRegistry();
     startLayoutGateCycle();
     const currentSrc = frame.src || "about:blank";
     navigateArtifactFrame(currentSrc + (currentSrc.includes("?") ? "&" : "?") + "lavish_reload=" + Date.now());
@@ -3661,7 +3238,7 @@ async function replaceArtifactFrame({ recoveryRetry = false } = {}) {
   startLayoutGateCycle();
   // The next document reports its own registry once it loads; until then the
   // previous revision's legend would point at blocks that may no longer exist.
-  resetRevisionLegend();
+  resetRevisionRegistry();
   navigateArtifactFrame(artifactFrameSrcForLoad({ revision, token }));
   return true;
 }
@@ -4456,7 +4033,7 @@ window.addEventListener("message", (event) => {
       });
     }
     const nowMissing = [...threadGeometry].filter(([, position]) => position.missing).map(([id]) => id);
-    // A thread whose anchor appeared or vanished moves between the margin and the panel list.
+    // A thread whose anchor appeared or vanished moves between the margin and the off-page list.
     if (nowMissing.length !== wasMissing.size || nowMissing.some((id) => !wasMissing.has(id))) renderThreads();
     else positionThreads();
   }
@@ -4643,13 +4220,23 @@ sendButton.onclick = () => sendQueued(false);
 sendAndEndButton.onclick = () => sendQueued(true);
 moreButton.onclick = () => {
   closeWarningsDrawer();
-  closeRevisionsDrawer();
+  closeResolvedDrawer();
   toggleMenu(moreButton, moreMenu);
 };
-warningsButton.onclick = toggleWarningsDrawer;
-revisionsButton.onclick = () => {
+warningsButton.onclick = () => {
+  closeResolvedDrawer();
+  toggleWarningsDrawer();
+};
+resolvedButton.onclick = () => {
   closeWarningsDrawer();
-  setRevisionsDrawerOpen(revisionsDrawer.hidden);
+  setResolvedDrawerOpen(resolvedDrawer.hidden);
+};
+resolveUndoButton.onclick = undoResolve;
+attachImagesButton.onclick = () => {
+  closeMenus();
+  revealComments();
+  openThread(PAGE_THREAD_ID);
+  chatAttachInput.click();
 };
 warningsSelectAll.onchange = toggleSelectAllWarnings;
 warningsQueueButton.onclick = queueSelectedWarningFixes;
@@ -4695,20 +4282,22 @@ chatInput.addEventListener("paste", (event) => {
   const added = chatAttachmentController.addFiles(files);
   if (added && !keepsClipboardText(event.clipboardData?.getData("text/plain") || "", files)) event.preventDefault();
 });
-chatComposer.addEventListener("dragover", (event) => {
+// Images dropped anywhere on the page comment attach to its draft, opening it so the chips show.
+pageThread.addEventListener("dragover", (event) => {
   if (Array.from(event.dataTransfer?.types || []).includes("Files")) {
     event.preventDefault();
-    chatComposer.classList.add("is-dropping");
+    pageThread.classList.add("is-dropping");
   }
 });
-chatComposer.addEventListener("dragleave", (event) => {
+pageThread.addEventListener("dragleave", (event) => {
   const entering = /** @type {Node | null} */ (event.relatedTarget);
-  if (!chatComposer.contains(entering)) chatComposer.classList.remove("is-dropping");
+  if (!pageThread.contains(entering)) pageThread.classList.remove("is-dropping");
 });
-chatComposer.addEventListener("drop", (event) => {
-  chatComposer.classList.remove("is-dropping");
+pageThread.addEventListener("drop", (event) => {
+  pageThread.classList.remove("is-dropping");
   if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
   event.preventDefault();
+  openThread(PAGE_THREAD_ID);
   const files = transferredFiles(event.dataTransfer);
   if (!files.length) {
     // A drag advertising Files with nothing enumerable: the default was already
@@ -4735,13 +4324,26 @@ chatAttachments.addEventListener("click", (event) => {
   const retry = /** @type {HTMLElement | null} */ (target?.closest?.("[data-chat-attachment-retry]") || null);
   if (retry) chatAttachmentController.retry(String(retry.dataset.chatAttachmentRetry || ""));
 });
+// The page comment keeps the annotation card's keys: Enter saves a draft (Send delivers every
+// draft at once), Shift+Enter breaks the line, Esc closes and keeps the words.
 chatInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    sendQueued(false);
+    queueComposerMessage();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeThread(PAGE_THREAD_ID, { focusCard: true });
   }
 });
-chatInput.addEventListener("input", () => hideSendHint());
+chatInput.addEventListener("input", () => {
+  hideSendHint();
+  savePageDraft();
+  autosize(chatInput);
+  updateSendState();
+  renderSheetSummary();
+});
 copyPathButton.onclick = copyFilePath;
 reloadArtifactButton.onclick = reloadArtifact;
 copySnapshotButton.onclick = copyDomSnapshot;
@@ -4780,7 +4382,7 @@ document.addEventListener("mousedown", (event) => {
   const target = /** @type {Node} */ (event.target);
   if (!moreMenu.hidden && !moreWrap.contains(target)) setMenuOpen(moreButton, moreMenu, false);
   if (warningsDrawerOpen && !warningsWrap.contains(target)) closeWarningsDrawer();
-  if (revisionsDrawerOpen && !revisionsWrap.contains(target)) closeRevisionsDrawer();
+  if (resolvedDrawerOpen && !resolvedWrap.contains(target)) closeResolvedDrawer();
 });
 // A non-modal popover closes when focus leaves it, so keyboard users are never stranded inside a
 // panel they cannot see the end of.
@@ -4788,9 +4390,9 @@ warningsWrap.addEventListener("focusout", (event) => {
   const next = /** @type {Node | null} */ (event.relatedTarget);
   if (warningsDrawerOpen && next && !warningsWrap.contains(next)) closeWarningsDrawer();
 });
-revisionsWrap.addEventListener("focusout", (event) => {
+resolvedWrap.addEventListener("focusout", (event) => {
   const next = /** @type {Node | null} */ (event.relatedTarget);
-  if (revisionsDrawerOpen && next && !revisionsWrap.contains(next)) closeRevisionsDrawer();
+  if (resolvedDrawerOpen && next && !resolvedWrap.contains(next)) closeResolvedDrawer();
 });
 whiteboardCloseButton.onclick = closeWhiteboard;
 document.addEventListener("keydown", (event) => {
@@ -4799,8 +4401,8 @@ document.addEventListener("keydown", (event) => {
       closeWhiteboard();
     } else if (!shareDialog.hidden) {
       closeShareDialog();
-    } else if (revisionsDrawerOpen) {
-      closeRevisionsDrawer({ restoreFocus: true });
+    } else if (resolvedDrawerOpen) {
+      closeResolvedDrawer({ restoreFocus: true });
     } else if (warningsDrawerOpen) {
       closeWarningsDrawer({ restoreFocus: true });
     } else if (!moreMenu.hidden) {
@@ -4841,10 +4443,7 @@ initializeLayoutGate();
 
 // Margin comments keep only anchor ids, selectors and page-authored range targets in the artifact.
 // The reviewer's writing stays in the chrome and the store, outside the agent-authored page's reach.
-const checkIcon =
-  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="m5 12.5 4.2 4.2L19 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const reopenIcon =
-  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 4v4.6h4.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const marginThreadCanvas = /** @type {HTMLDivElement} */ (document.getElementById("marginThreadCanvas"));
 
 function threadMessageIds(threads) {
   const ids = new Set();
@@ -4854,31 +4453,52 @@ function threadMessageIds(threads) {
   return ids;
 }
 
-// Server threads plus this tab's queued notes: an anchored note still waiting to send shows as a
-// pending thread, and a queued reply shows at the end of its thread until the server records it.
+function draftMessage(prompt) {
+  return {
+    role: "user",
+    text: String(prompt.prompt || "") || attachmentOnlyText({ ...prompt, tag: prompt.tag }),
+    prompt_id: promptIdentity(prompt),
+    attachments: prompt.attachments,
+    anchor: draftThreadId(prompt) === PAGE_THREAD_ID ? promptAnchor(prompt) : null,
+    pending: true,
+    locked: !isPromptEditable(prompt),
+  };
+}
+
+// Server threads plus this tab's drafts: an anchored note still waiting to send shows as a
+// pending thread, and a draft reply shows at the end of its thread until the server records it.
 function visibleThreads() {
   const threads = commentThreads.map((thread) => ({ ...thread, messages: (thread.messages || []).slice() }));
   const byId = new Map(threads.map((thread) => [thread.id, thread]));
   const recorded = threadMessageIds(threads);
   for (const prompt of queued) {
     const promptId = promptIdentity(prompt);
-    if (!promptId || recorded.has(promptId)) continue;
-    let thread = prompt.thread_id ? byId.get(prompt.thread_id) : null;
-    if (!thread && !prompt.thread_id && prompt.selector && !NON_THREAD_TAGS.has(prompt.tag)) {
+    const threadId = draftThreadId(prompt);
+    if (!promptId || recorded.has(promptId) || threadId === PAGE_THREAD_ID) continue;
+    let thread = byId.get(threadId);
+    if (!thread && !prompt.thread_id) {
       thread = { id: promptId, anchor: prompt, resolved: false, pending: true, messages: [] };
       threads.push(thread);
       byId.set(thread.id, thread);
     }
     if (!thread) continue;
-    thread.messages.push({
-      role: "user",
-      text: prompt.prompt,
-      prompt_id: promptId,
-      attachments: prompt.attachments,
-      pending: true,
-    });
+    thread.messages.push(draftMessage(prompt));
   }
   return threads;
+}
+
+// The page thread's messages: the transcript outside every anchored thread, this tab's page
+// drafts, and any annotation text Lavish handed back because its anchor disappeared.
+function pageThreadMessages() {
+  const messages = displayedChat.filter(isPageChatEntry).map((entry) => ({
+    ...entry,
+    role: entry.role === "agent" ? "agent" : "user",
+  }));
+  for (const prompt of queued) {
+    if (promptIdentity(prompt) && draftThreadId(prompt) === PAGE_THREAD_ID) messages.push(draftMessage(prompt));
+  }
+  for (const text of retiredDrafts) messages.push({ role: "note", text, unstored: unstoredRetiredDrafts.has(text) });
+  return messages;
 }
 
 function syncThreads(data) {
@@ -4899,15 +4519,18 @@ function postThreadAnchors(force = false) {
   postToFrame({ type: "lavish:threadAnchors", anchors });
 }
 
-// Thread UI lives only in the margin and the panel list, so queries stay inside those two roots.
+// Thread UI lives in the comments column and the resolved drawer, so queries stay inside them.
 function threadNodes(selector) {
-  return ["marginThreads", "threadList"].flatMap((id) => [
-    ...(document.getElementById(id)?.querySelectorAll(selector) || []),
-  ]);
+  return [comments, resolvedList].flatMap((root) => [...(root?.querySelectorAll(selector) || [])]);
 }
 
 function threadCards(id) {
   return threadNodes(".comment-thread").filter((node) => node.getAttribute("data-thread-id") === id);
+}
+
+function marginCard(id) {
+  if (id === PAGE_THREAD_ID) return pageThread;
+  return threadCardCache.get("margin:" + id)?.card || null;
 }
 
 function setActiveThread(id, notify = true) {
@@ -4922,72 +4545,195 @@ function saveThreadDrafts() {
   saveJsonState(threadDraftStorageKey, Object.fromEntries(threadDrafts));
 }
 
-// Open = the card shows its reply box. One card is open at a time, as in a shared document.
+// The page comment box survives a reload the same way thread reply boxes do: per tab, per session.
+function savePageDraft() {
+  try {
+    if (chatInput.value) sessionStorage.setItem(pageDraftStorageKey, chatInput.value);
+    else sessionStorage.removeItem(pageDraftStorageKey);
+  } catch {
+    // The box still works if browser storage is unavailable; only reload survival is lost.
+  }
+}
+
+function restorePageDraft() {
+  try {
+    const stored = sessionStorage.getItem(pageDraftStorageKey);
+    if (stored && !chatInput.value) chatInput.value = stored;
+  } catch {
+    // Nothing stored, or storage unavailable.
+  }
+}
+
+function autosize(textarea) {
+  if (!textarea?.style) return;
+  textarea.style.height = "auto";
+  textarea.style.height = Math.min(Number(textarea.scrollHeight) || 0, 220) + "px";
+}
+
+function pendingThreadPrompt(id) {
+  return queued.find((prompt) => promptIdentity(prompt) === id && !prompt.thread_id) || null;
+}
+
+// Open = the card shows every message and its reply box. One card is open at a time, as in a
+// shared document. A comment that was never sent opens straight into editing its words.
 function openThread(id, { focus = true } = {}) {
+  if (!id || ended) return;
+  const pending = pendingThreadPrompt(id);
   if (openThreadId !== id) {
+    if (editingPromptId && !(pending && promptIdentity(pending) === editingPromptId)) commitQueuedEdit();
     openThreadId = id;
     for (const node of threadNodes(".comment-thread")) {
+      if (node.closest?.("#resolvedList")) continue;
       node.classList.toggle("is-open", node.getAttribute("data-thread-id") === id);
     }
   }
-  const inMargin = !isMobileSheet() && !document.getElementById("marginThreads")?.hidden;
-  const card =
-    threadCards(id).find((node) => Boolean(node.closest("#marginThreads")) === inMargin) || threadCards(id)[0];
-  if (!card) return;
-  if (!inMargin || card.closest("#threadList")) {
-    if (isMobileSheet()) setSheetOpen(true);
-    const details = /** @type {HTMLDetailsElement | null} */ (card.closest("details"));
-    if (details) details.open = true;
+  if (pending && isPromptEditable(pending) && editingPromptId !== id) {
+    editingPromptId = id;
+    editingDraft = String(pending.prompt || "");
+    editFocusPending = focus;
   }
+  if (isMobileSheet()) setSheetOpen(true);
+  renderThreads();
+  const card = marginCard(id);
+  if (!card) return;
+  if (id === PAGE_THREAD_ID) {
+    pageMessages.scrollTop = pageMessages.scrollHeight;
+    autosize(chatInput);
+  }
+  animateRestack();
   positionThreads();
-  const input = /** @type {HTMLTextAreaElement | null} */ (card.querySelector(".thread-reply textarea"));
-  if (input) input.value = String(threadDrafts.get(id) || "");
+  const input = /** @type {HTMLTextAreaElement | null} */ (
+    id === PAGE_THREAD_ID ? chatInput : card.querySelector(".thread-edit-input, .thread-reply textarea")
+  );
+  if (input && id !== PAGE_THREAD_ID && input.classList?.contains?.("thread-reply-input")) {
+    input.value = String(threadDrafts.get(id) || "");
+  }
   if (focus && input && !input.disabled) input.focus({ preventScroll: true });
-  if (card.closest("#threadList")) card.scrollIntoView({ block: "nearest" });
+  if (isMobileSheet()) card.scrollIntoView?.({ block: "nearest" });
   setActiveThread(id);
 }
 
-function closeThread(id) {
-  if (openThreadId !== id) return;
-  openThreadId = "";
-  for (const node of threadCards(id)) node.classList.remove("is-open");
-  positionThreads();
-  setActiveThread("");
+// Cards track a scroll frame-for-frame; only an open or close animates the restack.
+let restackTimer;
+function animateRestack() {
+  marginThreadCanvas.classList.add("is-animating");
+  clearTimeout(restackTimer);
+  restackTimer = setTimeout(() => marginThreadCanvas.classList.remove("is-animating"), 240);
 }
 
-// Google-Docs placement: every card wants its anchor's top. The open card gets exactly that;
-// cards below it are pushed down and cards above it pushed up, so none overlap.
+function closeThread(id, { focusCard = false } = {}) {
+  if (openThreadId !== id) return;
+  const card = marginCard(id);
+  openThreadId = "";
+  if (editingPromptId) {
+    commitQueuedEdit();
+    render();
+  }
+  for (const node of threadCards(id)) node.classList.remove("is-open");
+  threadHeights.delete(id);
+  animateRestack();
+  positionThreads();
+  setActiveThread("");
+  if (focusCard && card?.isConnected !== false) card?.focus?.({ preventScroll: true });
+}
+
+// Google-Docs placement: every card wants its anchor's top. A card whose resting size would run
+// into the next anchor's card shrinks to one compact line, decided from anchor spacing alone so a
+// scroll never flips it. The open card (else the first card in view) keeps its exact top; cards
+// below it are pushed down and cards above it pushed up, so none overlap. Cards in view never
+// tuck under the page bar. Runs on every artifact scroll frame: all reads come before all writes,
+// and only the open card is measured each time.
 function positionThreads() {
-  const canvas = document.getElementById("marginThreadCanvas");
+  const canvas = marginThreadCanvas;
   if (!canvas) return;
-  const items = [...canvas.querySelectorAll(".comment-thread")]
-    .map((node) => {
-      const el = /** @type {HTMLElement} */ (node);
-      const geometry = threadGeometry.get(el.getAttribute("data-thread-id") || "");
+  const cards = /** @type {HTMLElement[]} */ ([...canvas.children]);
+  if (isMobileSheet()) {
+    for (const el of cards) {
+      el.style.transform = "";
+      el.classList.remove("is-compact");
+    }
+    return;
+  }
+  if (!pageBarHeight && pageThread.offsetHeight && !pageThread.classList.contains("is-open")) {
+    pageBarHeight = pageThread.offsetHeight;
+  }
+  const floor = (Number(pageThread.offsetTop) || 0) + pageBarHeight + THREAD_CARD_GAP;
+  const unmeasured = cards.filter((el) => {
+    const id = el.getAttribute("data-thread-id") || "";
+    return id !== openThreadId && !threadHeights.has(id);
+  });
+  for (const el of unmeasured) el.classList.remove("is-compact");
+  for (const el of unmeasured) threadHeights.set(el.getAttribute("data-thread-id") || "", el.offsetHeight);
+  const items = cards
+    .map((el) => {
+      const id = el.getAttribute("data-thread-id") || "";
+      const geometry = threadGeometry.get(id);
       const placed = Number.isFinite(geometry?.top) && geometry?.missing !== true;
-      el.classList.toggle("is-unplaced", !placed);
-      return { el, top: placed ? Number(geometry.top) : 0, height: el.offsetHeight, placed };
+      const open = id === openThreadId;
+      return {
+        el,
+        id,
+        open,
+        placed,
+        anchor: placed ? Number(geometry.top) : 0,
+        height: open ? el.offsetHeight : threadHeights.get(id) || THREAD_COMPACT_HEIGHT,
+        compact: false,
+      };
     })
-    .filter((item) => item.placed)
-    .sort((a, b) => a.top - b.top);
-  const pivot = Math.max(
-    0,
-    items.findIndex((item) => item.el.getAttribute("data-thread-id") === openThreadId),
-  );
-  const tops = items.map((item) => item.top);
+    .filter((item) => {
+      item.el.classList.toggle("is-unplaced", !item.placed);
+      return item.placed;
+    })
+    .sort((a, b) => a.anchor - b.anchor);
+  for (let i = 0; i + 1 < items.length; i++) {
+    if (items[i + 1].anchor - items[i].anchor >= items[i].height + THREAD_CARD_GAP) continue;
+    if (!items[i].open) items[i].compact = true;
+    if (!items[i + 1].open) items[i + 1].compact = true;
+  }
+  for (const item of items) if (item.compact) item.height = THREAD_COMPACT_HEIGHT;
+  const desired = items.map((item) => (item.anchor >= 0 ? Math.max(item.anchor, floor) : item.anchor));
+  let pivot = items.findIndex((item) => item.open);
+  if (pivot === -1)
+    pivot = Math.max(
+      0,
+      items.findIndex((item) => item.anchor >= 0),
+    );
+  const tops = desired.slice();
   for (let i = pivot + 1; i < items.length; i++) {
-    tops[i] = Math.max(items[i].top, tops[i - 1] + items[i - 1].height + THREAD_CARD_GAP);
+    tops[i] = Math.max(desired[i], tops[i - 1] + items[i - 1].height + THREAD_CARD_GAP);
   }
   for (let i = pivot - 1; i >= 0; i--) {
-    tops[i] = Math.min(items[i].top, tops[i + 1] - THREAD_CARD_GAP - items[i].height);
+    tops[i] = Math.min(desired[i], tops[i + 1] - THREAD_CARD_GAP - items[i].height);
   }
   items.forEach((item, i) => {
+    item.el.classList.toggle("is-compact", item.compact);
     item.el.style.transform = "translateY(" + Math.round(tops[i]) + "px)";
   });
 }
 
-async function setThreadResolved(id, resolved, card) {
-  const error = card.querySelector(".thread-error");
+function showResolveToast(id) {
+  resolveToastThreadId = id;
+  resolveToastText.textContent = "Resolved";
+  resolveToast.hidden = false;
+  clearTimeout(resolveToastTimer);
+  resolveToastTimer = setTimeout(hideResolveToast, RESOLVE_TOAST_MS);
+}
+
+function hideResolveToast() {
+  clearTimeout(resolveToastTimer);
+  resolveToastTimer = undefined;
+  resolveToastThreadId = "";
+  resolveToast.hidden = true;
+}
+
+function undoResolve() {
+  const id = resolveToastThreadId;
+  hideResolveToast();
+  if (id) setThreadResolved(id, false);
+}
+
+async function setThreadResolved(id, resolved, card = marginCard(id)) {
+  const error = card?.querySelector?.(".thread-error");
   if (error) error.textContent = "";
   try {
     const response = await fetch("/api/" + encodeURIComponent(key) + "/threads/" + encodeURIComponent(id), {
@@ -4998,11 +4744,22 @@ async function setThreadResolved(id, resolved, card) {
     if (!response.ok) throw new Error("request failed");
     if (resolved) closeThread(id);
     syncThreads(await response.json());
+    if (resolved) {
+      showResolveToast(id);
+    } else {
+      // Reopened: back in its place with its whole history, and the page shows where.
+      if (resolveToastThreadId === id) hideResolveToast();
+      closeResolvedDrawer();
+      postToFrame({ type: "lavish:revealThread", id });
+      openThread(id, { focus: false });
+    }
   } catch {
     if (error) error.textContent = resolved ? "Could not resolve. Try again." : "Could not reopen. Try again.";
   }
 }
 
+// Enter in a thread's reply box saves a draft reply. Nothing reaches the agent until Send, which
+// delivers every draft on the page in one batch.
 function sendThreadReply(thread, input) {
   const text = input.value.trim();
   if (!text || ended || terminalSubmission) return;
@@ -5021,33 +4778,74 @@ function sendThreadReply(thread, input) {
   saveThreadDrafts();
   input.value = "";
   render();
-  requestSnapshot("submit", [prompt]);
   openThread(thread.id);
 }
 
-function threadMessageHtml(message) {
-  const agent = message.role === "agent";
-  const body = agent ? message.html || escapeHtml(message.text) : escapeHtml(message.text).replace(/\n/g, "<br>");
-  return (
-    '<div class="thread-author"><span class="thread-avatar" aria-hidden="true">' +
-    (agent ? "A" : "Y") +
-    "</span><span>" +
-    (agent ? "Agent" : "You") +
-    "</span>" +
-    (message.pending ? '<span class="thread-state">Sending</span>' : "") +
-    '</div><div class="thread-body">' +
-    body +
-    "</div>"
-  );
-}
-
-function threadChatEntry(message) {
+function threadEntryFor(message) {
   return message.prompt_id ? displayedChat.find((entry) => entry.prompt_id === message.prompt_id) || null : null;
 }
 
-function threadSignature(thread, inList, missing) {
+// One plain word per thread for where its latest message stands. Drafts come first: a thread
+// with an unsent note is Not sent (Sending while its batch is in flight, Not delivered after a
+// failed send); otherwise an agent answer reads Replied and a sent note reads its receipt.
+function threadStatus(messages) {
+  const drafts = messages.filter((message) => message.pending);
+  if (drafts.length) {
+    const prompts = drafts.map((message) => queued.find((prompt) => promptIdentity(prompt) === message.prompt_id));
+    if (prompts.some((prompt) => prompt && isPromptSending(prompt))) return { text: "Sending", retry: false };
+    if (sendFailureOwner && sendFailureOwner.kind !== "preparation") return { text: "Not delivered", retry: true };
+    return { text: "Not sent", retry: false };
+  }
+  const last = [...messages].reverse().find((message) => message.role === "user" || message.role === "agent");
+  if (!last) return null;
+  if (last.role === "agent") return { text: "Replied", retry: false };
+  return { text: deliveryLabel(threadEntryFor(last) || last), retry: false };
+}
+
+function statusHtml(status) {
+  if (!status) return "";
+  return (
+    escapeHtml(status.text) +
+    (status.retry ? ' · <button type="button" class="text-button thread-retry">Retry</button>' : "")
+  );
+}
+
+function anchorLineHtml(anchor) {
+  if (!anchor || typeof anchor !== "object") return "";
+  const words = [anchor.label, anchor.excerpt].filter(Boolean).map(String).join(" · ");
+  return words ? '<div class="thread-anchor-line">' + escapeHtml(words) + "</div>" : "";
+}
+
+function threadMessageHtml(message, editing, showAnchor) {
+  if (message.role === "note") {
+    return (
+      '<div class="thread-author">Unsent annotation</div><div class="thread-body">The artifact removed or replaced what this note was attached to, so Lavish could not keep it open. Your text is kept here:</div><div class="thread-body note-draft">' +
+      escapeHtml(message.text) +
+      "</div>" +
+      (message.unstored
+        ? '<div class="thread-body note-warning">This browser refused to store it, so copy it before you reload this page.</div>'
+        : "")
+    );
+  }
+  const agent = message.role === "agent";
+  const body = agent ? message.html || escapeHtml(message.text) : escapeHtml(message.text).replace(/\n/g, "<br>");
+  return (
+    '<div class="thread-author">' +
+    (agent ? "Agent" : "You") +
+    (message.pending && !message.locked && !editing
+      ? '<span class="thread-message-actions"><button type="button" class="text-button thread-edit">Edit</button><button type="button" class="text-button thread-delete">Delete</button></span>'
+      : "") +
+    "</div>" +
+    (showAnchor ? anchorLineHtml(message.anchor) : "") +
+    (editing
+      ? '<textarea class="thread-edit-input" rows="1" aria-label="Edit this comment"></textarea><div class="thread-reply-row"><span class="thread-hint">Enter saves · Esc closes</span><button type="button" class="text-button thread-delete">Delete</button></div>'
+      : '<div class="thread-body">' + (agent ? '<div class="chat-md">' + body + "</div>" : body) + "</div>")
+  );
+}
+
+function threadSignature(thread, placement, missing, messages, status) {
   return JSON.stringify([
-    inList,
+    placement,
     missing,
     thread.resolved,
     Boolean(thread.pending),
@@ -5055,59 +4853,41 @@ function threadSignature(thread, inList, missing) {
     Boolean(terminalSubmission),
     thread.anchor?.text,
     thread.anchor?.selector,
-    (thread.messages || []).map((message) => [
+    status,
+    messages.map((message) => [
       message.role,
       message.text,
+      message.html || "",
       Boolean(message.pending),
+      Boolean(message.locked),
+      message.pending && message.prompt_id === editingPromptId,
+      message.unstored || false,
       message.revision_id
         ? Boolean(revisionEntries.find((entry) => entry.id === message.revision_id)?.marks.length)
         : null,
       attachmentCount(message),
-      ["delivered_at", "working_at", "done_at", "receipt"].map((field) => threadChatEntry(message)?.[field] || ""),
     ]),
   ]);
 }
 
-function buildThreadCard(thread, inList, missing) {
-  const card = document.createElement("article");
-  card.className = "comment-thread" + (inList ? " in-list" : "") + (thread.pending ? " is-pending" : "");
-  card.dataset.threadId = thread.id;
-  const quote = String(thread.anchor.text || thread.anchor.selector || "Comment")
-    .replace(/\s+/g, " ")
-    .trim();
-  card.setAttribute("aria-label", "Comment on " + quote.slice(0, 120));
-  const resolveLabel = thread.resolved ? "Reopen comment" : "Resolve comment";
-  card.innerHTML =
-    '<header class="thread-head"><button type="button" class="thread-anchor" title="Show in page">' +
-    escapeHtml(quote) +
-    "</button>" +
-    (thread.pending
-      ? '<span class="thread-state">Not sent</span>'
-      : '<button type="button" class="thread-resolve' +
-        (thread.resolved ? " thread-reopen" : "") +
-        '" aria-label="' +
-        resolveLabel +
-        '" title="' +
-        resolveLabel +
-        '">' +
-        (thread.resolved ? reopenIcon + "<span>Reopen</span>" : checkIcon) +
-        "</button>") +
-    "</header>" +
-    (missing ? '<p class="thread-notice">The text this comment was on is no longer on the page.</p>' : "") +
-    '<ol class="thread-messages"></ol><div class="thread-error" role="status"></div>';
-  const list = card.querySelector(".thread-messages");
-  const messages = thread.messages || [];
+function queuedIndexOf(promptId) {
+  return queued.findIndex((prompt) => promptIdentity(prompt) === promptId);
+}
+
+// Fills a thread's message list. A resting card shows its root comment and its latest message,
+// with the middle folded behind a count; the open card shows everything.
+function fillThreadMessages(list, messages, { showAnchors = false } = {}) {
   messages.forEach((message, index) => {
     const item = document.createElement("li");
-    item.className = "thread-message " + (message.role === "agent" ? "agent" : "user");
-    // A long thread folds its middle while the card is closed, like a shared document's margin.
+    const editing = Boolean(message.pending && message.prompt_id && message.prompt_id === editingPromptId);
+    item.className =
+      "thread-message " +
+      (message.role === "agent" ? "agent" : message.role === "note" ? "note" : "user") +
+      (message.pending ? " is-draft" : "");
     if (messages.length > THREAD_COLLAPSE_AFTER && index > 0 && index < messages.length - 1) {
       item.classList.add("is-middle");
     }
-    item.innerHTML = threadMessageHtml(message);
-    // The same 👀 🛠️ ✅ receipts the chat bubble used to carry, read from its transcript entry.
-    const entry = message.role === "user" && !message.pending ? threadChatEntry(message) : null;
-    if (entry) item.insertAdjacentHTML("beforeend", receiptHtml(entry));
+    item.innerHTML = threadMessageHtml(message, editing, showAnchors);
     if (attachmentCount(message)) {
       const attachments = document.createElement("div");
       attachments.innerHTML = bubbleAttachmentsHtml(message);
@@ -5116,7 +4896,7 @@ function buildThreadCard(thread, inList, missing) {
     if (message.revision_id) {
       const reveal = document.createElement("button");
       reveal.type = "button";
-      reveal.className = "thread-reveal";
+      reveal.className = "text-button thread-reveal";
       reveal.textContent = "Reveal change";
       const revision = revisionEntries.find((entry) => entry.id === message.revision_id);
       reveal.disabled = !revision?.marks.length;
@@ -5129,6 +4909,46 @@ function buildThreadCard(thread, inList, missing) {
       });
       item.appendChild(reveal);
     }
+    if (message.pending && message.prompt_id) {
+      item.querySelector(".thread-edit")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const index = queuedIndexOf(message.prompt_id);
+        if (index !== -1) editQueuedPrompt(index, { reveal: false });
+      });
+      for (const button of item.querySelectorAll(".thread-delete")) {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (editingPromptId === message.prompt_id) endQueuedEdit();
+          const index = queuedIndexOf(message.prompt_id);
+          if (index !== -1) removeQueuedPrompt(index);
+        });
+      }
+      const editor = /** @type {HTMLTextAreaElement | null} */ (item.querySelector(".thread-edit-input"));
+      if (editor) {
+        editor.value = editingDraft;
+        editor.addEventListener("input", () => {
+          editingDraft = String(editor.value || "");
+          autosize(editor);
+        });
+        editor.addEventListener("keydown", (event) => {
+          if (event.isComposing || event.keyCode === 229) return;
+          // The annotation card's keys: Enter keeps the words, Shift+Enter breaks the line, and
+          // Esc closes keeping what was typed.
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            const threadId = openThreadId;
+            saveQueuedEdit();
+            if (threadId && threadId !== PAGE_THREAD_ID && !pendingThreadPrompt(threadId)) openThread(threadId);
+            else closeThread(threadId, { focusCard: true });
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            closeThread(openThreadId, { focusCard: true });
+          }
+        });
+      }
+    }
     list.appendChild(item);
     if (messages.length > THREAD_COLLAPSE_AFTER && index === 0) {
       const more = document.createElement("li");
@@ -5138,20 +4958,80 @@ function buildThreadCard(thread, inList, missing) {
       list.appendChild(more);
     }
   });
-  card.querySelector(".thread-anchor").addEventListener("click", (event) => {
+}
+
+function bindStatusRetry(root) {
+  root.querySelector?.(".thread-retry")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    sendQueued(Boolean(terminalSubmission));
+  });
+}
+
+function bindCardHover(card, id) {
+  card.addEventListener("mouseenter", () => setActiveThread(id));
+  card.addEventListener("mouseleave", () => {
+    if (!card.contains(document.activeElement)) setActiveThread(openThreadId);
+  });
+  card.addEventListener("focusin", () => setActiveThread(id));
+  card.addEventListener("focusout", (event) => {
+    if (!card.contains(/** @type {Node | null} */ (event.relatedTarget))) setActiveThread(openThreadId);
+  });
+}
+
+function buildThreadCard(thread, placement, missing, messages, status) {
+  const inDrawer = placement === "drawer";
+  const card = document.createElement("article");
+  card.className = "comment-thread" + (thread.pending ? " is-pending" : "") + (thread.resolved ? " is-resolved" : "");
+  card.dataset.threadId = thread.id;
+  card.tabIndex = 0;
+  // A table-cell draft names its row and column, which the raw cell text alone would lose.
+  const cell = thread.pending ? promptAnchor(thread.anchor) : null;
+  const quote = String(
+    (cell?.kind === "cell" && cell.excerpt) || thread.anchor.text || thread.anchor.selector || "Comment",
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  card.setAttribute("aria-label", "Comment on " + quote.slice(0, 120));
+  // A compact card sits beside its anchor, so its one line says what was last written there.
+  const latest = [...messages].reverse().find((message) => message.role === "user" || message.role === "agent");
+  const snippet = latest
+    ? (latest.role === "agent" ? "Agent: " : "You: ") +
+      String(latest.text || "")
+        .replace(/\s+/g, " ")
+        .trim()
+    : quote;
+  card.innerHTML =
+    '<header class="thread-head"><button type="button" class="thread-quote" title="Show in page">' +
+    escapeHtml(quote) +
+    '</button><span class="thread-snippet" aria-hidden="true">' +
+    escapeHtml(snippet.slice(0, 160)) +
+    '</span><span class="thread-status">' +
+    statusHtml(status) +
+    "</span></header>" +
+    (missing ? '<p class="thread-notice">The text this comment was on is no longer on the page.</p>' : "") +
+    '<ol class="thread-messages"></ol><div class="thread-error" role="status"></div>';
+  fillThreadMessages(card.querySelector(".thread-messages"), messages);
+  bindStatusRetry(card);
+  card.querySelector(".thread-quote").addEventListener("click", (event) => {
     event.stopPropagation();
     postToFrame({ type: "lavish:revealThread", id: thread.id });
-    openThread(thread.id);
+    if (inDrawer) card.classList.toggle("is-open");
+    else openThread(thread.id);
   });
-  card.querySelector(".thread-resolve")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    setThreadResolved(thread.id, !thread.resolved, card);
-  });
-  if (!thread.resolved && !thread.pending && !ended) {
+  if (thread.resolved) {
+    const actions = document.createElement("div");
+    actions.className = "thread-actions";
+    actions.innerHTML = '<button type="button" class="text-button thread-reopen">Reopen</button>';
+    actions.querySelector(".thread-reopen").addEventListener("click", (event) => {
+      event.stopPropagation();
+      setThreadResolved(thread.id, false, card);
+    });
+    card.appendChild(actions);
+  } else if (!thread.pending && !ended) {
     const form = document.createElement("form");
     form.className = "thread-reply";
     form.innerHTML =
-      '<textarea rows="1" aria-label="Reply to this comment" placeholder="Reply"></textarea><div class="thread-reply-row"><span class="thread-hint">Enter to send · Esc to close</span><button type="submit" class="thread-send">Reply</button></div>';
+      '<textarea class="thread-reply-input" rows="1" aria-label="Reply to this comment" placeholder="Reply"></textarea><div class="thread-reply-row"><span class="thread-hint">Enter saves · Esc closes</span><button type="button" class="text-button thread-resolve">Resolve</button></div>';
     const input = /** @type {HTMLTextAreaElement} */ (form.querySelector("textarea"));
     input.value = String(threadDrafts.get(thread.id) || "");
     input.disabled = Boolean(terminalSubmission);
@@ -5159,6 +5039,8 @@ function buildThreadCard(thread, inList, missing) {
       if (input.value) threadDrafts.set(thread.id, input.value);
       else threadDrafts.delete(thread.id);
       saveThreadDrafts();
+      autosize(input);
+      if (!inDrawer) positionThreads();
     });
     input.addEventListener("keydown", (event) => {
       // WebKit fires compositionend before the IME-confirming keydown, leaving only keyCode 229.
@@ -5169,115 +5051,237 @@ function buildThreadCard(thread, inList, missing) {
       } else if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        input.blur();
-        closeThread(thread.id);
+        if (inDrawer) card.classList.remove("is-open");
+        else closeThread(thread.id, { focusCard: true });
       }
     });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       sendThreadReply(thread, input);
     });
-    card.appendChild(form);
-  } else if (thread.pending) {
-    const send = document.createElement("button");
-    send.type = "button";
-    send.className = "thread-send thread-send-pending";
-    send.textContent = "Send";
-    send.disabled = ended || Boolean(terminalSubmission);
-    send.addEventListener("click", (event) => {
+    form.querySelector(".thread-resolve").addEventListener("click", (event) => {
       event.stopPropagation();
-      requestSnapshot(
-        "submit",
-        queued.filter((prompt) => promptIdentity(prompt) === thread.id),
-      );
+      setThreadResolved(thread.id, true, card);
     });
-    card.appendChild(send);
+    card.appendChild(form);
   }
   card.addEventListener("click", (event) => {
     const target = /** @type {Element} */ (event.target);
-    if (target.closest("button, a, textarea")) return;
-    if (!thread.resolved && !thread.pending) openThread(thread.id);
+    if (target.closest?.("button, a, textarea")) return;
+    if (inDrawer) card.classList.add("is-open");
+    else if (!thread.resolved) openThread(thread.id);
   });
-  card.addEventListener("mouseenter", () => setActiveThread(thread.id));
-  card.addEventListener("mouseleave", () => {
-    if (!card.contains(document.activeElement)) setActiveThread(openThreadId);
-  });
-  card.addEventListener("focusin", () => setActiveThread(thread.id));
-  card.addEventListener("focusout", (event) => {
-    if (!card.contains(/** @type {Node | null} */ (event.relatedTarget))) setActiveThread(openThreadId);
-  });
+  if (!inDrawer) bindCardHover(card, thread.id);
   return card;
 }
 
-function threadCard(thread, inList, missing) {
-  const cacheKey = (inList ? "list:" : "margin:") + thread.id;
-  const signature = threadSignature(thread, inList, missing);
+function threadCard(thread, placement, missing) {
+  const messages = thread.messages || [];
+  const status = threadStatus(messages);
+  const cacheKey = placement + ":" + thread.id;
+  const signature = threadSignature(thread, placement, missing, messages, status);
   const cached = threadCardCache.get(cacheKey);
-  const card = cached?.signature === signature ? cached.card : buildThreadCard(thread, inList, missing);
+  let card = cached?.card;
+  if (cached?.signature !== signature) {
+    card = buildThreadCard(thread, placement, missing, messages, status);
+    if (placement === "margin") threadHeights.delete(thread.id);
+  }
   threadCardCache.set(cacheKey, { signature, card });
-  card.classList.toggle("is-open", openThreadId === thread.id);
-  card.classList.toggle("is-active", activeThreadId === thread.id);
+  if (placement === "margin") {
+    card.classList.toggle("is-open", openThreadId === thread.id);
+    card.classList.toggle("is-active", activeThreadId === thread.id);
+  }
   return card;
+}
+
+function threadAnchorTop(thread) {
+  const top = threadGeometry.get(thread.id)?.top;
+  return Number.isFinite(top) ? Number(top) : Number.POSITIVE_INFINITY;
+}
+
+// The page thread is a fixed element so its comment box, images and draft survive every render.
+// Only its message list is rebuilt, and only when what it shows changed.
+function renderPageThread() {
+  const messages = pageThreadMessages();
+  const status = threadStatus(messages);
+  const signature = threadSignature(
+    { id: PAGE_THREAD_ID, anchor: {}, resolved: false },
+    "page",
+    false,
+    messages,
+    status,
+  );
+  pageThread.classList.toggle("is-open", openThreadId === PAGE_THREAD_ID);
+  pageThread.classList.toggle("is-active", activeThreadId === PAGE_THREAD_ID);
+  pageThread.classList.toggle("is-empty", messages.length === 0);
+  if (signature === pageSignature) return;
+  pageSignature = signature;
+  pageThreadStatus.innerHTML = statusHtml(status);
+  bindStatusRetry(pageThreadStatus);
+  // A new reply never yanks the reader: the list follows the end only if they were already there.
+  const atEnd = pageMessages.scrollTop + pageMessages.clientHeight >= pageMessages.scrollHeight - 4;
+  const scrollTop = pageMessages.scrollTop;
+  pageMessages.replaceChildren();
+  if (!messages.length) {
+    const empty = document.createElement("li");
+    empty.className = "thread-empty";
+    empty.textContent = "Comment on the whole page";
+    pageMessages.appendChild(empty);
+  }
+  fillThreadMessages(pageMessages, messages, { showAnchors: true });
+  pageMessages.scrollTop = atEnd ? pageMessages.scrollHeight : scrollTop;
+  if (openThreadId !== PAGE_THREAD_ID) pageBarHeight = 0;
+}
+
+function renderResolvedDrawer(threads, missing) {
+  const resolved = threads.filter((thread) => thread.resolved);
+  const offPage = threads.filter((thread) => !thread.resolved && missing(thread));
+  const total = resolved.length + offPage.length;
+  resolvedWrap.hidden = total === 0 || ended;
+  resolvedCount.textContent =
+    (resolved.length ? resolved.length + " resolved" : "") +
+    (resolved.length && offPage.length ? " · " : "") +
+    (offPage.length ? offPage.length + " off-page" : "");
+  if (resolvedWrap.hidden && resolvedDrawerOpen) setResolvedDrawerOpen(false);
+  const nodes = [];
+  if (offPage.length) {
+    const heading = document.createElement("div");
+    heading.className = "thread-group";
+    heading.textContent = "No longer on the page";
+    nodes.push(heading, ...offPage.map((thread) => threadCard(thread, "drawer", true)));
+  }
+  if (resolved.length) {
+    const heading = document.createElement("div");
+    heading.className = "thread-group";
+    heading.textContent = "Resolved";
+    nodes.push(heading, ...resolved.map((thread) => threadCard(thread, "drawer", missing(thread))));
+  }
+  resolvedList.replaceChildren(...nodes);
+}
+
+function setResolvedDrawerOpen(open) {
+  resolvedDrawerOpen = Boolean(open) && !ended && !resolvedWrap.hidden;
+  resolvedDrawer.hidden = !resolvedDrawerOpen;
+  resolvedButton.setAttribute("aria-expanded", String(resolvedDrawerOpen));
+  if (resolvedDrawerOpen) closeMenus();
+}
+
+function closeResolvedDrawer({ restoreFocus = false } = {}) {
+  if (!resolvedDrawerOpen) return;
+  setResolvedDrawerOpen(false);
+  if (restoreFocus) resolvedButton.focus();
 }
 
 function renderThreads() {
-  const margin = document.getElementById("marginThreads");
-  const canvas = document.getElementById("marginThreadCanvas");
-  const list = document.getElementById("threadList");
-  if (!margin || !canvas || !list) return;
+  const canvas = marginThreadCanvas;
+  if (!canvas || !pageThread) return;
   const focused = /** @type {HTMLTextAreaElement | null} */ (
     document.activeElement?.closest?.(".comment-thread") ? document.activeElement : null
   );
   const caret = focused?.tagName === "TEXTAREA" ? [focused.selectionStart, focused.selectionEnd] : null;
   const focusedCard = focused?.closest?.(".comment-thread");
   const focusedKey = focusedCard
-    ? (focusedCard.closest("#threadList") ? "list:" : "margin:") + focusedCard.getAttribute("data-thread-id")
+    ? (focusedCard.closest?.("#resolvedList") ? "drawer:" : "margin:") + focusedCard.getAttribute("data-thread-id")
     : "";
+  const focusedEditor = focused?.classList?.contains?.("thread-edit-input");
+  // The open card's history keeps the reader's place when an answer lands in it.
+  const openList = marginCard(openThreadId)?.querySelector?.(".thread-messages");
+  const openScroll = openList
+    ? {
+        top: openList.scrollTop,
+        atEnd: openList.scrollTop + openList.clientHeight >= openList.scrollHeight - 4,
+      }
+    : null;
   const threads = visibleThreads();
   const missing = (thread) => threadGeometry.get(thread.id)?.missing === true;
-  const inMargin = threads.filter((thread) => !thread.resolved && !missing(thread));
-  margin.hidden = inMargin.length === 0;
-  canvas.replaceChildren(...inMargin.map((thread) => threadCard(thread, false, false)));
+  const inMargin = threads
+    .filter((thread) => !thread.resolved && !missing(thread))
+    .sort((a, b) => threadAnchorTop(a) - threadAnchorTop(b));
+  renderPageThread();
+  canvas.replaceChildren(...inMargin.map((thread) => threadCard(thread, "margin", false)));
   const live = new Set(threads.map((thread) => thread.id));
   for (const cacheKey of threadCardCache.keys()) {
     if (!live.has(cacheKey.slice(cacheKey.indexOf(":") + 1))) threadCardCache.delete(cacheKey);
   }
-  if (!threads.length) {
-    list.replaceChildren();
-  } else {
-    if (!threadArchive) {
-      threadArchive = /** @type {HTMLDetailsElement} */ (document.createElement("details"));
-      threadArchive.className = "thread-archive";
-      threadArchiveSummary = document.createElement("summary");
-    }
-    if (threadArchive.parentNode !== list) list.replaceChildren(threadArchive);
-    const open = threads.filter((thread) => !thread.resolved);
-    const resolved = threads.filter((thread) => thread.resolved);
-    threadArchiveSummary.textContent =
-      "Comments · " + open.length + " open" + (resolved.length ? " · " + resolved.length + " resolved" : "");
-    const nodes = [threadArchiveSummary, ...open.map((thread) => threadCard(thread, true, missing(thread)))];
-    if (resolved.length) {
-      const heading = document.createElement("div");
-      heading.className = "thread-group";
-      heading.textContent = "Resolved";
-      nodes.push(heading, ...resolved.map((thread) => threadCard(thread, true, missing(thread))));
-    }
-    threadArchive.replaceChildren(...nodes);
+  for (const id of threadHeights.keys()) if (!live.has(id)) threadHeights.delete(id);
+  renderResolvedDrawer(threads, missing);
+  if (openThreadId && openThreadId !== PAGE_THREAD_ID && !live.has(openThreadId)) openThreadId = "";
+  const nextOpenList = marginCard(openThreadId)?.querySelector?.(".thread-messages");
+  if (openScroll && nextOpenList && nextOpenList !== openList) {
+    nextOpenList.scrollTop = openScroll.atEnd ? nextOpenList.scrollHeight : openScroll.top;
   }
   postThreadAnchors();
   positionThreads();
   // A card rebuilt under the reviewer's caret (say, an agent answer arriving mid-reply) hands focus
   // and the caret to its replacement; the draft text itself is already in threadDrafts.
-  const target = focused?.isConnected
+  const replacement = threadCardCache.get(focusedKey)?.card;
+  let target = focused?.isConnected
     ? focused
     : caret
-      ? /** @type {HTMLTextAreaElement | null} */ (threadCardCache.get(focusedKey)?.card.querySelector("textarea"))
+      ? /** @type {HTMLTextAreaElement | null} */ (
+          replacement?.querySelector(focusedEditor ? ".thread-edit-input" : ".thread-reply textarea")
+        )
       : null;
+  if (editFocusPending) {
+    const editor = /** @type {HTMLTextAreaElement | null} */ (
+      threadNodes(".thread-edit-input").find((node) => node.isConnected !== false) || null
+    );
+    if (editor) {
+      editFocusPending = false;
+      editor.focus({ preventScroll: true });
+      editor.setSelectionRange?.(editor.value.length, editor.value.length);
+      autosize(editor);
+      return;
+    }
+  }
   if (target && document.activeElement !== target && target.isConnected) {
     target.focus({ preventScroll: true });
     if (caret) target.setSelectionRange(caret[0], caret[1]);
   }
 }
+
+// Keyboard review: with a card focused, j/k or the arrow keys walk the comments in page order
+// and bring each anchor into view, Enter opens the card, Esc closes it.
+function threadOrder() {
+  const cards = /** @type {HTMLElement[]} */ ([...marginThreadCanvas.children]).sort(
+    (a, b) =>
+      (threadGeometry.get(a.getAttribute("data-thread-id"))?.top ?? Infinity) -
+      (threadGeometry.get(b.getAttribute("data-thread-id"))?.top ?? Infinity),
+  );
+  return [pageThread, ...cards];
+}
+
+commentsBody.addEventListener("keydown", (event) => {
+  const target = /** @type {HTMLElement} */ (event.target);
+  if (!target?.classList?.contains?.("comment-thread")) return;
+  const id = target.getAttribute("data-thread-id") || "";
+  const step =
+    event.key === "j" || event.key === "ArrowDown" ? 1 : event.key === "k" || event.key === "ArrowUp" ? -1 : 0;
+  if (step && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    const order = threadOrder();
+    const next = order[order.indexOf(target) + step];
+    if (!next) return;
+    const nextId = next.getAttribute("data-thread-id") || "";
+    if (nextId !== PAGE_THREAD_ID) postToFrame({ type: "lavish:revealThread", id: nextId });
+    next.focus({ preventScroll: true });
+    setActiveThread(nextId);
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    openThread(id);
+  } else if (event.key === "Escape" && openThreadId === id) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeThread(id, { focusCard: true });
+  }
+});
+
+pageThread.addEventListener("click", (event) => {
+  const target = /** @type {Element} */ (event.target);
+  if (target.closest?.("button, a, textarea, input")) return;
+  if (openThreadId !== PAGE_THREAD_ID) openThread(PAGE_THREAD_ID);
+});
+bindCardHover(pageThread, PAGE_THREAD_ID);
 
 // WebSockets leave the browser's HTTP connection pool free for sends and artifact loads.
 const events = new Map();
@@ -5337,7 +5341,10 @@ events.set("agent-reply", (data) => {
     text: String(data.text || ""),
     ...(data.at ? { at: String(data.at) } : {}),
   };
-  if (addChat(entry)) displayedChat.push(entry);
+  if (isPageChatEntry(entry)) {
+    displayedChat.push(entry);
+    renderThreads();
+  }
   noteAgentReply(entry.text);
 });
 events.set("chat-sync", (data) => {
@@ -5351,15 +5358,13 @@ events.set("layout-warnings", (data) => setLayoutWarnings(data.warnings || []));
 events.set("ended", () => markSessionEnded());
 connectLiveEvents();
 
+restorePageDraft();
 applySheetState();
-applyPanelCollapsed();
 settleQueuedFromTranscript(initialChat, false);
 render();
 setChromeOutdated(false);
 setWarningsDrawerOpen(false);
 renderWarnings();
-initialChat.forEach((item) => addChat(item));
-retiredDrafts.forEach((text) => renderRetiredDraft(text));
 setAgentPresence("waiting");
 // The session already ended before this page (re)loaded, so there is no future live `ended` event
 // to wait for - start read-only instead of looking live until a Send gets silently refused.

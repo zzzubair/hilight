@@ -1,0 +1,20 @@
+{
+  "label": "after",
+  "reply": 200,
+  "counts": {
+    "marginCards": 42,
+    "panel": false
+  },
+  "overlaps": 0,
+  "alignment": {
+    "visibleAnchors": 12,
+    "within4px": 8,
+    "worstPx": 100
+  },
+  "scroll": {
+    "p50": "16.7",
+    "p95": "17.2",
+    "max": "18.3"
+  },
+  "errors": []
+}

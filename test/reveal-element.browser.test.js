@@ -86,7 +86,7 @@ window.addEventListener('message', async (event) => {
 </script></body></html>`;
 
 test(
-  "Reveal tracks off-screen revision blocks, later scrolling, nested scrolling and reduced motion",
+  "a thread reply's Reveal change tracks off-screen revision blocks, later scrolling, nested scrolling and reduced motion",
   { skip: !runBrowserE2e, timeout: 180_000 },
   async () => {
     const temp = await mkdtemp(path.join(tmpdir(), "lavish-reveal-e2e-"));
@@ -130,7 +130,7 @@ test(
           }
           window.addEventListener('message', handler);
         });
-        for (let i = 0; i < ${revision}; i++) document.querySelector('.revision-reveal').click();
+        for (let i = 0; i < ${revision}; i++) document.querySelector('#marginThreadCanvas .thread-reveal').click();
         ${reveal ? `frame.contentWindow.postMessage({ type: 'lavish:revealElement', selector: ${JSON.stringify(selector)} }, '*');` : ""}
         frame.contentWindow.postMessage({ type: 'reveal-probe', id, selector: ${JSON.stringify(selector)}, action: ${JSON.stringify(action)}, reduced: ${reduced} }, '*');
         return JSON.stringify(await response);
@@ -149,10 +149,36 @@ test(
       const output = run(process.execPath, ["bin/lavish-axi.js", artifact, "--no-open"], lavishEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
+      const key = new URL(url).pathname.split("/").pop();
       browser("open", url);
       browser("emulate", "--viewport", "1440x1000x1");
       evaluate(`async () => { await new Promise(resolve => setTimeout(resolve, 4000)); return JSON.stringify(true); }`);
-      evaluate(`() => { document.getElementById('revisionsButton').click(); return JSON.stringify(true); }`);
+
+      // Reveal lives only on thread replies: comment on the heading, then answer that thread with
+      // `## c1 reveal=r1` so its card carries a Reveal change button for the r1 blocks.
+      const sent = evaluate(`async () => {
+        const response = await fetch("/api/${key}/prompts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            prompts: [{ prompt_id: crypto.randomUUID(), uid: "", prompt: "What changed?", selector: "h1", tag: "h1", text: "Reveal regression" }],
+            domSnapshot: "",
+          }),
+        });
+        return JSON.stringify(response.status);
+      }`);
+      assert.equal(sent, 200);
+      const replyFile = path.join(temp, "reply.md");
+      await writeFile(replyFile, "## c1 reveal=r1\nBoth sections changed.\n");
+      run(process.execPath, ["bin/lavish-axi.js", "reply", artifact, "--agent-reply-file", replyFile], lavishEnv);
+      evaluate(`async () => {
+        const deadline = Date.now() + 10000;
+        while (!document.querySelector('#marginThreadCanvas .thread-reveal:not([disabled])')) {
+          if (Date.now() > deadline) throw new Error('Reveal change never appeared');
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return JSON.stringify(true);
+      }`);
 
       const first = probe("#first", { revision: 1 });
       if (process.env.LAVISH_AXI_REVEAL_SCREENSHOT) {

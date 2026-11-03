@@ -100,7 +100,7 @@ test(
           ' badge: document.getElementById("warningsCount").textContent,' +
           ' label: document.getElementById("warningsButton").getAttribute("aria-label"),' +
           ' gate: document.body.classList.contains("layout-gate-active"),' +
-          ' pills: document.querySelectorAll(".bubble.queued").length,' +
+          ' pills: document.querySelectorAll("#pageMessages .thread-message.is-draft").length,' +
           " loads: window.__lavishArtifactLoads," +
           ' rows: [...document.querySelectorAll(".warning-row")].map((row) => ({' +
           '   title: row.querySelector(".warning-title").textContent,' +
@@ -129,12 +129,18 @@ test(
 
     function openReview(url, settleMs = 4500) {
       run("chrome-devtools-axi", ["open", url], chromeEnv);
-      run("chrome-devtools-axi", ["wait", String(settleMs)], chromeEnv, settleMs + 45_000);
+      wait(settleMs);
       instrumentArtifactLoads();
     }
 
     function wait(ms) {
-      run("chrome-devtools-axi", ["wait", String(ms)], chromeEnv, ms + 45_000);
+      // An in-page timer: `chrome-devtools-axi wait <ms>` fails with "fn is not a function" in 0.1.34.
+      run(
+        "chrome-devtools-axi",
+        ["eval", `async()=>{await new Promise(r=>setTimeout(r,${ms}));return true}`],
+        chromeEnv,
+        ms + 45_000,
+      );
     }
 
     try {
@@ -144,6 +150,8 @@ test(
       const artifact = path.join(temp, "review.html");
       await copyFile(path.join(fixtures, "control-broken-clipping.html"), artifact);
       const url = openArtifact(artifact);
+      // chrome-devtools-axi 0.1.34 refuses `emulate` until a page is selected.
+      run("chrome-devtools-axi", ["open", "data:text/html,"], chromeEnv);
       run("chrome-devtools-axi", ["emulate", "--viewport", "1440x1000x1"], chromeEnv);
       openReview(url);
 
@@ -161,9 +169,9 @@ test(
       const reopened = inbox();
       assert.equal(reopened.loads, 1, "reopening the session preserves live artifact reloads");
       assert.equal(
-        evaluate(
-          'JSON.stringify(new URL(document.getElementById("artifact").src).searchParams.get("artifact_revision"))',
-        ),
+        // `frame.src` keeps the first load's URL (later loads are `location.replace`), so read the
+        // chrome's own record of the revision it last loaded.
+        evaluate("JSON.stringify(artifactLoadRevision)"),
         2,
       );
       const sessionKey = new URL(url).pathname.split("/").pop();
@@ -451,7 +459,13 @@ test("a live reload preserves the review context Lavish owns", { skip: !runBrows
     run("chrome-devtools-axi", ["click", `@${ref(pattern)}`], chromeEnv);
   }
   function wait(ms) {
-    run("chrome-devtools-axi", ["wait", String(ms)], chromeEnv, ms + 45_000);
+    // An in-page timer: `chrome-devtools-axi wait <ms>` fails with "fn is not a function" in 0.1.34.
+    run(
+      "chrome-devtools-axi",
+      ["eval", `async()=>{await new Promise(r=>setTimeout(r,${ms}));return true}`],
+      chromeEnv,
+      ms + 45_000,
+    );
   }
 
   try {
@@ -460,13 +474,14 @@ test("a live reload preserves the review context Lavish owns", { skip: !runBrows
     const output = run(process.execPath, ["bin/lavish-axi.js", artifact, "--no-open"], lavishEnv);
     const url = output.match(/url:\s*"([^"]+)"/)?.[1];
     assert.ok(url, output);
+    run("chrome-devtools-axi", ["open", "data:text/html,"], chromeEnv);
     run("chrome-devtools-axi", ["emulate", "--viewport", "1440x1000x1"], chromeEnv);
     run("chrome-devtools-axi", ["open", url], chromeEnv);
     wait(4500);
 
     // Lavish-owned answers: a radio and a checkbox inside a data-lavish-question scope.
-    click(/radio " Pro"/);
-    click(/checkbox " Include beta cohort"/);
+    click(/radio "Pro"/);
+    click(/checkbox "Include beta cohort"/);
     // Unsent annotation text on an element the reload will replace.
     click(/Annotate this paragraph/);
     wait(800);
@@ -474,35 +489,37 @@ test("a live reload preserves the review context Lavish owns", { skip: !runBrows
     wait(800);
 
     const before = snapshot();
-    assert.match(before, /radio " Pro" checked/);
-    assert.match(before, /checkbox " Include beta cohort" checked/);
+    assert.match(before, /radio "Pro" checked/);
+    assert.match(before, /checkbox "Include beta cohort" checked/);
 
     await writeFile(artifact, `${await readFile(artifact, "utf8")}\n<!-- revision -->\n`);
     wait(5000);
 
     const after = snapshot();
-    assert.match(after, /radio " Pro" checked/, "a Lavish-owned answer survives the reload");
-    assert.match(after, /checkbox " Include beta cohort" checked/);
+    assert.match(after, /radio "Pro" checked/, "a Lavish-owned answer survives the reload");
+    assert.match(after, /checkbox "Include beta cohort" checked/);
     assert.match(after, /Annotate <p>/, "the open annotation card comes back");
 
-    // Queueing the restored card proves the unsent text itself survived, not just the card.
-    click(/button "Queue"/);
+    // Saving the restored card proves the unsent text itself survived, not just the card: it
+    // becomes a dashed Not sent margin card whose quote stays on one line.
+    click(/button "Save"/);
     wait(800);
     const queuedNote = run(
       "chrome-devtools-axi",
       [
         "eval",
-        '() => { const bubble = document.querySelector(".bubble.queued"); const excerpt = bubble.querySelector(".anchor-excerpt"); const scroll = document.getElementById("panelScroll"); const chat = document.getElementById("chatLog"); return JSON.stringify({ text: bubble.querySelector(".bubble-text").textContent, borderStyle: getComputedStyle(bubble).borderStyle, excerptWhiteSpace: getComputedStyle(excerpt).whiteSpace, excerptHeight: excerpt.getBoundingClientRect().height, excerptLineHeight: parseFloat(getComputedStyle(excerpt).lineHeight), scrollOverflowY: getComputedStyle(scroll).overflowY, emptyCopyDisplay: getComputedStyle(chat, "::before").display }); }',
+        '() => { const card = document.querySelector("#marginThreadCanvas .comment-thread.is-pending"); const quote = card.querySelector(".thread-quote"); return JSON.stringify({ text: card.querySelector(".thread-body").textContent, status: card.querySelector(".thread-status").textContent, borderStyle: getComputedStyle(card).borderTopStyle, quoteWhiteSpace: getComputedStyle(quote).whiteSpace, quoteHeight: quote.getBoundingClientRect().height, quoteLineHeight: parseFloat(getComputedStyle(quote).lineHeight) }); }',
       ],
       chromeEnv,
     );
-    const geometry = JSON.parse(JSON.parse(queuedNote.match(/result:\s*("(?:[^"\\]|\\.)*")/s)[1]));
+    let geometry = JSON.parse(queuedNote.match(/result:\s*("(?:[^"\\]|\\.)*")/s)?.[1] || "null");
+    while (typeof geometry === "string") geometry = JSON.parse(geometry);
+    assert.ok(geometry, queuedNote);
     assert.equal(geometry.text, "Shorten this to one sentence");
+    assert.equal(geometry.status, "Not sent");
     assert.equal(geometry.borderStyle, "dashed");
-    assert.equal(geometry.excerptWhiteSpace, "nowrap");
-    assert.equal(geometry.scrollOverflowY, "auto");
-    assert.equal(geometry.emptyCopyDisplay, "none");
-    assert.ok(geometry.excerptHeight <= geometry.excerptLineHeight + 1, "the anchor excerpt stays on one line");
+    assert.equal(geometry.quoteWhiteSpace, "nowrap");
+    assert.ok(geometry.quoteHeight <= geometry.quoteLineHeight + 1, "the anchor quote stays on one line");
   } finally {
     run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
     run("chrome-devtools-axi", ["stop"], chromeEnv);

@@ -7,12 +7,11 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-// The phone-width conversation surface, measured in a real browser. Before this change the panel
-// was a fixed-fraction strip under the artifact: at 390x844 the composer alone consumed it and
-// left the chat log a 72px sliver, and on a short phone the chat log had no height at all while
-// the Send row ran past the viewport. The sheet replaces that split, and these assertions are the
-// geometry an end user would notice: nothing clipped, every control inside the viewport, the
-// artifact never under the dock, and the desktop layout untouched.
+// The phone-width comments surface, measured in a real browser. A side-by-side margin leaves
+// neither half usable on a phone, so the comments become a bottom sheet over the artifact, and
+// these assertions are the geometry an end user would notice: nothing clipped, Send and the page
+// comment box inside the viewport, the artifact never under the dock, and the desktop margin
+// untouched.
 const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -51,49 +50,52 @@ const ARTIFACT = `<!doctype html>
 <section><h2>Open questions</h2><p>Do we keep guest checkout?</p></section>
 </body></html>`;
 
-// Enough replies to make the chat log taller than any phone's sheet can show at once.
+// Enough replies to make the page thread taller than any phone's sheet can show at once.
 const REPLIES = [
   "Here is the first draft of the checkout redesign plan. I collapsed the three steps into one page.",
   "I also added an open-questions card at the bottom. Let me know whether guest checkout stays in scope.",
   "Updated the review table with real line items so the totals read correctly.",
   "The payment step now uses hosted fields so PCI scope stays small.",
   "Address lookup falls back to manual entry when the postcode service is down.",
+  "Guest checkout stays, but it now asks for an email before the payment step.",
+  "The order summary sticks to the top of the screen on small phones.",
+  "Promo codes moved into the summary so they no longer interrupt payment.",
+  "Saved cards show the last four digits and the expiry month.",
+  "Errors now appear next to the field that caused them instead of at the top.",
 ];
 
 const GEOMETRY = `() => {
   const rect = (el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), height: Math.round(r.height) }; };
-  const scroll = document.getElementById("panelScroll");
-  const panel = document.getElementById("panel");
+  const body = document.getElementById("commentsBody");
+  const comments = document.getElementById("comments");
   return JSON.stringify({
     viewport: { width: innerWidth, height: innerHeight },
     open: document.body.classList.contains("sheet-open"),
-    panelPosition: getComputedStyle(panel).position,
-    panel: rect(panel),
-    head: rect(document.getElementById("panelHead")),
+    commentsPosition: getComputedStyle(comments).position,
+    comments: rect(comments),
+    head: rect(document.getElementById("sheetHead")),
     frame: rect(document.getElementById("artifact")),
-    chat: { visible: scroll.clientHeight, content: scroll.scrollHeight, inert: scroll.inert },
-    composer: {
-      ...rect(document.getElementById("chatComposer")),
-      visible: document.getElementById("chatComposer").clientHeight,
-      content: document.getElementById("chatComposer").scrollHeight,
-      scrollTop: document.getElementById("chatComposer").scrollTop,
+    body: { visible: body.clientHeight, content: body.scrollHeight, inert: body.inert },
+    messages: {
+      visible: document.getElementById("pageMessages").clientHeight,
+      content: document.getElementById("pageMessages").scrollHeight,
     },
     attachments: {
       visible: document.getElementById("chatAttachments").clientHeight,
       content: document.getElementById("chatAttachments").scrollHeight,
     },
-    actions: rect(document.getElementById("sendActions")),
+    foot: rect(document.getElementById("commentsFoot")),
     send: rect(document.getElementById("send")),
-    sendAndEnd: rect(document.getElementById("sendAndEnd")),
     textarea: rect(document.getElementById("chatInput")),
-    summary: document.getElementById("panelSummary").textContent,
-    toggleLabel: document.getElementById("panelToggle").getAttribute("aria-label"),
+    pageOpen: document.getElementById("pageThread").classList.contains("is-open"),
+    summary: document.getElementById("sheetSummary").textContent,
+    toggleLabel: document.getElementById("sheetToggle").getAttribute("aria-label"),
     documentScrollable: document.documentElement.scrollHeight > innerHeight || document.documentElement.scrollWidth > innerWidth,
   });
 }`;
 
 test(
-  "the conversation is a dock and bottom sheet on a phone, and unchanged on desktop",
+  "the comments are a dock and bottom sheet on a phone, and a margin on desktop",
   { skip: !runBrowserE2e, timeout: 300_000 },
   async () => {
     const temp = await mkdtemp(path.join(tmpdir(), "lavish-mobile-sheet-"));
@@ -125,52 +127,63 @@ test(
       }
       return value;
     }
-
+    // An in-page timer: `chrome-devtools-axi wait <ms>` fails with "fn is not a function" in 0.1.34.
     function wait(ms) {
-      run("chrome-devtools-axi", ["wait", String(ms)], chromeEnv, ms + 45_000);
+      run(
+        "chrome-devtools-axi",
+        ["eval", `async()=>{await new Promise(r=>setTimeout(r,${ms}));return true}`],
+        chromeEnv,
+        ms + 45_000,
+      );
     }
-
     function emulate(viewport) {
       run("chrome-devtools-axi", ["emulate", "--viewport", viewport], chromeEnv);
     }
-
     function open(url, settleMs = 4000) {
       run("chrome-devtools-axi", ["open", url], chromeEnv);
       wait(settleMs);
     }
-
     function geometry() {
       return evaluate(GEOMETRY);
     }
+    function openPageThread() {
+      evaluate(
+        '() => { const page = document.getElementById("pageThread"); if (!page.classList.contains("is-open")) page.click(); return "ok"; }',
+      );
+      wait(500);
+    }
 
-    // Everything the user can reach in the sheet sits inside the viewport, and the log scrolls
+    // Everything the user can reach in the sheet sits inside the viewport, and the threads scroll
     // inside the sheet rather than being cut off by it.
     function assertSheetUsable(g) {
       assert.equal(g.open, true);
-      assert.equal(g.panelPosition, "fixed");
-      assert.ok(g.panel.top >= 56, `sheet clears the bar: ${JSON.stringify(g.panel)}`);
-      assert.equal(g.panel.bottom, g.viewport.height, "sheet reaches the bottom edge");
-      assert.equal(g.composer.bottom, g.viewport.height, "composer ends at the viewport edge");
-      for (const [name, r] of [
-        ["send", g.send],
-        ["sendAndEnd", g.sendAndEnd],
-        ["textarea", g.textarea],
-      ]) {
+      assert.equal(g.commentsPosition, "fixed");
+      assert.ok(g.comments.top >= 48, `sheet clears the bar: ${JSON.stringify(g.comments)}`);
+      assert.equal(g.comments.bottom, g.viewport.height, "sheet reaches the bottom edge");
+      assert.equal(g.foot.bottom, g.viewport.height, "the send foot ends at the viewport edge");
+      // The page comment box shows once its thread is open; Send is always reachable.
+      for (const [name, r] of [["send", g.send], ...(g.pageOpen ? [["textarea", g.textarea]] : [])]) {
         assert.ok(
-          r.top >= g.panel.top && r.bottom <= g.viewport.height,
+          r.top >= g.comments.top && r.bottom <= g.viewport.height,
           `${name} is inside the viewport: ${JSON.stringify(r)}`,
         );
         assert.ok(r.left >= 0 && r.right <= g.viewport.width, `${name} is inside the viewport: ${JSON.stringify(r)}`);
       }
-      assert.ok(g.chat.visible >= 120, `chat log keeps real height: ${JSON.stringify(g.chat)}`);
-      assert.ok(g.chat.content > g.chat.visible, "fixture chat is taller than the viewport, so it must scroll");
-      assert.equal(g.chat.inert, false);
+      assert.ok(g.body.visible >= 120, `the thread list keeps real height: ${JSON.stringify(g.body)}`);
+      // A closed thread folds its middle replies, and an open one scrolls its own message list, so
+      // the fixture overflows once the page thread is open, inside the sheet rather than past it.
+      if (g.pageOpen) {
+        assert.ok(
+          g.body.content > g.body.visible || g.messages.content > g.messages.visible,
+          `fixture threads are taller than the viewport, so they must scroll: ${JSON.stringify({ body: g.body, messages: g.messages })}`,
+        );
+      }
+      assert.equal(g.body.inert, false);
       assert.equal(g.documentScrollable, false, "the page itself never scrolls");
     }
 
     function populateComposer() {
       evaluate(`() => {
-        document.getElementById("presenceBanner").hidden = false;
         document.getElementById("chatAttachments").innerHTML = ${JSON.stringify(
           Array.from(
             { length: 4 },
@@ -178,37 +191,37 @@ test(
               `<div class="chat-attachment-chip"><span class="chat-attachment-thumb"></span><span class="chat-attachment-copy"><strong>Screenshot ${index + 1}</strong><span class="chat-attachment-status">Ready</span></span><button type="button">Remove</button></div>`,
           ).join(""),
         )};
-        document.getElementById("chatComposer").scrollTop = 0;
+        document.getElementById("commentsBody").scrollTop = 0;
         return "ok";
       }`);
       wait(300);
     }
 
+    // With attachments in the page comment box, the thread list scrolls and Send stays pinned.
     function assertPopulatedComposerUsable(g) {
       assert.equal(g.open, true);
-      assert.equal(g.composer.scrollTop, 0, "send actions are visible before scrolling the composer");
-      assert.ok(g.chat.visible >= 56, `chat retains usable height: ${JSON.stringify(g.chat)}`);
-      assert.ok(g.composer.bottom <= g.viewport.height, `composer stays in viewport: ${JSON.stringify(g.composer)}`);
+      assert.ok(g.body.visible >= 56, `the thread list retains usable height: ${JSON.stringify(g.body)}`);
       for (const [name, rect] of [
-        ["actions", g.actions],
+        ["foot", g.foot],
         ["send", g.send],
-        ["sendAndEnd", g.sendAndEnd],
       ]) {
         assert.ok(
-          rect.top >= g.panel.top && rect.bottom <= g.viewport.height,
+          rect.top >= g.comments.top && rect.bottom <= g.viewport.height,
           `${name} stays visible: ${JSON.stringify(rect)}`,
         );
       }
       assert.ok(
-        g.composer.content > g.composer.visible || g.attachments.content > g.attachments.visible,
-        `populated composer contains its overflow: ${JSON.stringify({ composer: g.composer, attachments: g.attachments })}`,
+        g.body.content > g.body.visible ||
+          g.messages.content > g.messages.visible ||
+          g.attachments.content > g.attachments.visible,
+        `the populated sheet contains its overflow: ${JSON.stringify({ body: g.body, messages: g.messages, attachments: g.attachments })}`,
       );
       assert.equal(g.documentScrollable, false);
     }
 
     function assertDocked(g) {
       assert.equal(g.open, false);
-      assert.equal(g.panelPosition, "fixed");
+      assert.equal(g.commentsPosition, "fixed");
       assert.equal(g.head.bottom, g.viewport.height, "dock sits on the bottom edge");
       assert.ok(g.head.height >= 56, `dock is a touch-sized target: ${JSON.stringify(g.head)}`);
       assert.ok(
@@ -219,8 +232,8 @@ test(
         g.frame.height >= g.viewport.height * 0.7,
         `artifact owns the screen while docked: ${JSON.stringify(g.frame)}`,
       );
-      assert.equal(g.chat.inert, true, "the hidden part of the sheet is unreachable");
-      assert.equal(g.toggleLabel, "Show conversation");
+      assert.equal(g.body.inert, true, "the hidden part of the sheet is unreachable");
+      assert.equal(g.toggleLabel, "Show comments");
       assert.equal(g.documentScrollable, false, "the page itself never scrolls");
     }
 
@@ -240,18 +253,24 @@ test(
       }
 
       // ---- Portrait phone ----
+      // chrome-devtools-axi 0.1.34 refuses `emulate` until a page is selected.
+      run("chrome-devtools-axi", ["open", "data:text/html,"], chromeEnv);
       emulate("390x844x3,mobile,touch");
       open(url);
       let g = geometry();
       assertDocked(g);
       assert.equal(g.summary, "Agent not listening");
 
-      evaluate('() => { document.getElementById("panelHead").click(); return "ok"; }');
+      evaluate('() => { document.getElementById("sheetHead").click(); return "ok"; }');
       wait(500);
       assertSheetUsable(geometry());
+      openPageThread();
+      g = geometry();
+      assert.equal(g.pageOpen, true, "tapping the page thread opens its comment box");
+      assertSheetUsable(g);
 
       // The scrim lowers it again and the artifact is back to full height.
-      evaluate('() => { document.getElementById("panelScrim").click(); return "ok"; }');
+      evaluate('() => { document.getElementById("sheetScrim").click(); return "ok"; }');
       wait(500);
       assertDocked(geometry());
 
@@ -260,33 +279,34 @@ test(
       open(url);
       g = geometry();
       assertDocked(g);
-      evaluate('() => { document.getElementById("panelToggle").click(); return "ok"; }');
+      evaluate('() => { document.getElementById("sheetToggle").click(); return "ok"; }');
       wait(500);
+      assertSheetUsable(geometry());
+      openPageThread();
       assertSheetUsable(geometry());
 
       // The open sheet survives a chrome reload on the same tab.
       open(url, 3000);
       assertSheetUsable(geometry());
+      openPageThread();
       populateComposer();
       g = geometry();
       assertPopulatedComposerUsable(g);
-      assert.ok(g.chat.visible >= 56, `normal visual viewport retains the chat minimum: ${JSON.stringify(g.chat)}`);
+      assert.ok(g.body.visible >= 56, `normal visual viewport retains the list minimum: ${JSON.stringify(g.body)}`);
 
       evaluate(`() => {
         document.documentElement.style.setProperty("--vv-top", "0px");
         document.documentElement.style.setProperty("--vv-height", "240px");
-        document.getElementById("chatComposer").scrollTop = 0;
         return "ok";
       }`);
       wait(300);
       g = geometry();
-      assert.equal(g.composer.scrollTop, 0);
-      assert.equal(g.panel.bottom, 240);
-      assert.equal(g.composer.bottom, 240);
-      assert.ok(g.chat.visible >= 0);
+      assert.equal(g.comments.bottom, 240);
+      assert.equal(g.foot.bottom, 240);
+      assert.ok(g.body.visible >= 0);
       for (const [name, rect] of [
+        ["foot", g.foot],
         ["send", g.send],
-        ["sendAndEnd", g.sendAndEnd],
       ]) {
         assert.ok(
           rect.top >= 0 && rect.bottom <= 240,
@@ -302,22 +322,23 @@ test(
 
       emulate("844x390x1,mobile,touch");
       open(url, 3000);
+      openPageThread();
       populateComposer();
       g = geometry();
-      assert.equal(g.panel.bottom, g.viewport.height);
+      assert.equal(g.comments.bottom, g.viewport.height);
       assertPopulatedComposerUsable(g);
 
-      // ---- Desktop: a side panel, never a sheet ----
+      // ---- Desktop: a comments margin, never a sheet ----
       emulate("1440x1000x1");
       open(url, 3000);
       g = geometry();
       assert.equal(g.open, false);
-      assert.notEqual(g.panelPosition, "fixed");
-      assert.equal(g.panel.top, 56);
-      assert.equal(g.panel.bottom, g.viewport.height);
-      assert.equal(g.panel.right - g.panel.left, 360, "desktop panel keeps its width");
-      assert.equal(g.chat.inert, false);
-      assert.equal(g.frame.right, g.panel.left, "artifact and panel sit side by side");
+      assert.notEqual(g.commentsPosition, "fixed");
+      assert.equal(g.comments.top, 48);
+      assert.equal(g.comments.bottom, g.viewport.height);
+      assert.equal(g.comments.right - g.comments.left, 320, "the desktop margin keeps its width");
+      assert.equal(g.body.inert, false);
+      assert.equal(g.frame.right, g.comments.left, "artifact and margin sit side by side");
     } finally {
       run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
       run("chrome-devtools-axi", ["stop"], chromeEnv);

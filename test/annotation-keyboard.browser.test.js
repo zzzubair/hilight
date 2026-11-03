@@ -90,7 +90,7 @@ test(
       browser("open", url);
       browser("wait", "Annotate this paragraph.");
       browser("click", `@${uidOf(browser("snapshot"), /"Annotate this paragraph\."/)}`);
-      browser("wait", "Enter to send");
+      browser("wait", "Enter saves a draft");
 
       const typed = browser("type", "fix this text");
       assert.match(typed, /textbox "Tell the agent[^"]*"[^\n]*value="fix this text"/, typed);

@@ -1,11 +1,11 @@
 # Delivery acks: seen, working, done per request
 
-Design note for per-request delivery state in the Conversation panel. [README.md](../README.md) owns
+Design note for per-request delivery state on comment threads. [README.md](../README.md) owns
 the user-facing wording once this ships; [invariants.md](invariants.md) owns the stamping rules.
 
 ## Problem
 
-A reviewer sends a note and cannot tell whether anything picked it up. Today the panel has one
+A reviewer sends a note and cannot tell whether anything picked it up. Before this, the chrome had one
 session-wide signal - the `agent-presence` stream (`waiting` / `listening` / `working`) and the
 "Working..." bubble - and a sent note looks identical whether it is sitting undelivered in
 `state.json`, has been handed to a poll, or was answered an hour ago.
@@ -20,7 +20,7 @@ Every state below is a fact the server records anyway. None of them asks the age
 | no poll in `activePolls` | `computePresence` is `waiting`; the chrome already shows "Your agent is not listening" | nobody is there to receive it                    |
 | `takeFeedback` succeeded | the store drained the batch for a poll; a poll that closed before the write undoes it  | **Seen** - the batch was handed to a poll        |
 | artifact file changed    | chokidar `reload` for the session key after a delivery                                 | **Working** - the agent is editing the artifact  |
-| `addAgentReply`          | `lavish-axi reply` / `poll --agent-reply`, or `/api/:key/agent-reply`                  | **Done** - the agent handed something back       |
+| `addAgentReply`          | `lavish-axi reply` / `poll --agent-reply`, or `/api/:key/agent-reply`                  | **Replied** - the agent handed something back    |
 
 Two of Wally's three acks ("I saw it", "I'm done") fall straight out of the existing protocol.
 "I'm working on it" has no explicit message, but the file watcher sees the agent's saves. A request
@@ -34,14 +34,12 @@ queued ──send──> sent ──poll takes it──> seen ──artifact cha
  (tab)          (server)                 (agent)                    (agent)                  (agent)
 ```
 
-- **queued**: in the tab only (dashed bubble). Unchanged.
-- **sent**: a `role: "user"` chat entry with no `delivered_at`. The bubble says why it has not been
-  seen, from the live presence the chrome already holds: "No agent is listening" (`waiting`),
-  "Agent is busy; delivered on its next poll" (`working` / external listener), or "Delivering"
-  while a poll is attached, which lasts milliseconds.
+- **queued**: in the tab only (**Not sent**).
+- **sent**: a `role: "user"` chat entry with no `delivered_at`. The top bar's agent status says
+  whether anything is listening to receive it.
 - **seen**: `delivered_at` set by `takeFeedback`.
 - **working**: `working_at` set by the first artifact `reload` after delivery. Optional evidence.
-- **done**: `done_at` set by the next agent reply.
+- **done**: `done_at` set by the next agent reply, shown as **Replied**.
 
 ## Storage and stamping rules
 
@@ -79,16 +77,14 @@ the stamps with no new wire shape.
 
 ## UI
 
-Each sent user bubble gets a one-line receipt under its text: the three emoji of the Telegram ack
-protocol this mirrors, 👀 Seen, 🛠️ Working, ✅ Done, each lighting up once its stamp exists and
-shown greyed and dimmed until then, so the row always shows what is still to come. Every step
-carries its label and time (or "not yet") as both `title` and `aria-label`, so hover and screen
-readers say the word, not the glyph. Before 👀 lights, the row carries the honest reason from the
-presence stream. The session-wide "Working..." bubble and
-presence banner are unchanged; the receipt is the per-request view of the same facts.
-
-A presence change rewrites only the undelivered line, the one part of the row that depends on it.
-The rest of the bubble is left alone, so a thumbnail already replaced by "Image expired" stays so.
+Each comment thread shows one muted status word, right-aligned in its header, derived on every
+render from the latest message: **Not sent** (a draft in this tab), **Sending** (its batch is in
+flight), **Sent** (no stamp yet), **Seen**, **Working**, and **Replied** (a `done_at` stamp, or the
+agent's own message is the latest one in the thread). A failed send reads **Not delivered · Retry**,
+where Retry is a text button. There is no emoji and no reaction row. Whether an agent is listening at
+all is the top bar's `#agentStatus` (**Not listening**, **Listening**, **Working**, **Ended**), so a
+presence change never touches a card. Cards are rebuilt only when their `threadSignature` changes,
+so a thumbnail already replaced by "Image expired" stays so.
 
 ## CLI and API changes
 
