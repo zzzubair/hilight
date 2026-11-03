@@ -544,10 +544,18 @@ export function collectChatAckIds(evicted, existing = []) {
   return ackIds;
 }
 
+export function serializeThreads(threads) {
+  return (Array.isArray(threads) ? threads : []).map((thread) => ({
+    ...thread,
+    messages: serializeChat(thread.messages),
+  }));
+}
+
 export function serializeChatSync(session) {
   const revision = Number(session?.chat_revision);
   return {
     chat: serializeChat(session?.chat || []),
+    threads: serializeThreads(session?.threads || []),
     ack_ids: serializeChatAckIds(session?.chat_ack_ids),
     chat_revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0,
   };

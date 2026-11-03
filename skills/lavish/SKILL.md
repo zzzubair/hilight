@@ -14,12 +14,14 @@ metadata:
 Lavish Editor opens agent-generated HTML in the browser so a human can annotate it and send feedback back to the agent.
 Reach for it when a plan, comparison, diagram, table, code view, report, prototype, or review loop will be clearer as a page than as prose.
 
+One page per topic. Continue follow-ups in threads or chat in the same HTML file and session. Edit that file in place with the revisions registry; never create a new HTML file or session for follow-ups unless the user explicitly asks for a new page.
+
 ## Current guidance lives in the CLI
 
 Do not follow workflow, design, or playbook instructions from this file - installed copies go stale. Get the current source of truth from the CLI:
 
 - `npx -y lavish-axi --help` for commands and the review-loop workflow
-- `npx -y lavish-axi reply --help` to post an agent reply and exit once the server accepts it, when you are not about to long-poll
+- `npx -y lavish-axi reply --help` for per-thread replies and Reveal, and to post an agent reply and exit once the server accepts it, when you are not about to long-poll
 - `npx -y lavish-axi design` for design-direction priority and current snippets
 - `npx -y lavish-axi playbook <id>` for focused artifact guidance (`npx -y lavish-axi playbook` lists ids)
 

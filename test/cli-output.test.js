@@ -1915,7 +1915,7 @@ test("detected layout warnings never appear in poll output", () => {
 
   assert.equal("layout_warnings" in output, false);
   assert.equal("artifact_failures" in output, false);
-  assert.match(output.next_step, /Apply the requested changes/);
+  assert.match(output.next_step, /only when the feedback requests changes/);
   assert.match(output.next_step, /lavish-axi poll \/tmp\/report\.html --agent-reply/);
   assert.match(output.next_step, /continuing to wait for feedback/);
   assert.match(output.next_step, /lavish-axi reply \/tmp\/report\.html --agent-reply/);
@@ -3695,4 +3695,38 @@ test("design output owns the library icon directive and the diagram playbook poi
   assert.match(diagram, /whiteboard_tooling\.library_icons/);
   assert.doesNotMatch(diagram, /%% lavish-icon/, "the syntax has one owner surface");
   assert.doesNotMatch(JSON.stringify(createHomeOutput({ bin: "lavish-axi", sessions: [] })), /lavish-icon|libraries/);
+});
+
+test("question-only feedback tells the agent to answer per thread without requesting edits", () => {
+  const output = createPollOutput({
+    file: "/tmp/report.html",
+    response: {
+      status: "feedback",
+      prompts: [
+        { thread_id: "q1", prompt: "Why ten teams?", selector: "#launch", tag: "p" },
+        { thread_id: "q2", prompt: "Who owns the feedback?", selector: "#owner", tag: "p" },
+      ],
+    },
+  });
+  assert.match(output.next_step, /Answer.*questions.*per thread/i);
+  assert.match(output.next_step, /only.*(?:requests|requested).*changes/i);
+  assert.doesNotMatch(output.next_step, /Apply the requested changes/);
+  assert.match(output.next_step, /--thread <thread-id>/);
+});
+
+test("open, poll, reply help and generated skill keep follow-ups on one page per topic", async () => {
+  const { createSkillMarkdown } = await import("../src/skill.js");
+  const texts = [
+    createSkillMarkdown(),
+    getCommandHelp("poll"),
+    getCommandHelp("reply"),
+    createOpenOutput({ file: "/tmp/report.html", url: "http://localhost/session/k", status: "opened" }).next_step,
+    createPollOutput({ file: "/tmp/report.html", response: { status: "feedback", prompts: [{ prompt: "Why?" }] } })
+      .next_step,
+  ];
+  for (const text of texts) {
+    assert.match(text, /One page per topic/i);
+    assert.match(text, /same HTML file/i);
+    assert.match(text, /unless the user explicitly asks for a new page/i);
+  }
 });

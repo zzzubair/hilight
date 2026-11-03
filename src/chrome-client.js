@@ -22,6 +22,13 @@ const internalQueueKeyField = "_lavishQueueKey";
 const promptIdentityField = "prompt_id";
 const PROMPT_IDENTITY_MAX = 128;
 const PROMPT_IDENTITY_RE = /^[A-Za-z0-9_-]+$/;
+let commentThreads = Array.isArray(sessionData.initialThreads) ? sessionData.initialThreads : [];
+let threadSyncRevision = Number(sessionData.initialChatRevision) || 0;
+const threadGeometry = new Map();
+const threadDraftStorageKey = "lavish-axi:thread-drafts:" + key;
+const threadDrafts = new Map(Object.entries(loadJsonState(threadDraftStorageKey, {})));
+let activeThreadId = "";
+let lastThreadAnchors = "[]";
 const initialChat = Array.isArray(sessionData.initialChat) ? sessionData.initialChat : [];
 const initialChatAckIds = Array.isArray(sessionData.initialChatAckIds) ? sessionData.initialChatAckIds : [];
 const initialChatRevision = parseChatRevision(sessionData.initialChatRevision) || 0;
@@ -707,6 +714,7 @@ function render() {
     }
   }
   postQueuedAnchors();
+  renderThreads();
   updateSendState();
   scrollPanelToBottom();
   renderSheetSummary();
@@ -992,6 +1000,7 @@ function refreshUnseenReceipts() {
 
 function addChat(entry, shouldScroll = true) {
   if (!entry || typeof entry !== "object") return;
+  if (entry.thread_id) return;
   const role = entry.role === "agent" ? "agent" : "user";
   const text = String(entry.text || "");
   if (!text && !(role === "agent" ? entry.html : attachmentCount(entry) || entry.anchor)) return;
@@ -1738,6 +1747,7 @@ function enqueuePrompt(rawPrompt, /** @type {FeedbackPreparation | null} */ prep
   // The sandboxed iframe is untrusted: never accept a caller-supplied settlement identity.
   const prompt = adoptQueuedPrompt(rawPrompt, false);
   if (!prompt) return false;
+  delete prompt.thread_id;
 
   const queueKey = promptQueueKey(prompt);
   if (queueKey) {
@@ -2299,6 +2309,7 @@ async function submitQueuedOnce(submission, preserveFailureState = false) {
     }
     persistQueuedPrompts();
     if (reconciledChat) syncChat(reconciledChat, acceptedRevision);
+    syncThreads(accepted);
   }
   render();
   settleAcknowledgementGuidance(submission, preserveFailureState);
@@ -2959,6 +2970,7 @@ function applyRevisionMessage(msg) {
     if (!revisionEntries.some((entry) => entry.id === id)) revisionRevealCursor.delete(id);
   }
   renderRevisionLegend();
+  renderThreads();
 }
 
 function revisionMarkSummary(entry) {
@@ -3174,6 +3186,7 @@ function markSessionEnded() {
   annotationSwitch.disabled = true;
   moreButton.disabled = true;
   chatInput.disabled = true;
+  renderThreads();
   updateSendState();
   applySheetState();
   if (presenceBanner) presenceBanner.hidden = true;
@@ -4388,6 +4401,14 @@ window.addEventListener("message", (event) => {
     // Reconcile even if frame load replayed the old mode before this report arrived.
     postToFrame({ type: "lavish:setAnnotationMode", enabled: annotation && !ended });
   }
+  if (msg.type === "lavish:threadGeometry") {
+    for (const position of Array.isArray(msg.positions) ? msg.positions : []) {
+      if (typeof position.id === "string") threadGeometry.set(position.id, position);
+    }
+    positionThreads();
+  }
+  if (msg.type === "lavish:threadHover") setActiveThread(String(msg.id || ""), false);
+  if (msg.type === "lavish:focusThread") focusThread(String(msg.id || ""));
   if (msg.type === "lavish:queuePrompt") {
     enqueuePrompt(msg.prompt);
     // Queued from inside the artifact, where the closed dock is the only sign it landed.
@@ -4751,6 +4772,7 @@ frame.addEventListener("load", () => {
   postToFrame({ type: "lavish:restoreScroll", x: lastScroll.x, y: lastScroll.y });
   if (lastReviewState) postToFrame({ type: "lavish:restoreReviewState", state: lastReviewState });
   postQueuedAnchors(true);
+  postThreadAnchors(true);
   if (overlayIndex !== null) {
     inlineWhiteboardChannels.delete(overlayIndex);
     postToFrame({ type: "lavish:suspendWhiteboard", diagramIndex: overlayIndex });
@@ -4758,6 +4780,290 @@ frame.addEventListener("load", () => {
 });
 
 initializeLayoutGate();
+
+// Margin comments keep only anchor geometry in the artifact. The reviewer's writing remains
+// in the chrome/store, outside the agent-authored page's reach.
+function visibleThreads() {
+  const threads = commentThreads.map((thread) => ({ ...thread, messages: thread.messages.slice() }));
+  const byId = new Map(threads.map((thread) => [thread.id, thread]));
+  for (const prompt of queued) {
+    const id = prompt.thread_id || promptIdentity(prompt);
+    let thread = byId.get(id);
+    if (
+      !thread &&
+      !prompt.thread_id &&
+      prompt.selector &&
+      !["message", "whiteboard", "layout-warnings"].includes(prompt.tag)
+    ) {
+      thread = { id, anchor: prompt, resolved: false, pending: true, messages: [] };
+      threads.push(thread);
+      byId.set(id, thread);
+    }
+    if (thread && !thread.messages.some((message) => message.prompt_id === promptIdentity(prompt))) {
+      thread.messages.push({
+        role: "user",
+        text: prompt.prompt,
+        prompt_id: promptIdentity(prompt),
+        attachments: prompt.attachments,
+        pending: true,
+      });
+    }
+  }
+  return threads;
+}
+
+function syncThreads(data) {
+  const revision = parseChatRevision(data?.chat_revision);
+  if (!Array.isArray(data?.threads) || revision === null || revision < threadSyncRevision) return;
+  threadSyncRevision = revision;
+  commentThreads = data.threads;
+  renderThreads();
+}
+
+function postThreadAnchors(force = false) {
+  const anchors = visibleThreads()
+    .filter((thread) => !thread.resolved)
+    .map((thread) => ({ id: thread.id, selector: thread.anchor.selector, target: thread.anchor.target }));
+  const serialized = JSON.stringify(anchors);
+  if (!force && serialized === lastThreadAnchors) return;
+  lastThreadAnchors = serialized;
+  postToFrame({ type: "lavish:threadAnchors", anchors });
+}
+
+function setActiveThread(id, notify = true) {
+  activeThreadId = id;
+  for (const node of document.querySelectorAll(".comment-thread")) {
+    node.classList.toggle("is-active", node.getAttribute("data-thread-id") === id);
+  }
+  if (notify) postToFrame({ type: "lavish:activeThread", id });
+}
+
+function focusThread(id) {
+  const node = [...document.querySelectorAll("#marginThreads .comment-thread, #threadList .comment-thread")].find(
+    (node) =>
+      node.getAttribute("data-thread-id") === id &&
+      (window.matchMedia("(max-width: 860px)").matches ? node.closest("#threadList") : node.closest("#marginThreads")),
+  );
+  if (!node) return;
+  if (isMobileSheet()) setSheetOpen(true);
+  const details = node.closest("details");
+  if (details) details.open = true;
+  node.classList.remove("reply-closed");
+  const input = node.querySelector("textarea");
+  if (input) input.focus({ preventScroll: true });
+  node.scrollIntoView({ block: "nearest" });
+  setActiveThread(id);
+}
+
+function positionThreads() {
+  const canvas = document.getElementById("marginThreadCanvas");
+  if (!canvas) return;
+  let bottom = 12;
+  const nodes = [...canvas.querySelectorAll(".comment-thread")];
+  nodes.sort(
+    (a, b) =>
+      (threadGeometry.get(a.getAttribute("data-thread-id"))?.top ?? Infinity) -
+      (threadGeometry.get(b.getAttribute("data-thread-id"))?.top ?? Infinity),
+  );
+  for (const node of nodes) {
+    const geometry = threadGeometry.get(node.getAttribute("data-thread-id"));
+    const top = Math.max(bottom, Number.isFinite(geometry?.top) ? geometry.top : bottom);
+    const el = /** @type {HTMLElement} */ (node);
+    el.style.top = top + "px";
+    el.classList.toggle("anchor-missing", geometry?.missing === true);
+    bottom = top + el.offsetHeight + 12;
+  }
+  canvas.style.height = bottom + "px";
+}
+
+async function resolveThread(id, resolved) {
+  const response = await fetch("/api/" + encodeURIComponent(key) + "/threads/" + encodeURIComponent(id), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ resolved }),
+  });
+  if (!response.ok) throw new Error("Could not update the comment. Try again.");
+  syncThreads(await response.json());
+}
+
+function buildThreadCard(thread, inList = false) {
+  const card = document.createElement("article");
+  card.className = "comment-thread";
+  card.dataset.threadId = thread.id;
+  card.setAttribute("aria-label", "Comment on " + String(thread.anchor.text || thread.anchor.selector).slice(0, 120));
+  const title = String(thread.anchor.text || thread.anchor.selector || "Comment");
+  card.innerHTML =
+    '<header><button type="button" class="thread-anchor" title="Go to comment">' +
+    escapeHtml(title) +
+    "</button>" +
+    (thread.pending
+      ? '<span class="thread-state">Queued</span>'
+      : '<button type="button" class="thread-resolve' +
+        (thread.resolved ? " thread-reopen" : "") +
+        '" aria-label="' +
+        (thread.resolved ? "Reopen comment" : "Resolve comment") +
+        '" title="' +
+        (thread.resolved ? "Reopen comment" : "Resolve comment") +
+        '">' +
+        (thread.resolved
+          ? "Reopen"
+          : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>') +
+        "</button>") +
+    '</header><div class="thread-anchor-missing">Anchor no longer on this page</div><div class="thread-messages"></div><div class="thread-error" role="status"></div>';
+  const messages = card.querySelector(".thread-messages");
+  for (const message of thread.messages) {
+    const item = document.createElement("div");
+    item.className = "thread-message " + (message.role === "agent" ? "agent" : "user");
+    item.innerHTML =
+      '<div class="thread-author">' +
+      (message.role === "agent" ? "Agent" : "You") +
+      (message.pending ? " · Queued" : "") +
+      '</div><div class="thread-body">' +
+      (message.role === "agent"
+        ? message.html || escapeHtml(message.text)
+        : escapeHtml(message.text).replace(/\n/g, "<br>")) +
+      "</div>";
+    if (message.attachments?.length) {
+      const attachments = document.createElement("div");
+      attachments.innerHTML = bubbleAttachmentsHtml(message);
+      item.appendChild(attachments);
+    }
+    if (message.revision_id) {
+      const reveal = document.createElement("button");
+      reveal.type = "button";
+      reveal.className = "thread-reveal";
+      reveal.textContent = "Reveal";
+      const revision = revisionEntries.find((entry) => entry.id === message.revision_id);
+      reveal.disabled = !revision?.marks.length;
+      reveal.title = reveal.disabled ? "This revision has no marked block on the current page" : "Reveal changed block";
+      reveal.onclick = () => revealNextRevisionMark(message.revision_id);
+      item.appendChild(reveal);
+    }
+    messages.appendChild(item);
+  }
+  card.querySelector(".thread-anchor").addEventListener("click", () => {
+    postToFrame({ type: "lavish:revealThread", id: thread.id });
+    focusThread(thread.id);
+  });
+  card.querySelector(".thread-resolve")?.addEventListener("click", async () => {
+    try {
+      await resolveThread(thread.id, !thread.resolved);
+    } catch (error) {
+      card.querySelector(".thread-error").textContent = error.message;
+    }
+  });
+  if (!thread.resolved && !thread.pending) {
+    const form = document.createElement("form");
+    form.className = "thread-reply";
+    form.innerHTML =
+      '<button type="button" class="thread-open-reply">Reply…</button><textarea rows="1" aria-label="Reply to comment" placeholder="Reply…"></textarea><button type="submit" class="thread-send">Reply</button>';
+    const input = form.querySelector("textarea");
+    input.value = String(threadDrafts.get(thread.id) || "");
+    input.disabled = ended || Boolean(terminalSubmission);
+    form.querySelector(".thread-open-reply").addEventListener("click", () => focusThread(thread.id));
+    input.addEventListener("input", () => {
+      threadDrafts.set(thread.id, input.value);
+      saveJsonState(threadDraftStorageKey, Object.fromEntries(threadDrafts));
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        card.classList.add("reply-closed");
+        input.blur();
+        setActiveThread("");
+      }
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text || ended || terminalSubmission) return;
+      const prompt = {
+        uid: "",
+        prompt: text,
+        selector: thread.anchor.selector,
+        tag: "message",
+        text: "Thread reply",
+        thread_id: thread.id,
+      };
+      assignPromptIdentity(prompt, false);
+      queued.push(prompt);
+      persistQueuedPrompts();
+      threadDrafts.delete(thread.id);
+      saveJsonState(threadDraftStorageKey, Object.fromEntries(threadDrafts));
+      render();
+      requestSnapshot("submit", [prompt]);
+      focusThread(thread.id);
+    });
+    card.appendChild(form);
+  } else if (thread.pending) {
+    const send = document.createElement("button");
+    send.className = "thread-send";
+    send.textContent = "Send to agent";
+    send.disabled = ended || Boolean(terminalSubmission);
+    send.onclick = () =>
+      requestSnapshot(
+        "submit",
+        queued.filter((prompt) => promptIdentity(prompt) === thread.id),
+      );
+    card.appendChild(send);
+  }
+  card.addEventListener("mouseenter", () => setActiveThread(thread.id));
+  card.addEventListener("mouseleave", () => {
+    if (!card.contains(document.activeElement)) setActiveThread("");
+  });
+  card.addEventListener("focusin", () => setActiveThread(thread.id));
+  card.addEventListener("focusout", (event) => {
+    if (!card.contains(/** @type {Node | null} */ (event.relatedTarget))) setActiveThread("");
+  });
+  if (activeThreadId === thread.id) card.classList.add("is-active");
+  if (inList) card.classList.add("in-list");
+  return card;
+}
+
+function renderThreads() {
+  const margin = document.getElementById("marginThreads");
+  const canvas = document.getElementById("marginThreadCanvas");
+  const list = document.getElementById("threadList");
+  if (!margin || !canvas || !list) return;
+  const focused = /** @type {HTMLTextAreaElement | null} */ (
+    document.activeElement?.tagName === "TEXTAREA" && document.activeElement.closest(".comment-thread")
+      ? document.activeElement
+      : null
+  );
+  const focusedId = focused?.closest(".comment-thread")?.getAttribute("data-thread-id");
+  const caret = focused ? [focused.selectionStart, focused.selectionEnd] : null;
+  const listOpen = list.querySelector("details")?.open || false;
+  const threads = visibleThreads();
+  margin.hidden = !threads.some((thread) => !thread.resolved);
+  canvas.replaceChildren(...threads.filter((thread) => !thread.resolved).map((thread) => buildThreadCard(thread)));
+  list.replaceChildren();
+  if (threads.length) {
+    const details = document.createElement("details");
+    details.open = listOpen;
+    const summary = document.createElement("summary");
+    summary.textContent =
+      "Comments · " +
+      threads.filter((thread) => !thread.resolved).length +
+      " open · " +
+      threads.filter((thread) => thread.resolved).length +
+      " resolved";
+    details.appendChild(summary);
+    for (const thread of threads) details.appendChild(buildThreadCard(thread, true));
+    list.appendChild(details);
+  }
+  postThreadAnchors();
+  positionThreads();
+  if (focusedId) {
+    focusThread(focusedId);
+    const input = /** @type {HTMLTextAreaElement | null} */ (document.activeElement);
+    if (input?.tagName === "TEXTAREA" && caret) input.setSelectionRange(caret[0], caret[1]);
+  }
+}
 
 // WebSockets leave the browser's HTTP connection pool free for sends and artifact loads.
 const events = new Map();
@@ -4821,6 +5127,7 @@ events.set("agent-reply", (data) => {
   noteAgentReply(entry.text);
 });
 events.set("chat-sync", (data) => {
+  syncThreads(data);
   rememberChatAckIds(data.ack_ids);
   syncChat(data.chat || [], data.chat_revision);
 });

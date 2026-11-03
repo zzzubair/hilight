@@ -441,3 +441,42 @@ test("reply fails with a timeout when the server stalls before headers or mid-bo
     await new Promise((resolve) => stalling.close(() => resolve()));
   }
 });
+
+test("reply and poll route --thread and --revision without adding a general chat answer", async () => {
+  await withArtifact(async ({ base, key, env, artifact, dir }) => {
+    const queued = await fetch(`${base}/api/${key}/prompts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({
+        prompts: [{ prompt_id: "thread1", selector: "body", tag: "body", prompt: "Explain this" }],
+      }),
+    });
+    assert.equal(queued.status, 200);
+    const replyFile = path.join(dir, "answer.md");
+    await writeFile(replyFile, "**Specific answer**");
+    const result = await runCli(
+      ["reply", "--thread", "thread1", artifact, "--revision", "r1", "--agent-reply-file", replyFile],
+      { env },
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const poll = await runCli(
+      ["poll", artifact, "--thread", "thread1", "--agent-reply", "Second answer", "--timeout-ms", "100"],
+      { env },
+    );
+    assert.equal(poll.status, 0, poll.stderr || poll.stdout);
+    assert.match(poll.stdout, /thread_id/);
+    const html = await (await fetch(`${base}/session/${key}`)).text();
+    const data = chromeSessionData(html);
+    assert.equal(data.initialThreads[0].messages.length, 3);
+    assert.equal(data.initialThreads[0].messages[1].revision_id, "r1");
+    assert.equal(data.initialChat.filter((m) => m.role === "agent").length, 0);
+    const invalid = await runCli(["reply", artifact, "--thread", "missing", "--agent-reply", "Lost"], { env });
+    assert.notEqual(invalid.status, 0);
+    const forbidden = await fetch(`${base}/api/${key}/threads/thread1`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://foreign.invalid" },
+      body: JSON.stringify({ resolved: true }),
+    });
+    assert.equal(forbidden.status, 403);
+  });
+});

@@ -263,6 +263,22 @@ async function createChromeHarness({
         return matches;
       },
       querySelector(selector) {
+        // Thread cards have small, static markup. Model those children as real DOM queries
+        // would, while the browser suite owns their geometry, focus and interaction checks.
+        const threadPart = selector.startsWith(".thread-") && this.html.includes(selector.slice(1));
+        const threadInput = this.className === "thread-reply" && selector === "textarea";
+        if (threadPart || threadInput) {
+          let child = this.children.find(
+            (node) => node.className === selector.slice(1) || (threadInput && node.tagName === "TEXTAREA"),
+          );
+          if (!child) {
+            child = element(`${id}:${selector}`);
+            child.className = selector.startsWith(".") ? selector.slice(1) : "";
+            child.tagName = threadInput ? "TEXTAREA" : "DIV";
+            this.appendChild(child);
+          }
+          return child;
+        }
         if (selector !== "span") return this.querySelectorAll(selector)[0] || null;
         const childId = `${id}:span`;
         if (!elements.has(childId)) element(childId);
@@ -9405,4 +9421,26 @@ test("a window that is not the artifact frame cannot set the tab", async () => {
     });
   }
   assert.equal(chrome.tab().title, "Plan \u00b7 Lavish");
+});
+
+test("thread anchor messages never expose reviewer writing to the artifact", async () => {
+  const chrome = await createChromeHarness();
+  chrome.sendFrameMessage({
+    type: "lavish:queuePrompt",
+    artifact_load_token: chrome.artifactLoadToken(),
+    prompt: {
+      selector: "#intro",
+      tag: "p",
+      text: "Page text",
+      prompt: "Private reviewer question",
+      thread_id: "forged-thread",
+    },
+  });
+  const message = chrome.postedToFrame.findLast((message) => message.type === "lavish:threadAnchors");
+  assert.equal(message.anchors.length, 1);
+  assert.deepEqual(Object.keys(message.anchors[0]).sort(), ["id", "selector", "target"]);
+  assert.equal(message.anchors[0].selector, "#intro");
+  assert.notEqual(message.anchors[0].id, "forged-thread");
+  assert.ok(!JSON.stringify(message).includes("Private reviewer question"));
+  assert.equal(chrome.queued()[0].thread_id, undefined, "the iframe cannot route a note into another thread");
 });
