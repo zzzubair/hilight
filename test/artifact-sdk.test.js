@@ -388,3 +388,61 @@ test("isModeToggleHotkeyEvent ignores other keys even with a modifier held", () 
   assert.equal(isModeToggleHotkeyEvent({ key: "e", metaKey: true }), false);
   assert.equal(isModeToggleHotkeyEvent({ key: "Enter", metaKey: true }), false);
 });
+
+// A small element tree with just enough querySelectorAll for the child-combinator chains
+// `uniqueElementSelector` writes: `tag`, `tag#id` and `tag:nth-of-type(n)` joined by ` > `.
+function selectorTree() {
+  const all = [];
+  function make(tag, id, children = []) {
+    const el = { tagName: tag.toUpperCase(), nodeType: 1, id: id || "", parentElement: null, children };
+    for (const child of children) child.parentElement = el;
+    all.push(el);
+    return el;
+  }
+  function matchesPart(el, part) {
+    const match = part.match(/^([a-z0-9]+)(?:#([\w-]+))?(?::nth-of-type\((\d+)\))?$/);
+    if (!match || !el || el.tagName.toLowerCase() !== match[1]) return false;
+    if (match[2] && el.id !== match[2]) return false;
+    if (match[3]) {
+      const same = el.parentElement ? el.parentElement.children.filter((x) => x.tagName === el.tagName) : [el];
+      if (same.indexOf(el) + 1 !== Number(match[3])) return false;
+    }
+    return true;
+  }
+  const root = {
+    querySelectorAll(selector) {
+      const parts = selector.split(" > ");
+      return all.filter((candidate) => {
+        let node = candidate;
+        for (let i = parts.length - 1; i >= 0; i -= 1) {
+          if (!matchesPart(node, parts[i])) return false;
+          node = node.parentElement;
+        }
+        return true;
+      });
+    },
+  };
+  const nest = (leaf) => make("div", "", [make("div", "", [make("div", "", [make("div", "", [leaf])])])]);
+  const targets = [1, 2, 3].map(() => make("div"));
+  const sections = targets.map((target, index) => make("section", "section-" + (index + 1), [nest(target)]));
+  const html = make("html", "", [make("body", "", [make("main", "", sections)])]);
+  return { root, html, targets };
+}
+
+test("uniqueElementSelector climbs past five steps until the selector names only its element", async () => {
+  const { uniqueElementSelector } = await import("../src/artifact-sdk.js");
+  const { root, targets } = selectorTree();
+  const first = uniqueElementSelector(targets[0], root);
+  const second = uniqueElementSelector(targets[1], root);
+  assert.notEqual(first, second);
+  assert.deepEqual(root.querySelectorAll(first), [targets[0]]);
+  assert.deepEqual(root.querySelectorAll(second), [targets[1]]);
+  assert.equal(second, "section#section-2 > div > div > div > div > div");
+});
+
+test("uniqueElementSelector keeps the familiar five-step selector when it is already unique", async () => {
+  const { uniqueElementSelector } = await import("../src/artifact-sdk.js");
+  const { root, html } = selectorTree();
+  const main = html.children[0].children[0];
+  assert.equal(uniqueElementSelector(main, root), "html > body > main");
+});

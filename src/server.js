@@ -21,6 +21,7 @@ import {
   isMaterialPageOverflow,
   isModeToggleHotkeyEvent,
   isNativeInteractiveControl,
+  uniqueElementSelector,
   isNearTotalOcclusion,
   isTrustedAttachmentResult,
   attachmentSizeError,
@@ -1224,6 +1225,17 @@ export async function serve({
         status: "queued",
         pending_prompts: publishedSession.pending_prompts,
         ...serializeChatSync(publishedSession),
+        // Layout fix requests that were not sent with the rest of the batch: retired ones asked
+        // only about issues that are gone (and settle through `ack_ids`), held ones stay queued in
+        // the tab because their issue changed after they were queued.
+        ...(session.retired_prompt_ids ? { retired_prompt_ids: session.retired_prompt_ids } : {}),
+        ...(session.held_prompt_ids
+          ? {
+              held_prompt_ids: session.held_prompt_ids,
+              warning_ids: session.warning_ids,
+              warnings: serializeLayoutWarnings(publishedSession.layout_warnings),
+            }
+          : {}),
       });
       if (shouldEndSession) await shutdownIfNoLiveSessions();
     } catch (error) {
@@ -3239,6 +3251,7 @@ const artifactRevision=${revision};
 const artifactLoadToken=${JSON.stringify(loadToken)};
 const deriveQueueKey=${deriveLavishQueueKey.toString()};
 const isNativeInteractiveControl=${isNativeInteractiveControl.toString()};
+const uniqueElementSelector=${uniqueElementSelector.toString()};
 const MODE_TOGGLE_HOTKEY_KEY=${JSON.stringify(MODE_TOGGLE_HOTKEY_KEY)};
 const isModeToggleHotkeyEvent=${isModeToggleHotkeyEvent.toString()};
 const classifySevereTextOverflow=${classifySevereTextOverflow.toString()};

@@ -720,43 +720,145 @@ test("an acknowledged layout prompt retry bypasses a later recurring-warning con
   }
 });
 
-test("a prepared layout prompt conflicts when its warning changes before sending", async () => {
+// A queued layout fix request whose issue moved on between queueing and Send. Returns the store,
+// the session, the prepared prompt and the warning id, after a second artifact load either
+// resolved the issue (`resolve: true`) or saw it again unchanged.
+async function staleLayoutFixRequest(dir, { resolve }) {
+  const stateFile = path.join(dir, "state.json");
+  const artifact = path.join(dir, "artifact.html");
+  await writeFile(artifact, "<h1>Hello</h1>");
+  const store = new SessionStore(stateFile);
+  const session = await store.upsertSession(artifact, "http://localhost:4387/session/test");
+  const finding = { selector: "p", kind: "clipped-text", axis: "vertical", overflowPx: 27, severity: "error" };
+  const firstLoad = await beginArtifactLoad(store, session.key);
+  const recorded = await store.recordLayoutDiagnostics(
+    session.key,
+    diagnosticPayload(firstLoad, 1, { complete: true, viewport_width: 1440, findings: [finding] }),
+  );
+  const prepared = await store.prepareLayoutWarningFixes(session.key, [recorded.warnings[0].id]);
+  const secondLoad = await beginArtifactLoad(store, session.key);
+  const after = await store.recordLayoutDiagnostics(
+    session.key,
+    diagnosticPayload(secondLoad, 1, {
+      complete: true,
+      target_presence_complete: true,
+      viewport_width: 1440,
+      findings: resolve ? [] : [finding],
+    }),
+  );
+  return {
+    store,
+    session,
+    warningId: recorded.warnings[0].id,
+    status: after.warnings[0].status,
+    layoutPrompt: {
+      ...prepared.prompt,
+      uid: "",
+      selector: "",
+      tag: "layout-warnings",
+      prompt_id: "aaaaaaaa-1111-4222-8333-444444444444",
+    },
+  };
+}
+
+const ORDINARY_QUESTION = {
+  uid: "",
+  selector: "",
+  tag: "message",
+  text: "Freeform message",
+  prompt: "This ordinary question should still be sent.",
+  prompt_id: "bbbbbbbb-1111-4222-8333-444444444444",
+};
+
+test("a layout fix request for issues the agent already resolved is retired, not sent", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-store-"));
   try {
-    const stateFile = path.join(dir, "state.json");
-    const artifact = path.join(dir, "artifact.html");
-    await writeFile(artifact, "<h1>Hello</h1>");
+    const { store, session, layoutPrompt, status } = await staleLayoutFixRequest(dir, { resolve: true });
+    assert.equal(status, "resolved");
 
-    const store = new SessionStore(stateFile);
-    const session = await store.upsertSession(artifact, "http://localhost:4387/session/test");
-    const firstLoad = await beginArtifactLoad(store, session.key);
-    const recorded = await store.recordLayoutDiagnostics(
-      session.key,
-      diagnosticPayload(firstLoad, 1, {
-        complete: true,
-        viewport_width: 1440,
-        findings: [{ selector: "p", kind: "clipped-text", axis: "vertical", overflowPx: 27, severity: "error" }],
-      }),
-    );
-    const prepared = await store.prepareLayoutWarningFixes(session.key, [recorded.warnings[0].id]);
+    const result = await store.queuePrompts(session.key, { prompts: [layoutPrompt] });
+    assert.equal(result.conflict, undefined);
+    assert.deepEqual(result.retired_prompt_ids, [layoutPrompt.prompt_id]);
+    assert.ok(result.chat_ack_ids.includes(layoutPrompt.prompt_id), "the retired note settles by its own identity");
+    assert.equal(result.fresh_feedback, false);
+    assert.equal((await store.takeFeedback(session.key)).status, "waiting");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
-    const secondLoad = await beginArtifactLoad(store, session.key);
-    const resolved = await store.recordLayoutDiagnostics(
-      session.key,
-      diagnosticPayload(secondLoad, 1, {
-        complete: true,
-        target_presence_complete: true,
-        viewport_width: 1440,
-        findings: [],
-      }),
+test("a resolved layout fix request in the queue never blocks an unrelated question", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-store-"));
+  try {
+    const { store, session, layoutPrompt } = await staleLayoutFixRequest(dir, { resolve: true });
+
+    const result = await store.queuePrompts(session.key, { prompts: [layoutPrompt, ORDINARY_QUESTION] });
+    assert.equal(result.conflict, undefined);
+    assert.deepEqual(result.retired_prompt_ids, [layoutPrompt.prompt_id]);
+    assert.equal(result.fresh_feedback, true);
+    // A retry of the same batch after a lost response is the same answer, and delivers nothing twice.
+    const retry = await store.queuePrompts(session.key, { prompts: [layoutPrompt, ORDINARY_QUESTION] });
+    assert.equal(retry.conflict, undefined);
+    assert.equal(retry.fresh_feedback, false);
+
+    const feedback = feedbackResult(await store.takeFeedback(session.key));
+    assert.deepEqual(
+      feedback.prompts.map((prompt) => prompt.prompt),
+      [ORDINARY_QUESTION.prompt],
     );
-    assert.equal(resolved.warnings[0].status, "resolved");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a layout fix request whose issue changed is held back while the rest of the batch is sent", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-store-"));
+  try {
+    const { store, session, layoutPrompt, warningId } = await staleLayoutFixRequest(dir, { resolve: false });
+
+    const result = await store.queuePrompts(session.key, { prompts: [layoutPrompt, ORDINARY_QUESTION] });
+    assert.equal(result.conflict, undefined);
+    assert.deepEqual(result.held_prompt_ids, [layoutPrompt.prompt_id]);
+    assert.deepEqual(result.warning_ids, [warningId]);
+    assert.ok(!result.chat_ack_ids.includes(layoutPrompt.prompt_id), "a held note stays queued in the tab");
+    const warning = (await store.listLayoutWarnings(session.key)).warnings.find((w) => w.id === warningId);
+    assert.equal(warning.selectable, true, "a held request queues nothing");
+
+    const feedback = feedbackResult(await store.takeFeedback(session.key));
+    assert.deepEqual(
+      feedback.prompts.map((prompt) => prompt.prompt),
+      [ORDINARY_QUESTION.prompt],
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a batch of only changed layout fix requests still conflicts", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-store-"));
+  try {
+    const { store, session, layoutPrompt, warningId } = await staleLayoutFixRequest(dir, { resolve: false });
+
+    const conflict = await store.queuePrompts(session.key, { prompts: [layoutPrompt] });
+    assert.equal(conflict.conflict, true);
+    assert.deepEqual(conflict.warning_ids, [warningId]);
+    assert.equal((await store.takeFeedback(session.key)).status, "waiting");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Send & End never ends a session while it holds back a changed layout fix request", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-store-"));
+  try {
+    const { store, session, layoutPrompt } = await staleLayoutFixRequest(dir, { resolve: false });
 
     const conflict = await store.queuePrompts(session.key, {
-      prompts: [{ ...prepared.prompt, uid: "", selector: "", tag: "layout-warnings" }],
+      prompts: [layoutPrompt, ORDINARY_QUESTION],
+      endSession: true,
     });
     assert.equal(conflict.conflict, true);
-    assert.deepEqual(conflict.warning_ids, [recorded.warnings[0].id]);
+    assert.equal((await store.findByKey(session.key)).status, "open");
     assert.equal((await store.takeFeedback(session.key)).status, "waiting");
   } finally {
     await rm(dir, { recursive: true, force: true });

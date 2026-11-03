@@ -196,6 +196,7 @@ function bootSdk({
   return {
     posted,
     body,
+    documentListeners,
     api: sandbox.window.lavish,
     // Returns the dispatched event so a test can tell whether the SDK swallowed the click.
     click(target, modifiers = {}) {
@@ -911,4 +912,89 @@ test("setDocumentMeta forwards null to restore, omits unset fields and drops non
     messages.map((entry) => JSON.parse(JSON.stringify({ title: entry.title, icon: entry.icon }))),
     [{ title: null }, {}, {}],
   );
+});
+
+// An agent save replaces the document, and a selected-text card's words used to be reported as
+// `card: null` - so the save threw away a question the reviewer had not queued yet.
+test("an unsent text-selection draft is reported with the words it annotates", () => {
+  const sdk = bootSdk();
+  const paragraph = appendTo(sdk.body, cell("p", "This introduction has enough words."));
+
+  sdk.selectText(paragraph, "introduction has enough");
+  const textarea = sdk.card().querySelector("textarea");
+  textarea.value = "Why is this required?";
+  for (const listener of textarea.listeners.filter((entry) => entry.type === "input")) listener.handler({});
+  sdk.runTimers();
+
+  const report = sdk.posted.findLast((message) => message.type === "lavish:reviewState");
+  assert.ok(report, "typing in a text card reports the draft");
+  assert.equal(report.state.card.text, "Why is this required?");
+  assert.equal(report.state.card.selector, "html > body > p");
+  assert.equal(report.state.card.target.type, "text-range");
+  assert.equal(report.state.card.target.text, "introduction has enough");
+});
+
+test("a text-selection draft whose words cannot be found again reopens on their container", () => {
+  const sdk = bootSdk();
+  const paragraph = appendTo(sdk.body, cell("p", "The agent rewrote this paragraph."));
+  sdk.setDocumentQuery((selector) => (selector === "body > p" ? paragraph : null));
+
+  sdk.sendChromeMessage({
+    type: "lavish:restoreReviewState",
+    state: {
+      card: {
+        selector: "body > p",
+        text: "Why is this required?",
+        target: {
+          type: "text-range",
+          text: "introduction has enough",
+          selector: "body > p",
+          commonAncestorSelector: "body > p",
+          start: { selector: "body > p", path: [0], offset: 5 },
+          end: { selector: "body > p", path: [0], offset: 28 },
+        },
+      },
+      fields: [],
+    },
+  });
+
+  assert.equal(sdk.card().querySelector("textarea").value, "Why is this required?");
+});
+
+// A save replaces the document, so a disclosure the reviewer opened closed again under them.
+test("a disclosure the reviewer opened is reported and reopened after a reload", () => {
+  const sdk = bootSdk();
+  const details = appendTo(sdk.body, cell("details", "Supporting detail"));
+  details.id = "details";
+  details.open = true;
+  const toggle = sdk.documentListeners.find((entry) => entry.type === "toggle");
+  assert.ok(toggle, "the SDK listens for disclosure toggles");
+  toggle.handler({ target: details });
+  sdk.runTimers();
+
+  const report = sdk.posted.findLast((message) => message.type === "lavish:reviewState");
+  assert.deepEqual(JSON.parse(JSON.stringify(report.state.disclosures)), [{ key: "#details", open: true }]);
+
+  const reloaded = bootSdk();
+  const fresh = appendTo(reloaded.body, cell("details", "Supporting detail"));
+  fresh.id = "details";
+  fresh.open = false;
+  reloaded.setDocumentQuery((selector) => (selector === "#details" ? fresh : null));
+  reloaded.sendChromeMessage({ type: "lavish:restoreReviewState", state: report.state });
+  assert.equal(fresh.open, true);
+});
+
+test("a disclosure the reviewer left as the page wrote it is not reported", () => {
+  const sdk = bootSdk();
+  const details = appendTo(sdk.body, cell("details", "Supporting detail"));
+  details.id = "details";
+  details.open = true;
+  const toggle = sdk.documentListeners.find((entry) => entry.type === "toggle");
+  toggle.handler({ target: details });
+  details.open = false;
+  toggle.handler({ target: details });
+  sdk.runTimers();
+
+  const report = sdk.posted.findLast((message) => message.type === "lavish:reviewState");
+  assert.deepEqual(JSON.parse(JSON.stringify(report.state.disclosures)), []);
 });

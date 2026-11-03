@@ -1153,11 +1153,12 @@ test("composer textarea is sized within the right panel", async () => {
   assert.match(css, /\.composer textarea\{[^}]*box-sizing:border-box/);
 });
 
-test("hot reload resets iframe src instead of crossing sandbox location", async () => {
+test("hot reload navigates the iframe by URL, replacing its history entry, never by reloading it", async () => {
   const js = await chromeClientSource();
 
   assert.doesNotMatch(js, /contentWindow\.location\.reload/);
-  assert.match(js, /frame\.src\s*=\s*artifactFrameSrcForLoad\(\{ revision, token \}\)/);
+  assert.match(js, /navigateArtifactFrame\(artifactFrameSrcForLoad\(\{ revision, token \}\)\)/);
+  assert.match(js, /location\.replace\(src\)/);
   assert.match(js, /artifact-loads\/begin/);
 });
 
@@ -3232,7 +3233,7 @@ test("stale diagnostic passes are ignored after a newer artifact load", async ()
   }
 });
 
-test("stale layout prompts return a conflict without entering feedback", async () => {
+test("a layout fix request for already-resolved issues is retired without entering feedback", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
   const artifact = path.join(dir, "artifact.html");
   await writeFile(artifact, "<!doctype html><html><body></body></html>");
@@ -3283,13 +3284,23 @@ test("stale layout prompts return a conflict without entering feedback", async (
     const response = await fetch(`${base}/api/${key}/prompts`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: base },
-      body: JSON.stringify({ prompts: [{ ...prepared.prompt, uid: "", selector: "", tag: "layout-warnings" }] }),
+      body: JSON.stringify({
+        prompts: [
+          {
+            ...prepared.prompt,
+            uid: "",
+            selector: "",
+            tag: "layout-warnings",
+            prompt_id: "aaaaaaaa-1111-4222-8333-444444444444",
+          },
+        ],
+      }),
     });
-    const conflict = await response.json();
+    const retired = await response.json();
 
-    assert.equal(response.status, 409);
-    assert.equal(conflict.status, "conflict");
-    assert.equal(conflict.warnings[0].status, "resolved");
+    assert.equal(response.status, 200);
+    assert.deepEqual(retired.retired_prompt_ids, ["aaaaaaaa-1111-4222-8333-444444444444"]);
+    assert.ok(retired.ack_ids.includes("aaaaaaaa-1111-4222-8333-444444444444"));
     assert.equal(
       (await fetch(`${base}/api/poll?file=${encodeURIComponent(artifact)}&timeoutMs=100`).then((res) => res.json()))
         .status,

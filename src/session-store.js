@@ -7,6 +7,7 @@ import {
   applyDiagnosticPass,
   dismissLayoutWarning as dismissWarningRecord,
   hasOutstandingRepairRequest,
+  isActiveLayoutWarning,
   isSelectableLayoutWarning,
   layoutWarningPromptPayload,
   markObsoleteViewportWarnings,
@@ -22,6 +23,7 @@ import {
   collectChatAckIds,
   markPreReceipt,
   normalizePromptId,
+  serializeChatAckIds,
   stampDelivered,
   stampDone,
   stampWorking,
@@ -270,11 +272,13 @@ export class SessionStore {
     const at = new Date().toISOString();
     let warnings = normalizeStoredWarnings(session.layout_warnings);
     let acceptedPrompts;
+    const retiredPromptIds = [];
+    const heldPromptIds = [];
+    const heldWarningIds = new Set();
     if (restoring) {
       acceptedPrompts = normalizedPrompts;
     } else {
       const layoutPlans = [];
-      const conflicts = new Set();
       for (const prompt of normalizedPrompts) {
         const warningIds = layoutWarningPromptIds(prompt);
         if (warningIds === null) {
@@ -285,23 +289,46 @@ export class SessionStore {
             conflicts: [],
             queueIds: [],
             hadKnownWarning: false,
+            outcome: "",
           });
           continue;
         }
-        const plan = planLayoutWarningPrompt(warnings, prompt, revision);
-        for (const id of plan.conflicts) conflicts.add(id);
+        /** @type {ReturnType<typeof planLayoutWarningPrompt> & { outcome: "" | "held" | "retired" }} */
+        const plan = { ...planLayoutWarningPrompt(warnings, prompt, revision), outcome: "" };
+        // A fix request whose issue is still there but changed after it was queued is held back
+        // for the reviewer to look at again. One that asks only about issues that are no longer
+        // active (the agent resolved them, or the reviewer dismissed them) asks for nothing any
+        // more: it is retired by its own identity, so the tab settles it and a retried batch is
+        // the same answer. Neither may block the unrelated feedback sent with it.
+        if (plan.conflicts.some((id) => isActiveLayoutWarning(warnings.find((warning) => warning.id === id)))) {
+          plan.outcome = "held";
+          for (const id of plan.conflicts) heldWarningIds.add(id);
+        } else if (plan.conflicts.length > 0 && plan.queueIds.length === 0) {
+          plan.outcome = "retired";
+        }
         layoutPlans.push({ prompt, ...plan });
       }
-      if (conflicts.size > 0) {
+      const sendable = layoutPlans.filter((plan) => !plan.outcome);
+      // Held requests keep the whole-batch conflict when nothing else would be delivered, and
+      // always under Send & End: ending the session would strand the held note in the tab.
+      if (heldWarningIds.size > 0 && (sendable.length === 0 || shouldEndSession)) {
         return {
           conflict: true,
           session,
-          warning_ids: [...conflicts],
+          warning_ids: [...heldWarningIds],
           warnings: serializeLayoutWarnings(warnings),
         };
       }
-      acceptedPrompts = [];
       for (const plan of layoutPlans) {
+        const promptId = normalizePromptId(plan.prompt.prompt_id);
+        if (promptId && plan.outcome === "retired") retiredPromptIds.push(promptId);
+        if (promptId && plan.outcome === "held") heldPromptIds.push(promptId);
+      }
+      if (retiredPromptIds.length) {
+        session.chat_ack_ids = serializeChatAckIds([...(session.chat_ack_ids || []), ...retiredPromptIds]);
+      }
+      acceptedPrompts = [];
+      for (const plan of sendable) {
         if (plan.warningIds === null) {
           acceptedPrompts.push(plan.prompt);
           continue;
@@ -348,7 +375,13 @@ export class SessionStore {
     if (shouldEndSession) session.ended_by = "user";
     session.updated_at = new Date().toISOString();
     await this.writeState(state);
-    return { ...session, fresh_feedback: !restoring && acceptedPrompts.length > 0 };
+    const result = { ...session, fresh_feedback: !restoring && acceptedPrompts.length > 0 };
+    if (retiredPromptIds.length) result.retired_prompt_ids = retiredPromptIds;
+    if (heldPromptIds.length || heldWarningIds.size) {
+      result.held_prompt_ids = heldPromptIds;
+      result.warning_ids = [...heldWarningIds];
+    }
+    return result;
   }
 
   async issueReviewerHandoff(key) {
