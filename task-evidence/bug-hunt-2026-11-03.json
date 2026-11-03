@@ -1,0 +1,169 @@
+[
+  {
+    "name": "environment",
+    "value": {
+      "date": "2026-11-03",
+      "machine": "ser5ver",
+      "chrome": "156.0.8078.79",
+      "port": 44671,
+      "stateDir": "/tmp/lavish-bughunt-DkBzf6/state"
+    }
+  },
+  {
+    "name": "selector-collision",
+    "value": {
+      "card": 0,
+      "editor": "Question for repeated target ONE",
+      "queue": "QUEUED\n<p>\n“Review paragraph 1. The deployment decision needs a clear explanation and another round of questions before we decide.”\nWhy does this deployment need a separate approval?\nEDITING\n<div>\n“Repeated target 1”\nCancel\nSave",
+      "selectorMatches": 12,
+      "screenshot": "/home/zubair/.t3/worktrees/lavish-axi/boss-lavish-bug-hunt-report-only/task-evidence/01-selector-collision.png"
+    }
+  },
+  {
+    "name": "four-notes-delivered",
+    "value": {
+      "code": 0,
+      "stdout": "session:\n  file: /tmp/lavish-bughunt-DkBzf6/review.html\n  status: feedback\nprompts[4]:\n  - uid: \"1\"\n    prompt: Why does this deployment need a separate approval?\n    selector: p#paragraph-1\n    tag: p\n    text: Review paragraph 1. The deployment decision needs a clear explanation and another round of questions before we decide.\n  - uid: \"3\"\n    prompt: Question for repeated target ONE\n    selector: div > div > div > div > div\n    tag: div\n    text: Repeated target 1\n  - uid: \"5\"\n    prompt: Can you explain this selected phrase first?\n    selector: p#intro\n    tag: text\n    text: introduction has enough words to\n    target:\n      type: text-range\n      text: introduction has enough words to\n      selector: p#intro\n      commonAncestorSelector: p#intro\n      start:\n        selector: p#intro\n        path[1]: 0\n        offset: 5\n      end:\n        selector: p#intro\n        path[1]: 0\n        offset: 37\n  - uid: \"\"\n    prompt: Please answer the questions before changing anything.\n    selector: \"\"\n    tag: message\n    text: Freeform message\nnext_step: \"Apply the requested changes to /tmp/lavish-bughunt-DkBzf6/review.html. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll /tmp/lavish-bughunt-DkBzf6/review.html --agent-reply \\\"<message for the user>\\\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply /tmp/lavish-bughunt-DkBzf6/review.html --agent-reply \\\"<message for the user>\\\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited. Codex detected: completed background tasks may not resume Codex automatically, so keep the poll attached to the active turn.\"\ndom_snapshot: \"uid=6 body \\\"Forge review board This introduction has enough words to select a specific phras\\\"\\n  uid=7 h1 \\\"Forge review board\\\"\\n  uid=5 p \\\"This introduction has enough words to select a specific phrase and ask the agent\\\"\\n  uid=8 form \\\"Your answer Queue answer\\\"\\n    uid=9 label \\\"Your answer\\\"\\n      uid=10 input\\n    uid=11 button \\\"Queue answer\\\"\\n  uid=12 div \\\"ThisIsASingleUnbreakableTokenThatIsFarWiderThanItsContainerAndGetsClippedEntirel\\\"\\n  uid=13 details \\\"Supporting detail\\\"\\n    uid=14 summary \\\"Supporting detail\\\"\\n    uid=15 p \\\"Keep this expanded while the agent answers.\\\"\\n  uid=16 main \\\"Section 1 Review paragraph 1. The deployment decision needs a clear explanation \\\"\\n    uid=17 section \\\"Section 1 Review paragraph 1. The deployment decision needs a clear explanation \\\"\\n      uid=18 h2 \\\"Section 1\\\"\\n      uid=1 p \\\"Review paragraph 1. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=19 div \\\"Repeated target 1\\\"\\n        uid=20 div \\\"Repeated target 1\\\"\\n          uid=21 div \\\"Repeated target 1\\\"\\n            uid=22 div \\\"Repeated target 1\\\"\\n    uid=23 section \\\"Section 2 Review paragraph 2. The deployment decision needs a clear explanation \\\"\\n      uid=24 h2 \\\"Section 2\\\"\\n      uid=25 p \\\"Review paragraph 2. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=26 div \\\"Repeated target 2\\\"\\n        uid=27 div \\\"Repeated target 2\\\"\\n          uid=28 div \\\"Repeated target 2\\\"\\n            uid=29 div \\\"Repeated target 2\\\"\\n    uid=30 section \\\"Section 3 Review paragraph 3. The deployment decision needs a clear explanation \\\"\\n      uid=31 h2 \\\"Section 3\\\"\\n      uid=32 p \\\"Review paragraph 3. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=33 div \\\"Repeated target 3\\\"\\n        uid=34 div \\\"Repeated target 3\\\"\\n          uid=35 div \\\"Repeated target 3\\\"\\n            uid=36 div \\\"Repeated target 3\\\"\\n    uid=37 section \\\"Section 4 Review paragraph 4. The deployment decision needs a clear explanation \\\"\\n      uid=38 h2 \\\"Section 4\\\"\\n      uid=39 p \\\"Review paragraph 4. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=40 div \\\"Repeated target 4\\\"\\n        uid=41 div \\\"Repeated target 4\\\"\\n          uid=42 div \\\"Repeated target 4\\\"\\n            uid=43 div \\\"Repeated target 4\\\"\\n    uid=44 section \\\"Section 5 Review paragraph 5. The deployment decision needs a clear explanation \\\"\\n      uid=45 h2 \\\"Section 5\\\"\\n      uid=46 p \\\"Review paragraph 5. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=47 div \\\"Repeated target 5\\\"\\n        uid=48 div \\\"Repeated target 5\\\"\\n          uid=49 div \\\"Repeated target 5\\\"\\n            uid=50 div \\\"Repeated target 5\\\"\\n    uid=51 section \\\"Section 6 Review paragraph 6. The deployment decision needs a clear explanation \\\"\\n      uid=52 h2 \\\"Section 6\\\"\\n      uid=53 p \\\"Review paragraph 6. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=54 div \\\"Repeated target 6\\\"\\n        uid=55 div \\\"Repeated target 6\\\"\\n          uid=56 div \\\"Repeated target 6\\\"\\n            uid=57 div \\\"Repeated target 6\\\"\\n    uid=58 section \\\"Section 7 Review paragraph 7. The deployment decision needs a clear explanation \\\"\\n      uid=59 h2 \\\"Section 7\\\"\\n      uid=60 p \\\"Review paragraph 7. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=61 div \\\"Repeated target 7\\\"\\n        uid=62 div \\\"Repeated target 7\\\"\\n          uid=63 div \\\"Repeated target 7\\\"\\n            uid=64 div \\\"Repeated target 7\\\"\\n    uid=65 section \\\"Section 8 Review paragraph 8. The deployment decision needs a clear explanation \\\"\\n      uid=66 h2 \\\"Section 8\\\"\\n      uid=67 p \\\"Review paragraph 8. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=68 div \\\"Repeated target 8\\\"\\n        uid=69 div \\\"Repeated target 8\\\"\\n          uid=70 div \\\"Repeated target 8\\\"\\n            uid=71 div \\\"Repeated target 8\\\"\\n    uid=72 section \\\"Section 9 Review paragraph 9. The deployment decision needs a clear explanation \\\"\\n      uid=73 h2 \\\"Section 9\\\"\\n      uid=74 p \\\"Review paragraph 9. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=75 div \\\"Repeated target 9\\\"\\n        uid=76 div \\\"Repeated target 9\\\"\\n          uid=77 div \\\"Repeated target 9\\\"\\n            uid=78 div \\\"Repeated target 9\\\"\\n    uid=79 section \\\"Section 10 Review paragraph 10. The deployment decision needs a clear explanatio\\\"\\n      uid=80 h2 \\\"Section 10\\\"\\n      uid=81 p \\\"Review paragraph 10. The deployment decision needs a clear explanation and anoth\\\"\\n      uid=82 div \\\"Repeated target 10\\\"\\n        uid=83 div \\\"Repeated target 10\\\"\\n          uid=84 div \\\"Repeated target 10\\\"\\n            uid=85 div \\\"Repeated target 10\\\"\\n    uid=86 section \\\"Section 11 Review paragraph 11. The deployment decision needs a clear explanatio\\\"\\n      uid=87 h2 \\\"Section 11\\\"\\n      uid=88 p \\\"Review paragraph 11. The deployment decision needs a clear explanation and anoth\\\"\\n      uid=89 div \\\"Repeated target 11\\\"\\n        uid=90 div \\\"Repeated target 11\\\"\\n          uid=91 div \\\"Repeated target 11\\\"\\n            uid=92 div \\\"Repeated target 11\\\"\\n    uid=93 section \\\"Section 12 Review paragraph 12. The deployment decision needs a clear explanatio\\\"\\n      uid=94 h2 \\\"Section 12\\\"\\n      uid=95 p \\\"Review paragraph 12. The deployment decision needs a clear explanation and anoth\\\"\\n      uid=96 div \\\"Repeated target 12\\\"\\n        uid=97 div \\\"Repeated target 12\\\"\\n          uid=98 div \\\"Repeated target 12\\\"\\n            uid=99 div \\\"Repeated target 12\\\"\\n  uid=100 script\"\n",
+      "stderr": ""
+    }
+  },
+  {
+    "name": "agent-reply",
+    "value": {
+      "code": 0,
+      "stdout": "session:\n  file: /tmp/lavish-bughunt-DkBzf6/review.html\n  status: waiting\nnext_step: \"No user feedback arrived before the optional timeout. Run `lavish-axi poll /tmp/lavish-bughunt-DkBzf6/review.html` without --timeout-ms to wait indefinitely - feedback remains queued until delivery, so re-running the poll is safe while waiting. Poll delivery consumes the response, so read it completely.\"\n",
+      "stderr": ""
+    }
+  },
+  {
+    "name": "composer-lost-on-reload",
+    "value": {
+      "before": "UNSENT COMPOSER: Explain the risk before I decide.",
+      "after": "",
+      "queue": "",
+      "screenshot": "/home/zubair/.t3/worktrees/lavish-axi/boss-lavish-bug-hunt-report-only/task-evidence/03-composer-after-reload.png"
+    }
+  },
+  {
+    "name": "text-draft-lost-on-save",
+    "value": {
+      "before": "UNSENT TEXT SELECTION: Why is this required?",
+      "afterCards": 0,
+      "chromeText": "Lavish\nEDITOR\n1\nRevisions\n1\nAnnotate\nConversation\nYOU\n<p>\n“Review paragraph 1. The deployment decision needs a clear explanation and another round of questions before we decide.”\nWhy does this deployment need a separate approval?\n👀\n🛠️\n✅\nYOU\n<div>\n“Repeated target 1”\nQuestion for repeated target ONE\n👀\n🛠️\n✅\nYOU\ntext\n“introduction has enough words to”\nCan you explain this selected phrase first?\n👀\n🛠️\n✅\nYOU\nPlease answer the questions before changing anything.\n👀\n🛠️\n✅\nAGENT\n\nThe extra approval protects the production rollout. Ask another question before deciding; I have not edited the artifact.\n\nYour agent is not listening. If this persists, ask your agent to poll for updates from Lavish.\nAttach images\nSend & End\nSend to Agent",
+      "storage": {
+        "lavish-axi:review-state:5e35d0561f591439": "{\"card\":null,\"fields\":[{\"key\":\"choice|answer|text|\",\"index\":0,\"question\":\"choice\",\"type\":\"text\",\"value\":\"\",\"checked\":null}]}",
+        "lavish-axi:warning-selection:5e35d0561f591439": "[]"
+      },
+      "screenshot": "/home/zubair/.t3/worktrees/lavish-axi/boss-lavish-bug-hunt-report-only/task-evidence/05-text-draft-after-save.png"
+    }
+  },
+  {
+    "name": "revisions-reveal",
+    "value": {
+      "scrollY": 5043,
+      "targetTop": 457.1875
+    }
+  },
+  {
+    "name": "stale-warning-blocks-whole-batch",
+    "value": {
+      "hint": "Could not send because the layout issue selection changed. Your feedback is still queued. Review the current issues, then click Send to Agent to retry.",
+      "queue": "QUEUED\nlayout\n“1 issue”\nFix this layout issue the browser detected in this artifact:\n1. [8951bff44f14ac59] Text cut off by its container - Rendered text crosses its container's right edge by 519px and is hidden. Target: html > body > div. Viewport: Desktop (1080px). Status: Queued for fix.\n\nApply every listed fix in one pass before saving so the review refreshes once. A queued layout issue is a repair request, not a resolved issue: Lavish only marks it resolved after a newer artifact load and a complete diagnostic pass for the same viewport no longer detects it.\nQUEUED\nThis ordinary question should still be sent.",
+      "responses": [
+        {
+          "label": "main",
+          "url": "http://127.0.0.1:44671/api/5e35d0561f591439/prompts",
+          "status": 409,
+          "body": "{\"status\":\"conflict\",\"error\":\"a layout warning changed before it was sent; review the warning again\",\"warning_ids\":[\"8951bff44f14ac59\"],\"warnings\":[{\"id\":\"8951bff44f14ac59\",\"fingerprint\":\"8951bff44f14ac59\",\"rule\":\"clipped-text\",\"severity\":\"error\",\"status\":\"resolved\",\"status_label\":\"Resolved\",\"title\":\"Text cut off by its container\",\"explanation\":\"Rendered text crosses its container's right edge by 519px and is hidden.\",\"selector\":\"html > body > div\",\"component\":\"div\",\"axis\":\"horizontal\",\"overflow_px\":519,\"viewport_class\":\"desktop\",\"viewport_label\":\"Desktop\",\"viewport_width\":1080,\"first_seen_at\":\"2026-11-03T16:51:21.630Z\",\"last_seen_at\":\"2026-11-03T16:51:27.245Z\",\"last_seen_revision\":3,\"queued_at\":\"\",\"queue_attempts\":0,\"active\":false,\"selectable\":false,\"outstanding\":false,\"history\":[{\"at\":\"2026-11-03T16:51:21.630Z\",\"revision\":1,\"event\":\"detected\"},{\"at\":\"2026-11-03T16:51:36.472Z\",\"revision\":4,\"event\":\"resolved\",\"note\":\"absent from a complete pass on a newer artifact revision\"}]}]}"
+        }
+      ],
+      "screenshot": "/home/zubair/.t3/worktrees/lavish-axi/boss-lavish-bug-hunt-report-only/task-evidence/07-stale-warning-send.png",
+      "retry": "session:\n  file: /tmp/lavish-bughunt-DkBzf6/review.html\n  status: waiting\nnext_step: \"No user feedback arrived before the optional timeout. Run `lavish-axi poll /tmp/lavish-bughunt-DkBzf6/review.html` without --timeout-ms to wait indefinitely - feedback remains queued until delivery, so re-running the poll is safe while waiting. Poll delivery consumes the response, so read it completely.\"\n",
+      "afterRemovingWarning": "session:\n  file: /tmp/lavish-bughunt-DkBzf6/review.html\n  status: feedback\nprompts[1]{uid,prompt,selector,tag,text}:\n  \"\",This ordinary question should still be sent.,\"\",message,Freeform message\nnext_step: \"Apply the requested changes to /tmp/lavish-bughunt-DkBzf6/review.html. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll /tmp/lavish-bughunt-DkBzf6/review.html --agent-reply \\\"<message for the user>\\\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply /tmp/lavish-bughunt-DkBzf6/review.html --agent-reply \\\"<message for the user>\\\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited. Codex detected: completed background tasks may not resume Codex automatically, so keep the poll attached to the active turn.\"\ndom_snapshot: \"uid=1 body \\\"Forge review board This introduction has enough words to select a specific phras\\\"\\n  uid=2 h1 \\\"Forge review board\\\"\\n  uid=3 p \\\"This introduction has enough words to select a specific phrase and ask the agent\\\"\\n  uid=4 form \\\"Your answer Queue answer\\\"\\n    uid=5 label \\\"Your answer\\\"\\n      uid=6 input\\n    uid=7 button \\\"Queue answer\\\"\\n  uid=8 div \\\"ThisIsASingleUnbreakableTokenThatIsFarWiderThanItsContainerAndGetsClippedEntirel\\\"\\n  uid=9 details \\\"Supporting detail\\\"\\n    uid=10 summary \\\"Supporting detail\\\"\\n    uid=11 p \\\"Keep this expanded while the agent answers.\\\"\\n  uid=12 main \\\"Section 1 Review paragraph 1. The deployment decision needs a clear explanation \\\"\\n    uid=13 section \\\"Section 1 Review paragraph 1. The deployment decision needs a clear explanation \\\"\\n      uid=14 h2 \\\"Section 1\\\"\\n      uid=15 p \\\"Review paragraph 1. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=16 div \\\"Repeated target 1\\\"\\n        uid=17 div \\\"Repeated target 1\\\"\\n          uid=18 div \\\"Repeated target 1\\\"\\n            uid=19 div \\\"Repeated target 1\\\"\\n    uid=20 section \\\"Section 2 Review paragraph 2. The deployment decision needs a clear explanation \\\"\\n      uid=21 h2 \\\"Section 2\\\"\\n      uid=22 p \\\"Review paragraph 2. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=23 div \\\"Repeated target 2\\\"\\n        uid=24 div \\\"Repeated target 2\\\"\\n          uid=25 div \\\"Repeated target 2\\\"\\n            uid=26 div \\\"Repeated target 2\\\"\\n    uid=27 section \\\"Section 3 Review paragraph 3. The deployment decision needs a clear explanation \\\"\\n      uid=28 h2 \\\"Section 3\\\"\\n      uid=29 p \\\"Review paragraph 3. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=30 div \\\"Repeated target 3\\\"\\n        uid=31 div \\\"Repeated target 3\\\"\\n          uid=32 div \\\"Repeated target 3\\\"\\n            uid=33 div \\\"Repeated target 3\\\"\\n    uid=34 section \\\"Section 4 Review paragraph 4. The deployment decision needs a clear explanation \\\"\\n      uid=35 h2 \\\"Section 4\\\"\\n      uid=36 p \\\"Review paragraph 4. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=37 div \\\"Repeated target 4\\\"\\n        uid=38 div \\\"Repeated target 4\\\"\\n          uid=39 div \\\"Repeated target 4\\\"\\n            uid=40 div \\\"Repeated target 4\\\"\\n    uid=41 section \\\"Section 5 Review paragraph 5. The deployment decision needs a clear explanation \\\"\\n      uid=42 h2 \\\"Section 5\\\"\\n      uid=43 p \\\"Review paragraph 5. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=44 div \\\"Repeated target 5\\\"\\n        uid=45 div \\\"Repeated target 5\\\"\\n          uid=46 div \\\"Repeated target 5\\\"\\n            uid=47 div \\\"Repeated target 5\\\"\\n    uid=48 section \\\"Section 6 Review paragraph 6. The deployment decision needs a clear explanation \\\"\\n      uid=49 h2 \\\"Section 6\\\"\\n      uid=50 p \\\"Review paragraph 6. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=51 div \\\"Repeated target 6\\\"\\n        uid=52 div \\\"Repeated target 6\\\"\\n          uid=53 div \\\"Repeated target 6\\\"\\n            uid=54 div \\\"Repeated target 6\\\"\\n    uid=55 section \\\"Section 7 Review paragraph 7. The deployment decision needs a clear explanation \\\"\\n      uid=56 h2 \\\"Section 7\\\"\\n      uid=57 p \\\"Review paragraph 7. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=58 div \\\"Repeated target 7\\\"\\n        uid=59 div \\\"Repeated target 7\\\"\\n          uid=60 div \\\"Repeated target 7\\\"\\n            uid=61 div \\\"Repeated target 7\\\"\\n    uid=62 section \\\"Section 8 Review paragraph 8. The deployment decision needs a clear explanation \\\"\\n      uid=63 h2 \\\"Section 8\\\"\\n      uid=64 p \\\"Review paragraph 8. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=65 div \\\"Repeated target 8\\\"\\n        uid=66 div \\\"Repeated target 8\\\"\\n          uid=67 div \\\"Repeated target 8\\\"\\n            uid=68 div \\\"Repeated target 8\\\"\\n    uid=69 section \\\"Section 9 Review paragraph 9. The deployment decision needs a clear explanation \\\"\\n      uid=70 h2 \\\"Section 9\\\"\\n      uid=71 p \\\"Review paragraph 9. The deployment decision needs a clear explanation and anothe\\\"\\n      uid=72 div \\\"Repeated target 9\\\"\\n        uid=73 div \\\"Repeated target 9\\\"\\n          uid=74 div \\\"Repeated target 9\\\"\\n            uid=75 div \\\"Repeated target 9\\\"\\n      uid=76 p \\\"Agent clarified the deployment answer.\\\"\\n    uid=77 section \\\"Section 10 Review paragraph 10. The deployment decision needs a clear explanatio\\\"\\n      uid=78 h2 \\\"Section 10\\\"\\n      uid=79 p \\\"Review paragraph 10. The deployment decision needs a clear explanation and anoth\\\"\\n      uid=80 div \\\"Repeated target 10\\\"\\n        uid=81 div \\\"Repeated target 10\\\"\\n          uid=82 div \\\"Repeated target 10\\\"\\n            uid=83 div \\\"Repeated target 10\\\"\\n    uid=84 section \\\"Section 11 Review paragraph 11. The deployment decision needs a clear explanatio\\\"\\n      uid=85 h2 \\\"Section 11\\\"\\n      uid=86 p \\\"Review paragraph 11. The deployment decision needs a clear explanation and anoth\\\"\\n      uid=87 div \\\"Repeated target 11\\\"\\n        uid=88 div \\\"Repeated target 11\\\"\\n          uid=89 div \\\"Repeated target 11\\\"\\n            uid=90 div \\\"Repeated target 11\\\"\\n    uid=91 section \\\"Section 12 Review paragraph 12. The deployment decision needs a clear explanatio\\\"\\n      uid=92 h2 \\\"Section 12\\\"\\n      uid=93 p \\\"Review paragraph 12. The deployment decision needs a clear explanation and anoth\\\"\\n      uid=94 div \\\"Repeated target 12\\\"\\n        uid=95 div \\\"Repeated target 12\\\"\\n          uid=96 div \\\"Repeated target 12\\\"\\n            uid=97 div \\\"Repeated target 12\\\"\\n  uid=98 script \\\"[{'id':'r1','label':'Answer round 1','timestamp':'2026-11-03T12:00:00Z','summary\\\"\\n  uid=99 script\"\n"
+    }
+  },
+  {
+    "name": "chat-scroll-jump",
+    "value": {
+      "before": {
+        "top": 0,
+        "height": 7627,
+        "client": 590
+      },
+      "after": {
+        "top": 7116,
+        "height": 7718,
+        "client": 590
+      },
+      "screenshot": "/home/zubair/.t3/worktrees/lavish-axi/boss-lavish-bug-hunt-report-only/task-evidence/09-transcript-forced-to-bottom.png"
+    }
+  },
+  {
+    "name": "live-reload-state",
+    "value": {
+      "before": {
+        "scrollY": 4439,
+        "open": true,
+        "answer": "Keep this choice"
+      },
+      "after": {
+        "scrollY": 4439,
+        "open": false,
+        "answer": "Keep this choice",
+        "card": "UNSENT ELEMENT: keep this question while you save"
+      },
+      "historyBefore": 4,
+      "historyAfter": 5,
+      "screenshot": "/home/zubair/.t3/worktrees/lavish-axi/boss-lavish-bug-hunt-report-only/task-evidence/10-element-draft-restored.png"
+    }
+  },
+  {
+    "name": "two-tab-takeover",
+    "value": {
+      "sourceQueue": "QUEUED\n<p>\n“Review paragraph 8. The deployment decision needs a clear explanation and another round of questions before we decide.”\nUNSENT ELEMENT: keep this question while you save",
+      "secondQueue": "",
+      "secondSuperseded": true,
+      "screenshot": "/home/zubair/.t3/worktrees/lavish-axi/boss-lavish-bug-hunt-report-only/task-evidence/12-source-takeover-restores-own-queue.png"
+    }
+  },
+  {
+    "name": "history-prevents-script-close",
+    "value": {
+      "historyLength": 5,
+      "closed": false,
+      "warnings": ["Scripts may close only the windows that were opened by them."]
+    }
+  },
+  {
+    "name": "runtime",
+    "value": {
+      "errors": [],
+      "network": [
+        {
+          "label": "main",
+          "url": "http://127.0.0.1:44671/api/5e35d0561f591439/prompts",
+          "status": 409,
+          "body": "{\"status\":\"conflict\",\"error\":\"a layout warning changed before it was sent; review the warning again\",\"warning_ids\":[\"8951bff44f14ac59\"],\"warnings\":[{\"id\":\"8951bff44f14ac59\",\"fingerprint\":\"8951bff44f14ac59\",\"rule\":\"clipped-text\",\"severity\":\"error\",\"status\":\"resolved\",\"status_label\":\"Resolved\",\"title\":\"Text cut off by its container\",\"explanation\":\"Rendered text crosses its container's right edge by 519px and is hidden.\",\"selector\":\"html > body > div\",\"component\":\"div\",\"axis\":\"horizontal\",\"overflow_px\":519,\"viewport_class\":\"desktop\",\"viewport_label\":\"Desktop\",\"viewport_width\":1080,\"first_seen_at\":\"2026-11-03T16:51:21.630Z\",\"last_seen_at\":\"2026-11-03T16:51:27.245Z\",\"last_seen_revision\":3,\"queued_at\":\"\",\"queue_attempts\":0,\"active\":false,\"selectable\":false,\"outstanding\":false,\"history\":[{\"at\":\"2026-11-03T16:51:21.630Z\",\"revision\":1,\"event\":\"detected\"},{\"at\":\"2026-11-03T16:51:36.472Z\",\"revision\":4,\"event\":\"resolved\",\"note\":\"absent from a complete pass on a newer artifact revision\"}]}]}"
+        },
+        {
+          "label": "main",
+          "url": "http://127.0.0.1:44671/api/5e35d0561f591439/prompts",
+          "status": 409,
+          "body": "{\"status\":\"conflict\",\"error\":\"a layout warning changed before it was sent; review the warning again\",\"warning_ids\":[\"8951bff44f14ac59\"],\"warnings\":[{\"id\":\"8951bff44f14ac59\",\"fingerprint\":\"8951bff44f14ac59\",\"rule\":\"clipped-text\",\"severity\":\"error\",\"status\":\"resolved\",\"status_label\":\"Resolved\",\"title\":\"Text cut off by its container\",\"explanation\":\"Rendered text crosses its container's right edge by 519px and is hidden.\",\"selector\":\"html > body > div\",\"component\":\"div\",\"axis\":\"horizontal\",\"overflow_px\":519,\"viewport_class\":\"desktop\",\"viewport_label\":\"Desktop\",\"viewport_width\":1080,\"first_seen_at\":\"2026-11-03T16:51:21.630Z\",\"last_seen_at\":\"2026-11-03T16:51:27.245Z\",\"last_seen_revision\":3,\"queued_at\":\"\",\"queue_attempts\":0,\"active\":false,\"selectable\":false,\"outstanding\":false,\"history\":[{\"at\":\"2026-11-03T16:51:21.630Z\",\"revision\":1,\"event\":\"detected\"},{\"at\":\"2026-11-03T16:51:36.472Z\",\"revision\":4,\"event\":\"resolved\",\"note\":\"absent from a complete pass on a newer artifact revision\"}]}]}"
+        },
+        {
+          "label": "main",
+          "url": "http://127.0.0.1:44671/api/5e35d0561f591439/artifact-loads/begin",
+          "status": 409,
+          "body": "{\"status\":\"superseded\"}"
+        },
+        {
+          "label": "second",
+          "url": "http://127.0.0.1:44671/api/5e35d0561f591439/artifact-loads/begin",
+          "status": 409,
+          "body": "{\"status\":\"superseded\"}"
+        }
+      ]
+    }
+  }
+]

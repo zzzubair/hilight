@@ -1,0 +1,623 @@
+[
+  {
+    "body": "**Version:** lavish-axi 0.1.90. Not yet retested on 0.1.95; the 0.1.91–0.1.95 release notes don't mention this.\n**Device:** Android phone, in both Chrome and Firefox.\n\n### 1. The collapsed conversation panel covers the annotation card\n\n**Steps**\n1. Open a review session on an Android phone.\n2. Leave the conversation panel collapsed.\n3. Select an element to annotate, so the annotation card opens.\n4. Tap the card's text input, so the on-screen keyboard opens.\n\n**Expected:** the input stays visible above the keyboard.\n**Actual:** the collapsed conversation panel moves up with the keyboard and covers the annotation card, so the input can't be seen until the keyboard is closed.\n\n### 2. The keyboard covers an annotation card placed low on the screen\n\n**Steps**\n1. Select an element near the bottom of the screen, so the annotation card opens below the point where the keyboard will appear.\n2. Tap the card's text input.\n\n**Expected:** the card moves or scrolls so the input stays above the keyboard.\n**Actual:** the keyboard covers the card and its input.\n\n**Possible cause (unverified):** the panel seems to stay attached to the visible area above the keyboard, while the card keeps its original position, so the panel slides over the card and the keyboard can cover a low card.\n\n**Workaround:** close the keyboard, or turn the phone sideways.\n",
+    "createdAt": "2026-10-29T05:16:25Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 474,
+    "title": "Mobile: on-screen keyboard hides the annotation card's input (collapsed panel overlaps it, or the keyboard covers a low card)",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/474"
+  },
+  {
+    "body": "## Problem\n\nWhen the HTML file behind an open session changes, the review page reloads and the reader loses their place: scroll position, the open tab, and every `<details>` section they collapsed or expanded all reset.\n\nThis happens a lot in agent workflows. An agent re-renders the same artifact in place many times during one review (applying annotations, adding a QA result, refreshing comments), and each re-render throws away where the reader was. On long pages with many collapsible sections the reader has to re-collapse everything and find their spot again after every round.\n\n## Proposal\n\nHot-reload the artifact without losing the reader's state when the file changes on disk:\n\n- keep the scroll position (or the nearest still-existing element at the top of the viewport)\n- keep the open/closed state of `<details>` elements and the active tab, matched by element `id` where present\n- keep any pending annotations and the conversation panel as they are today\n- if an artifact explicitly opts out (or a URL `#anchor` is set), fall back to a normal reload\n\nA DOM-diffing swap (morphdom-style) of the iframe body would do it. A simpler first step is to snapshot scroll + `[open]` + selected-tab state by `id` before the reload and re-apply it after.\n\n## Why in Lavish\n\nArtifacts can work around it with their own localStorage, but every artifact author has to rebuild the same logic, and it breaks in contexts where storage is blocked. Since Lavish owns the reload, it is the one place that can make every artifact keep the reader's place.\n",
+    "createdAt": "2026-10-28T13:08:27Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 469,
+    "title": "feat: hot-reload artifacts without losing the reader's scroll, collapsed sections and tab",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/469"
+  },
+  {
+    "body": "Related to issue #109 Export is great - neutral static HTML.\n\nThe share option is a bit opinionated by selecting the specific 3rd Party Provider. The feature and their service in general is very useful and the notice about this being a 3rd party provider is good. \n\nHere I think there could be 2 improvements though:\n1.) Add a pointer to their(ht-ml.app) terms of use. These seem relevant as they directly and honestly state that the operator may access, store, analyze, and use submitted content to build products they may sell.\n2.) Make the share implementation unopinionated. It could make sense to open the share feature up over a plugin interface such that the user may add their own share mechanism, or something like a configuration with a choice of driver + url. The drivers define the used API and the url defines where the requests are sent.  I did not invest more time in determining how the design would look like. As first the question is if there is the interest to go there. \n\nThanks and Cheers!\nJhonnyJason\n",
+    "createdAt": "2026-10-26T13:50:16Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 460,
+    "title": "Improvment: unopionionated share feature",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/460"
+  },
+  {
+    "body": "## Summary\n\nAnnotation selectors are not unique on artifacts with repeated structure (slide decks, card grids). The SDK's `selector(el)` stops after 5 ancestors, so two different elements in different slides get the same selector string. Clicking the second element then opens the *queued annotation of the first one* (the click handler matches `queuedAnchorSelectors` by selector string), and the reviewer cannot annotate the second element at all.\n\n## Real-world impact\n\nReviewing a 23-slide report deck where every slide has the same layout (`… > div > div > img`). After annotating the photo on slide 2, clicking the photo on slide 3 reopened the slide-2 annotation. The reviewer gave up on Lavish for per-slide feedback. The poll also returned `selector: \"div > div:nth-of-type(1) > div > div > img\"`, which matches many photos, so the agent cannot tell which one was meant.\n\n## Minimal repro (lavish-axi 0.1.90)\n\nTwo sections with identical nested markup deeper than 5 levels:\n\n```html\n<main>\n  <section><h2>Slide 1</h2><div><div><div><div><img alt=\"slide 1\"></div></div></div></div></section>\n  <section><h2>Slide 2</h2><div><div><div><div><img alt=\"slide 2\"></div></div></div></div></section>\n</main>\n```\n\nRunning the SDK's `selector()` logic on both images:\n\n```json\n{\"selectors\":[\"div > div > div > div > img\",\"div > div > div > div > img\"],\"identical\":true,\"matches\":2,\"firstMatchIsSlide1\":true}\n```\n\nSteps in Lavish:\n\n1. `lavish-axi deck.html`\n2. Click the slide 1 image, write a comment, queue it.\n3. Click the slide 2 image.\n\nExpected: a new annotation card for the slide 2 image.\nActual: the queued slide 1 annotation opens for editing (`lavish:editQueuedAnchor`), because both elements produce the same selector.\n\n## Where\n\nIn the injected SDK (`dist/cli.mjs`):\n\n- `function selector(el)` loops `while (node && node.nodeType === 1 && parts.length < 5)`. The depth cap is what drops the distinguishing ancestor (`section:nth-of-type(2)` here).\n- The annotate click handler does `queuedAnchorSelectors.has(clicked.selector)` → `postArtifactMessage(\"lavish:editQueuedAnchor\", …)`.\n\n(The revision-mark path, `revisionSelectorFor`, already walks to `html`, so it does not have this problem.)\n\n## Possible fix\n\nKeep climbing past 5 levels until the selector is unique, i.e. until `document.querySelectorAll(sel).length === 1` or you reach an element with a unique id or `html`. The short form stays for the common case, and repeated layouts get a selector that resolves to exactly one element.\n",
+    "createdAt": "2026-10-21T16:51:24Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 445,
+    "title": "Annotation selector collides on repeated structure (slides): clicking a second element reopens the first element's queued annotation",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/445"
+  },
+  {
+    "body": "### Observed\n\nlavish-axi 0.1.87, macOS, Chromium-based default browser. An agent opens a review, edits the artifact a few times (live reload), then wants to close the review tab when the review ends.\n\n- Before any reload the session tab has `history.length === 1` and `window.close()` from an attached page works.\n- After 3 live reloads the same tab has `history.length === 4`. Chromium now refuses `window.close()` (\"Scripts may close only the windows that were opened by them\"), so the tab stays open.\n- On one machine this left 36 finished review tabs that no script could close (52 of 61 browser tabs were Lavish tabs before cleanup; see #373 for the other half of the cause).\n\n### Cause\n\n`src/chrome-client.js` reloads the sandboxed artifact iframe by assigning `frame.src = artifactFrameSrcForLoad(...)` (load path and `loadFrame()`). Assigning a new `src` to an already-loaded iframe creates a joint session-history entry in the top-level tab. Every artifact revision therefore grows the tab's history, and Back also walks through old artifact revisions.\n\n### Fix\n\nNavigate the existing frame with `frame.contentWindow.location.replace(url)` after the first load, and keep `frame.src = url` only for the initial load:\n\n```js\nfunction navigateArtifactFrame(url) {\n  try {\n    if (frame.getAttribute(\"src\") && frame.contentWindow) {\n      frame.contentWindow.location.replace(new URL(url, location.href).href);\n      return;\n    }\n  } catch {}\n  frame.src = url;\n}\n```\n\nVerified locally: after 3 live reloads `history.length` stays `1`, the frame shows the newest revision, and the tab closes. The load-token handshake still works because the navigated URL is identical.\n\n### Ask\n\nUse `location.replace` for artifact reloads (both call sites), so a finished review tab stays closable and Back does not replay old revisions. Happy to send a PR through no-mistakes.\n",
+    "createdAt": "2026-10-15T09:31:35Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 426,
+    "title": "Artifact reloads add session-history entries, so review tabs can no longer be closed by script",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/426"
+  },
+  {
+    "body": "## Problem\n\nA reviewer can point at an element, a text range, a table cell, or a Mermaid node. A reviewer cannot draw on the page. Some feedback is easier to draw than to write: \"move this here\" with an arrow, a box around a group of elements, or a quick line under a value.\n\nThe Mermaid whiteboard already embeds Excalidraw, but it covers only `.mermaid` diagrams. A freehand mark there reaches the agent as one summary line, \"Drew a freehand mark near (x, y)\", with no comment attached to it.\n\nVISION.md names \"pointing, selecting, drawing, and typing\" as the reviewer input that Lavish turns into instructions for the agent.\n\n## Proposal\n\nAdd a sketch layer over the artifact that reuses the existing Excalidraw integration:\n\n- A **Sketch** switch in the toolbar, next to **Annotate**, lays one Excalidraw editor over the artifact iframe. The reviewer uses Excalidraw's own tools: freehand, rectangle, ellipse, arrow, line, and text.\n- Sketches stay on the content they were drawn over while the page scrolls, stay visible when sketch mode is off, and autosave per session beside the whiteboard scenes.\n- When the reviewer selects a sketch, a **Comment** button opens a card like the annotation card. The comment is queued like an annotation and shows in the Conversation panel with a `sketch` anchor.\n- `lavish-axi poll` delivers it as `tag: \"sketch\"` with a `sketch` target (sketch ids, label, page bounds), the artifact element under the sketch (selector, tag, text), and a PNG of the sketch as an image attachment.\n\nThe layer lives in the chrome, not in the artifact document. The served artifact bytes do not change, and export and share are not affected.\n\n## Use case\n\nThe reviewer draws a box around a pricing card and writes \"make this the primary plan\". The agent receives the comment, the selector of the button under the box, and an image of the box, and edits the right element.\n\nI have a working branch with tests and screenshots, and I can open a PR if this fits the project direction.\n",
+    "createdAt": "2026-10-13T01:05:28Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 419,
+    "title": "Feature: sketch on the artifact and comment on a selected sketch",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/419"
+  },
+  {
+    "body": "## Summary\n\nWhen a reverse proxy forwards a second address:port back to lavish-axi's own\nserver (e.g. to expose it on a Tailscale/LAN interface the server itself\ncan't bind because the proxy already holds that port), the CLI's\nduplicate-server detection mistakes the proxy-forwarded echo of the server\nfor a second, genuinely duplicate instance, and shuts it down - killing the\none real server within ~0.1s of every start.\n\n## Setup that reproduces it\n\n- `lavish-axi` server binds `127.0.0.1:4387` successfully but fails to also\n  bind `100.93.231.41:4387` (a Tailscale interface address) because a\n  separate reverse-proxy process already listens there and forwards traffic\n  to `127.0.0.1:4387`. This failure is handled gracefully - the server logs a\n  warning and keeps serving on loopback, as designed.\n- Every `lavish-axi <file>` invocation afterward fails with `SERVER_ERROR`.\n  `~/.lavish-axi/server.log` shows, within ~0.1s of every start:\n\n  ```\n  [lavish] WARNING: Tailscale binding failed for 100.93.231.41:4387\n    (EADDRINUSE: another process is already listening there); ...\n  [lavish] shutting down: shutdown-request\n  ```\n\n## Root cause\n\n`serverCandidateHosts()` (`dist/cli.mjs`) includes every local interface\naddress, including the Tailscale one, as a candidate host to probe for an\nexisting server:\n\n```js\nfunction serverCandidateHosts() {\n  const hosts = [clientHost(), LOOPBACK_HOST];\n  for (const address of localInterfaceAddresses()) {\n    if (!hosts.includes(address)) hosts.push(address);\n  }\n  return hosts;\n}\n```\n\n`findRunningServer()` then `GET`s `http://100.93.231.41:4387/health`. Because\nthe reverse proxy forwards that connection straight to the one real server on\nloopback, the probe returns a health body with the *same* `state_id` as the\nloopback probe - reached twice, through two paths, not two servers.\n\n`isOwnedServer()` matches both entries by `state_id` and marks both \"owned.\"\n`ownedDuplicates()` then compares each owned entry's host against the set of\naddresses the server *actually bound* (`health.hosts`, just `[\"127.0.0.1\"]`\nhere, since the Tailscale bind failed) - the proxy-reached entry isn't in\nthat set, so it's classified as a duplicate server that needs to be stopped.\n\n`ensureServer()`'s startup loop then runs this on the very first health check\nafter starting a fresh server:\n\n```js\nif (health?.app === \"lavish-axi\" && health.network_stale !== true && !raceRestarted) {\n  raceRestarted = true;\n  ...\n  await stopDuplicateServers(liveDuplicates, { reloadKey });   // kills the \"duplicate\"\n  await requestShutdown(liveUrl, { reloadKey, reason: ... });  // kills it again\n  ...\n}\n```\n\n`stopDuplicateServers()` → `requestShutdown()` → `POST {proxyAddress}/shutdown`,\nwhich the proxy forwards straight into the real server's `/shutdown` handler,\nkilling the only server that exists. This repeats on every retry (the new\nserver is just as Tailscale-unreachable), so the CLI eventually gives up with\n`SERVER_ERROR`.\n\nI confirmed the exact mechanism directly: started a disposable manual server\nbehind the same kind of forwarding proxy, then POSTed `/shutdown` to the\nproxy's address myself - it produced the identical\n`[lavish] shutting down: shutdown-request` log line and killed the process,\nreached via the proxy rather than a direct POST to the server's own bound\naddress.\n\n## Suggested fix\n\n`ownedDuplicates()` (or `isOwnedServer()`) should never schedule a\nsame-`state_id` entry for shutdown just because it was reached through a\ndifferent candidate host/address. A server reached twice - once directly,\nonce through something that forwards to it - is one server, not two. Only a\ngenuinely different `state_id` should ever be treated as a duplicate to stop.\n\n## Workaround\n\nSet `LAVISH_AXI_PORT` to a port the reverse proxy doesn't front, so\nlavish-axi's own direct interface bind (e.g. to the Tailscale address)\nsucceeds with no forwarding in the loop and no proxy-echo collision.\n\n## Version\n\nlavish-axi 0.1.79\n",
+    "createdAt": "2026-10-05T05:26:20Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 401,
+    "title": "Duplicate-server detection self-kills the server when a reverse proxy forwards a second address back to it",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/401"
+  },
+  {
+    "body": "## Summary\n\nThe bare `lavish-axi` output lists **every** open session on the machine, from every project and worktree. On a machine that runs many agent worktrees, that list grows without bound and pushes the SessionStart hook output past Claude Code's hook-output cap, so agents see a file path plus a 2,000-character preview instead of the output.\n\nPlease add a compact home view that lists only the sessions relevant to the caller: sessions whose file is under the current working directory, plus any session with pending prompts. Cap the list and print a count of the rest (for example `sessions[4 of 38]` and one line naming `lavish-axi sessions --all`).\n\n## Evidence (lavish-axi 0.1.79, one macOS host running a multi-agent fleet)\n\n- The bare output was 16,172 characters with 38 sessions on 2026-09-29. Two days earlier it was about 13,800 characters with 26 sessions.\n- Claude Code caps hook output at 10,000 characters and replaces it with a saved file plus a 2,000-character preview (https://code.claude.com/docs/en/hooks). The preview holds the description and the first few session rows; the help, playbooks, `end` and `export` guidance fall past the cut.\n- Of the 38 sessions, all had 0 pending prompts, 26 had no listener, and 5 pointed at files that no longer exist (deleted agent scratchpads and worktree copies).\n- After ending 13 finished boards with `lavish-axi end`, the output was still about 14,000 characters with 25 sessions.\n- The 5 missing-file sessions cannot be ended: `lavish-axi end <file>` fails with `ENOENT: no such file or directory, realpath '<file>'`. #373 already asks for `end` to take a session key when the file is gone; this is another instance of it.\n\n## Relation to other issues\n\n- #388 asks for a `--brief` mode that keeps the `sessions` block in full and drops the reference text. This request is complementary: it bounds the `sessions` block itself, which is the part that grows with the number of worktrees.\n- #308 and #243 are about a browsable list of all sessions, which would be the natural home for the full list once the default view is scoped.\n\n## Suggested shape\n\n- Default (or `--brief`): sessions under `cwd`, plus any session with pending prompts or a live listener, capped at N rows, then `sessions: N more (lavish-axi sessions --all)`.\n- A session whose file is missing is shown once as stale with its session key, so an agent can end it (with #373).\n",
+    "createdAt": "2026-09-29T14:05:19Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 391,
+    "title": "Compact home view: list only sessions for the working directory or with pending prompts, capped with a count",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/391"
+  },
+  {
+    "body": "The bare `lavish-axi` invocation is widely wired as a Claude Code `SessionStart` hook, which is what the tool's own guidance encourages. That makes its output part of the session's **cached prefix**, so it is re-sent to the model on every subsequent request in that session, not once.\n\nMeasured on lavish-axi 0.1.52:\n\n| | chars |\n|---|---:|\n| full bare output | 9,565 |\n| the `sessions[...]` block alone | 1,842 |\n| everything else (help, playbooks, visual guidance, description) | 7,723 |\n\nIn a configuration audit of one machine this worked out to roughly **3,100 tokens on every request** — 72% of all SessionStart hook output there, and larger than several always-loaded instruction files combined.\n\nThe part an agent acts on at session open is the `sessions` block: which artifacts are open, their URLs, and pending prompt counts. The rest — the 12 `help` lines, 7 `playbooks` descriptions, 5 `visual_guidance` paragraphs and the long `description` — is reference material already available on demand through `lavish-axi playbook <id>` and `lavish-axi design`, and in practice an agent re-reads those explicitly when it is actually about to build an artifact.\n\n### Request\n\nA quieter mode for the hook path, e.g. `lavish-axi --brief`, printing:\n\n- the `sessions` block in full, including when it is empty and when the tool reports an error, since that is the thing an agent must not silently stop seeing;\n- one line naming `lavish-axi playbook <id>` and `lavish-axi design` so the on-demand path stays discoverable.\n\nFull output would stay the default for interactive use.\n\n### Why not just filter it locally\n\nA user can wrap the hook, but a filter that silently stops passing the session block — on an empty list, or on an error shape it did not anticipate — leaves the agent blind to open sessions with nothing reporting it. A flag owned by the tool has no such failure mode, and the saving applies to everyone wiring the documented hook rather than only to users who know to work around it.\n\nHappy to open a PR if `--brief` is the shape you would want.\n",
+    "createdAt": "2026-09-27T15:50:31Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 388,
+    "title": "SessionStart output rides in every request's cached prefix (~3.1k tokens): add a --brief mode",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/388"
+  },
+  {
+    "body": "## Problem\n\n`lavish-axi export` produces a portable single-file artifact for stylesheets, CSS `url()`/`@import`, media, and classic scripts — but local `iframe` documents are left as plain `src` references with an `unsupported-frame` warning (\"iframe documents are left as references because nested HTML is not bundled\"). The moment the exported file moves or the sibling directory is deleted, every embedded frame 404s silently. The export still advertises itself as self-contained is the worst part: the artifact looks complete and breaks only when opened elsewhere.\n\nThis bites any artifact that embeds another local HTML page — e.g. an archify diagram viewer or an embedded demo — which is a common shape for review surfaces that mix prose with sub-artifacts.\n\n## Current behavior\n\n- `buildSelfContainedHtml` (`src/export-bundle.js`) dispatches `iframe` through `inlineRenderResourceAttrs` → `warnFrameSrc` → `warnUnsupportedFrame`, which resolves the ref, confirms it is a local file, and emits the warning. The `src` attribute is left pointing at the sibling path.\n- The same `nestedHtml` guard covers `object`/`embed` with HTML content, and `scrubFrameSrcdoc` treats existing `srcdoc` content as inert. Tests at `test/export-bundle.test.js:2839+` lock the warning contract in.\n\n## Proposed behavior\n\nFor a local-file iframe `src`, recursively transform the child document (the engine is already recursive for CSS `@import`, with shared budget accounting through `ctx.inlinedBytes` and an existing `maxDepth` pattern), then emit the result as an escaped `srcdoc` attribute using the existing `replaceAttrTokenValue` + HTML-escaping helpers that the srcdoc scrub path already uses.\n\nDetails worth deciding:\n\n- Recursion should respect `maxDepth` and the byte caps the same way CSS-import recursion does.\n- Relative links inside the nested document resolve against the child's own baseDir, so the recursive call needs the child's directory, not the parent's.\n- Existing `srcdoc` content (already escaped by the author) should probably stay untouched, matching the current scrub semantics — or be recursively processed too if it references local files.\n- `object`/`embed` HTML documents could ride the same path.\n\n## Workaround in use today\n\nPost-process the exported file: read each local iframe target and splice it into a `srcdoc` attribute with HTML escaping. It works but lives outside the tool, and every consumer has to rediscover it.\n\nHappy to send a PR if the approach sounds right.",
+    "createdAt": "2026-09-26T22:20:17Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 385,
+    "title": "export: inline local iframe documents as srcdoc instead of leaving them as broken references",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/385"
+  },
+  {
+    "body": "## Problem\n\nLavish-axi hardcodes `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'` on every session chrome response (`src/server.js`). When serving through a reverse proxy (e.g., godoxy, Caddy, nginx) that manages its own CSP/XFO framing policy, these hardcoded headers conflict with the proxy's framing configuration and block the very framing the proxy is trying to allow.\n\n## Proposal\n\nAdd a `LAVISH_AXI_ALLOW_FRAMING` environment variable that, when set, suppresses the `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'` headers on the `/session/:key` chrome route. This delegates framing policy to the reverse proxy.\n\n## Use case\n\nOperators running lavish-axi behind a reverse proxy that needs to embed the Lavish review surface in an iframe (e.g., within a dashboard or management UI). The proxy sets its own `Content-Security-Policy` and `X-Frame-Options` headers appropriate for the deployment. Without this flag, the backend's headers override the proxy's, preventing framing.\n\n## Security considerations\n\n- When `LAVISH_AXI_ALLOW_FRAMING` is **not set** (default), behavior is unchanged — the chrome refuses to be framed.\n- When set, the operator is explicitly opting in and is responsible for configuring framing policy at the proxy layer.\n- The `/artifact/*` and `/whiteboard-frame` routes are unaffected — they are already framable by design.",
+    "createdAt": "2026-09-26T21:38:14Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 383,
+    "title": "Feature: LAVISH_AXI_ALLOW_FRAMING env var to suppress framing headers behind reverse proxy",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/383"
+  },
+  {
+    "body": "### What happened?\n\nEvery `lavish-axi` invocation opens a TCP connection to port 4387 on **every local interface address**, not just loopback. That includes a bare `lavish-axi` run by an agent's SessionStart hook, and `stop`, `open`, `poll` and the rest. It comes from `serverCandidateHosts()` in `src/cli.js`, which appends `localInterfaceAddresses()` to the configured host and loopback (added in #374).\n\nOn a machine with a VPN or tunnel client, some of those addresses look public. For example, Cloudflare WARP gives each device an IPv6 in `2606:4700:110::/48`. Endpoint security tools then see a process started from a shell (`sh -c lavish-axi`) connecting to a \"public\" address on a non-web port, and raise an alert. We hit exactly that: a shell-egress detection fired on a developer laptop each time an agent session started. The connection was the CLI probing the machine's own WARP address.\n\nI expected discovery to stay on loopback plus the configured host. Since 0.1.78 every server binds loopback first as the port lock (`docs/invariants.md`, Process model), so those two addresses always find a current server. The every-interface sweep only helps find a 0.1.77-or-older server pinned to a Tailscale or LAN address alone.\n\n### How to reproduce\n\n1. On macOS or Linux with at least one non-loopback address (LAN, Tailscale, WARP, any VPN):\n   ```sh\n   sudo tcpdump -ni any 'tcp port 4387 and tcp[tcpflags] & tcp-syn != 0' &\n   lavish-axi stop\n   ```\n2. You'll see a connect attempt to `<every interface address>:4387`, not only `127.0.0.1:4387`.\n\nThe same thing happens with no server running at all, so every agent session start makes these connections.\n\n### lavish-axi version\n\n0.1.78\n\n### OS and Node version\n\nmacOS 27.0, Node v22.23.1\n\n### CLI output\n\nNo error output. The CLI works fine; the problem is the network side effect.\n\n### Anything else\n\n**Proposed fix (PR incoming):**\n- Discovery dials only the configured host and loopback by default.\n- The sweep stays available behind an opt-in `LAVISH_AXI_DISCOVER_ALL_INTERFACES=1`, for anyone upgrading past a pinned legacy server.\n- The existing legacy-server discovery tests turn it on, so that path stays covered.\n- A new end-to-end test listens on another local address and asserts it gets no connections by default.\n\nRelated: #374's own notes already mention one side effect of the sweep. A Tailscale IPv6 address drops connections to itself, which needed the socket-teardown fix.\n",
+    "createdAt": "2026-09-25T08:21:54Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 381,
+    "title": "CLI discovery dials port 4387 on every local interface address on every invocation",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/381"
+  },
+  {
+    "body": "On desktop, the Conversation panel has a fixed width. When I review an artifact and answer questions at the same time, I would like to drag the border between the artifact and the panel to resize it, like a split view. That way I could give the panel half of the window, or even more than the artifact when I am mostly reading and writing feedback.\n\n**Proposed behavior**\n- A drag handle on the panel's inner edge: the cursor changes to a resize cursor on hover, and dragging left or right changes the panel width.\n- A wide range, from a narrow panel up to most of the window, with a minimum so neither side collapses.\n- The chosen width is remembered across reloads of the same session (or globally).\n- Optional: double-click on the handle resets the default width.\n\n**Why**\nLong agent replies and queued feedback get cramped in a narrow panel, while the artifact sometimes needs less room. Letting the reviewer choose the split makes both reading and answering easier.\n\nTested with lavish-axi 0.1.76 on Windows.\n",
+    "createdAt": "2026-09-24T16:16:23Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 376,
+    "title": "Feature: resizable Conversation panel",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/376"
+  },
+  {
+    "body": "## Observed\n\nlavish-axi v0.1.77 on WSL2 (Ubuntu, Windows 11 host), 2026-09-22. The local server had accumulated 22 open sessions: one live review board with an agent listener, and 21 stale ones from finished agent sessions. Eight of the stale sessions pointed at HTML files that no longer exist, because the artifact lived in an agent scratchpad directory that was deleted when that agent session ended.\n\nTwo things made the cleanup and the day-to-day loop harder than they need to be.\n\n## 1. `lavish-axi <file>` opens a browser tab on every call, including a rebuild of a session that is already open\n\nAn agent iterating on an artifact calls `lavish-axi <file>` after each rewrite. Each call opens a new tab even though the session is already open in one, so a reviewer who keeps one tab per board ends up with several. `LAVISH_AXI_NO_OPEN=1` and `--no-open` suppress it globally, but then the first publish does not open either.\n\nAsk: when the target file already has an open session, reuse it and do not open a tab; open a tab only on first publish. The printed URL is enough for the rebuild case.\n\n## 2. `lavish-axi end <file>` cannot end a session whose file is gone\n\n`end` resolves the file with `realpath` first, so a session whose HTML was deleted fails with ENOENT and stays open on the server. The only way to close those was `POST http://127.0.0.1:4387/api/<key>/end` by hand, after reading the session key out of the server's session list.\n\nAsk: let `end` take the session key (or the session URL) as an alternative to the file path, so a session can be closed after its file is gone. A `lavish-axi end --missing` sweep that ends every session whose file no longer exists would cover the batch case.\n\n## Workaround in place\n\nA cron job on the machine ends sessions with no listener whose file is missing or untouched for three days, through the HTTP endpoint. It works, but it is outside the CLI's own surface.\n",
+    "createdAt": "2026-09-22T18:38:06Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 373,
+    "title": "Reuse the open session instead of opening a tab on every rebuild; let end take a session key when the file is gone",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/373"
+  },
+  {
+    "body": "## Observation\n\nReading `dist/cli.mjs` (0.1.76): before the artifact is revealed, the chrome waits for `document.fonts.ready`, then `waitForDomHydrationQuiescence` (MutationObserver, 180 ms settle / 2 s max), then a geometry-quiescence wait using a `ResizeObserver` over `document.body.querySelectorAll(\"*\")` capped at 800 elements (2 s max, 4 s when animations are present), then runs the layout audit, then reveals — behind a 12 s `CHROME_LAYOUT_GATE_MAX_HOLD_MS` hold. The audit's findings go to the passive **Layout issues** inbox and never reach the agent's poll unless the reviewer queues them.\n\nSo the reveal is gated on work whose only output is advisory. On a phone, a ~50 KB page with two inline SVG figures (their nodes fill the 800-element observed set) shows \"Checking layout. One moment.\" for several seconds every load and reload, and the reviewer experiences that as the page being slow — while the artifact itself is static HTML that would paint instantly.\n\n## Suggestions\n\n1. Reveal as soon as fonts are ready and the first paint has happened; run the quiescence waits and the audit *after* reveal and file findings into the inbox exactly as now. The reviewer loses nothing (the inbox is passive) and gains the seconds back.\n2. If a pre-reveal gate must stay for the \"inaccessible or unusable content\" case, exclude SVG descendants (and `<svg>` subtrees generally) from the observed set — they are DOM, not loaded resources, and they swamp the 800-element cap on any page with a diagram.\n3. Expose the hold as an env knob (`LAVISH_AXI_LAYOUT_GATE_MAX_HOLD_MS` or a `--no-layout-gate` for `poll`/reopen) so an agent that knows its page is static can opt out.\n\nRelated: #369 (load tokens lost on upgrade restart) — together they are the two \"Lavish feels broken\" moments a reviewer reported on 2026-09-22.\n\n— Keeping my human friend @idvorkin in the loop!",
+    "createdAt": "2026-09-22T12:36:56Z",
+    "labels": [
+      { "id": "LA_kwDOSanIos8AAAACiygkqw", "name": "bug", "description": "Something isn't working", "color": "d73a4a" },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 370,
+    "title": "Layout gate holds the reveal for a diagnostic that only feeds the passive warnings inbox — reveal first, audit after",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/370"
+  },
+  {
+    "body": "## What I was trying to do\n\nReview a small static website with Lavish: six sibling pages in one folder (`index.html`, `pergamum.html`, `open-source.html`, …) sharing one CSS file, one JS file and an `assets/` folder, linked to each other through a normal nav bar. I wanted to walk the site the way a visitor would, annotate things on each page, and send it all back to the agent in one pass.\n\n## What happens today\n\nOnly the page the session was opened with can be annotated. On current `main` (`d6285316`, 0.1.72) the SDK is injected only for the entry route:\n\n```js\n// src/server.js:1226\napp.get(/^\\/artifact\\/([^/]+)\\/index\\.html$/, async (req, res, next) => {\n  …\n  res.type(\"html\").send(injectLavishSdk(html, key, verified.artifact_revision, verified.artifact_load_token));\n```\n\nEvery other HTML file in the artifact directory is served raw through `sendFile`, so as soon as the reviewer clicks a nav link inside the frame, the chrome is still there but hover/click annotation and the DOM snapshot are gone for that page.\n\n#332 / #334 made this fail loudly instead of silently stranding feedback, which is the right fix for that bug. This issue is the feature that was left on the other side of it: the sibling page itself is still not reviewable.\n\n## The workaround, and why it is rough\n\nThe agent has to open one session per page. In practice, for six pages:\n\n- six `lavish-axi <file>` calls, six URLs, six long-polls to keep alive at once;\n- the reviewer has to be told not to use the site's own navigation, which is exactly what they would naturally test;\n- feedback about shared things (nav bar, footer, theme) gets filed against whichever page the reviewer happened to be on, and the agent has to work out that it is global;\n- in my session the reviewer saw six tabs open at once, assumed the agent had made a mistake, and closed them all. We restarted one page at a time. His words when he understood it was a limitation: \"it only lets you open one per session?\"\n\n## What I would like\n\nOne session that can review a multi-page artifact:\n\n1. Inject the SDK into any same-origin HTML document served from the artifact directory, not only `index.html`, so annotation keeps working after in-frame navigation.\n2. Carry the page in each prompt (for example a `page` / `path` field next to `selector`), so the agent knows which file an annotation belongs to. The DOM snapshot would be of the page being viewed when the feedback is sent, or one per page that has annotations.\n3. Optionally, a small indicator in the chrome of which page is currently loaded.\n\nEntry stays `index.html` (or whatever file the session was opened with); nothing changes for single-page artifacts.\n\n## Things I am not sure about\n\nI have not read `VISION.md` closely enough to know whether \"one artifact = one document\" is a deliberate constraint. If it is, a lighter version that would still remove most of the pain: let `lavish-axi` accept several files (or a directory) and present them as one session with a page switcher, each page being its own injected entry. I am happy to go with whichever shape fits the project, or to hear that this is out of scope.\n\n## Environment\n\nlavish-axi 0.1.65 installed locally (behaviour re-checked against `main` 0.1.72 by reading `src/server.js`), macOS, Chrome. Agent harness: Claude Code, polling through a tracked background job.\n",
+    "createdAt": "2026-09-19T01:12:45Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 352,
+    "title": "Feature: review a multi-page artifact in one session (keep annotation working on sibling HTML pages)",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/352"
+  },
+  {
+    "body": "## Summary\n\nLavish routes feedback to the first poller that calls `takeFeedback`, not to the agent or task that opened the artifact. In a mixed Claude Code and Codex environment, feedback for a Codex-created artifact can be consumed by Claude. Codex then never resumes.\n\nThis is broader than the duplicate-poll guard in #300 and the Codex foreground-poll guidance from #114. Those changes reduce one-agent failures, but they do not identify the task that owns a review session.\n\n## Environment\n\n- `lavish-axi` 0.1.71\n- macOS\n- Claude Code and Codex Desktop share the same Lavish state directory\n- One review session opened from Codex\n\n## Reproduction\n\n1. Open `plan.html` from a Codex task.\n2. Leave or finish the Codex turn before review feedback arrives.\n3. Start or retain a Claude poll for the same file.\n4. Add annotations in the browser and select **Send to Agent**.\n5. Observe that Claude receives the feedback and Codex does not resume.\n\nIn the observed session, Lavish accepted nine annotations. The session then contained an agent reply and zero pending prompts. The artifact changed, but the Codex task received no poll result.\n\n## Cause\n\nThe saved session has no agent, owner, or task identity. `activePolls` is only a count keyed by the canonical file path. Each poll receives the same feedback event and calls `store.takeFeedback(key)`, so the first caller wins.\n\n`detectInvokingAgent()` currently changes guidance text only. `openCommand()` does not send the detected agent or the Codex thread ID to `POST /api/sessions`.\n\n## Expected behavior\n\n**Send to Agent** should deliver feedback to the task that owns the session. The browser should show the target, such as **Send to Codex** or **Send to Claude**.\n\nAnother agent should receive feedback only after an explicit takeover.\n\n## Proposed design\n\n1. Store an owner lease when an agent opens or claims a session:\n   - agent kind\n   - opaque task or thread ID\n   - random lease token\n   - last-seen timestamp\n2. Require the lease token on `poll`.\n3. Reject a conflicting poll with a clear error and an explicit takeover command.\n4. Show the current target in the browser without exposing the raw task ID.\n5. If the owner has an active poll, deliver through that poll.\n6. If no poll is active, use a configured host adapter to resume the owning task.\n7. If no adapter exists, keep the feedback queued and tell the reviewer that the named agent is not listening.\n\nFor Codex, the documented App Server supports `thread/resume` and `turn/start`, so a Codex adapter can wake the recorded `CODEX_THREAD_ID`. The adapter should remain opt-in until concurrent desktop and App Server ownership is proven safe.\n\n## Acceptance criteria\n\n- [ ] A session records one current owner and supports explicit takeover.\n- [ ] The browser names the target agent.\n- [ ] A non-owner poll cannot consume feedback.\n- [ ] Codex feedback either starts the owning task or remains visibly queued.\n- [ ] Claude feedback follows the same ownership contract.\n- [ ] Generic clients without task identity keep the current queue-and-poll behavior.\n- [ ] No raw task identifier reaches the browser.\n- [ ] Existing sessions remain readable and can be claimed.\n\nRelated: #300, #114, #296.\n\nCodex App Server documentation: https://learn.chatgpt.com/docs/app-server\n",
+    "createdAt": "2026-09-18T00:18:04Z",
+    "labels": [
+      { "id": "LA_kwDOSanIos8AAAACiygkqw", "name": "bug", "description": "Something isn't working", "color": "d73a4a" },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 350,
+    "title": "Route feedback to the owning agent/task instead of the first poller",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/350"
+  },
+  {
+    "body": "## Summary\n\nWhen an artifact control calls `window.lavish.queuePrompt()` (e.g. the \"Queue this answer\" submit button the `input` playbook recommends), the triggering element gives no visual confirmation. The prompt lands in the Conversation panel, but the button the user actually pressed looks exactly as it did before the click.\n\n## Why it matters\n\nIn a decision board with several question cards, a reviewer answers question 1, presses its queue button, and sees nothing change where they clicked. Real-world result from a review session today: the reviewer was unsure whether the click registered, whether pressing again would double-queue, and which of the four questions they had already answered. The Conversation panel does record it, but the eye is on the card, not the panel — and on smaller viewports the panel may be collapsed entirely.\n\nThe `input` playbook already tells artifact authors to \"show selected state separately from queued state so the user trusts what will be sent back\", but today every artifact must hand-roll that acknowledgement in its own JS, and most (including agent-generated ones) don't.\n\n## Repro\n\n1. Create an artifact with the playbook's own single-choice example: a `<form data-lavish-question=\"plan\">` with radios and a submit button whose handler calls `window.lavish.queuePrompt(...)`.\n2. Open it under `lavish-axi`, pick a radio, press the queue button.\n3. Observe: the button and card are visually unchanged. Pressing repeatedly queues again (or replaces via `queueKey`), with no feedback at the point of interaction either way.\n\n## Expected\n\nLavish-owned acknowledgement at the source of the click, so authors get it for free:\n\n- When `queuePrompt` is called with an `element` (or from within a `data-lavish-question` container), the chrome marks that container as queued — e.g. a small \"queued ✓\" chip on the card, cleared/refreshed when a `queueKey` replacement lands or the prompts are sent.\n- The per-question state should distinguish *selected locally* vs *queued* vs *sent*, matching the playbook's own vocabulary.\n- Optionally: let `queuePrompt` return the queued entry (id/count) so artifacts that want custom feedback can build on a documented return value instead of assuming.\n\n## Environment\n\nlavish-axi 0.1.67, macOS, Chrome, artifact using the input playbook's native-form pattern.\n",
+    "createdAt": "2026-09-15T19:40:05Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 336,
+    "title": "Controls that queue a prompt give no clicked/queued feedback at the point of interaction",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/336"
+  },
+  {
+    "body": "## Summary\n\nWhen reviewing an artifact in Lavish Editor, sending feedback to the agent is unreliable in two related ways:\n\n1. **Human side:** The reviewer sometimes cannot successfully activate **Send to Agent** (control appears present but does not complete a send from their perspective).\n2. **Agent side:** An agent-driven browser session on the same local session URL can click **Send to Agent** and get no delivery. The UI stays put and prompts along the lines of needing a message or an annotation first, with **no queued annotations visible** — even when the human believes they already annotated.\n\n## Environment\n\n- Happened on a **Grok Bot computer** (agent VM)\n- Local `lavish-axi` server + session URL on loopback\n- Human reviewing via the bot desktop / remote view\n- Agent also driving a browser against the **same session URL**\n- Annotate mode can show as **on** while the Conversation panel still has an empty “write a message…” field and no visible queued marks\n\nThat multi-client setup (human desktop view + agent browser on one loopback session) is likely relevant.\n\n## Agent recovery attempt (failed)\n\nAfter the human reported they had annotated but could not activate **Send to Agent**, the agent tried to complete the send on their behalf:\n\n1. Kept `lavish-axi poll` running on the same HTML artifact (with an `--agent-reply` ack).\n2. Opened the existing local session URL in the **host browser** on the Grok Bot computer (same loopback session id).\n3. Located **Send to Agent** in the Conversation panel and clicked it.\n\n**Result:** no feedback was delivered to poll. The UI did not advance; it stayed on a prompt like “Write a message or annotate an element first,” with **no queued annotations visible** in that browser client. Annotate mode could still show as on, and the Conversation composer stayed empty.\n\nSo the agent-side click path does not recover a send when the human’s marks are not present in the agent’s browser client (or were never queued on the session). From the agent’s view this looks identical to an empty queue, with no way to complete the human’s pending feedback.\n\n## Expected\n\n- Annotations made while Annotate is on should queue and be sendable via **Send to Agent**\n- If the human cannot click Send, an agent operating the same session should still see the queued feedback (or the UI should make clear that marks live only in another client)\n- Error copy should distinguish “nothing queued in *this* client” vs “nothing queued on the session”\n\n## Actual\n\n- Human cannot complete Send\n- Agent click yields “write a message or annotate an element first” / empty queue\n- No feedback reaches `lavish-axi poll`\n\n## Questions / asks\n\n- Is annotation state **per browser client** rather than session-shared? If so, docs/UI should say so clearly for remote-desktop / multi-tab setups.\n- Can Send be disabled with a clearer reason when the queue is empty?\n- Is there a known issue with Annotate toggle on but nothing queued after marking elements/text?\n\nHappy to provide a minimal repro HTML + CLI steps if useful. No proprietary artifact attached.",
+    "createdAt": "2026-09-04T04:24:54Z",
+    "labels": [
+      { "id": "LA_kwDOSanIos8AAAACiygkqw", "name": "bug", "description": "Something isn't working", "color": "d73a4a" },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 323,
+    "title": "Send to Agent: UI blocked / agent click finds no queued annotations",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/323"
+  },
+  {
+    "body": "# Persistent multi-address server mode: bind several addresses, never idle out, keep the printed link host\n\n## Problem\n\nWhen an agent hands a reviewer a Lavish link, the link often does not work from the reviewer's machine, for three independent reasons that all trace to the server being spawned ad hoc by whichever process calls `lavish-axi <file>` first:\n\n1. **One bind address per process.** `LAVISH_AXI_HOST` accepts exactly one explicit address (`resolveListenHosts` keeps `[primary]`, and `sanitizeListenHosts` drops wildcards back to loopback). Auto mode binds loopback plus the Tailscale IPv4, but only when `LAVISH_AXI_HOST` is unset, and then `LAVISH_AXI_LINK_HOST` is ignored in favour of the MagicDNS name. There is no way to say \"listen on loopback, my tailnet address and my LAN address, and print links with this short name\".\n2. **First caller wins the bind.** The first process to start the background server decides its host, allowlist and link host; every later `lavish-axi <file>` attaches to it silently. A helper process with no env (a hook, a subagent) starts it on loopback, and from then on every link the agent prints is unreachable from any other device until someone finds and kills that server.\n3. **Idle self-stop kills links.** The server exits after `LAVISH_AXI_IDLE_TIMEOUT_MS` (30 min default) with no connection. A reviewer who opens a link 40 minutes after it was posted gets a connection refused, and the next caller respawns a server whose bind again depends on its own env (point 2). Setting `off` works, but only if the process that happened to start the server had it set.\n\nAlso, a server started before the tailnet interface has an address at boot falls back to loopback and stays there.\n\n## Proposal\n\n- Let `LAVISH_AXI_HOST` (and/or a repeatable `--host` on `lavish-axi server`) hold a **list** of addresses; bind each, keep the first as primary for link resolution, and honour `LAVISH_AXI_LINK_HOST` whenever the host is explicit. A local patch of `resolveListenHosts` that splits the env var on commas/whitespace is about 4 lines and has been running fine.\n- Document a **persistent server mode** for shared machines: a `lavish-axi server --port N` process managed by the OS (systemd user unit, launchd, scheduled task) with idle timeout off, so `lavish-axi <file>` always attaches and never decides the bind. A `lavish-axi service install` subcommand that writes that unit would make this a one-liner.\n- When a caller attaches to an already-running server whose link host or bind set differs from the caller's env, print a one-line warning instead of silently inheriting the running server's values.\n- Retry the bind of a tailnet address at startup for a bounded time (the retry delays that exist for auto mode) also when the address was given explicitly.\n\nRelated: #62 (custom host binding), #215 (tailnet access from other devices), #205 (allowlist discoverability).\n\n## Environment\n\nlavish-axi 0.1.63, Linux (Fedora and Ubuntu), Node 22, Tailscale present on all machines, reviewers on a Windows workstation and on phones over the tailnet.\n",
+    "createdAt": "2026-09-02T16:17:57Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 318,
+    "title": "Persistent multi-address server mode: bind several addresses, never idle out, keep the printed link host",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/318"
+  },
+  {
+    "body": "## Summary\n\nAdd right-click (`contextmenu`) as an additive way to open an annotation card immediately, and pass through modifier clicks (Ctrl/Cmd-click) so native link navigation and multi-tab workflows are never swallowed.\n\n## Motivation & Context\n\nIn current `lavish-axi` (0.1.63):\n1. In annotate mode, left-clicking anywhere opens an annotation card. While this is great for markup, it can make it tricky to click on native links or open them in background tabs without switching modes back and forth.\n2. PR #127 proposed swapping left-click for a custom right-click context menu, but that was held because replacing the default annotate gesture breaks existing user habits and default chrome UX.\n\n## Proposed Solution (Additive, Non-Breaking)\n\nInstead of replacing left-click annotate:\n1. **Additive right-click (`contextmenu`) trigger**:\n   - A right-click listener in `src/artifact-sdk.js` captures `contextmenu` events (ignoring native inputs, textareas, and Lavish UI).\n   - If there is an active text selection, it opens the card anchored to the selection range.\n   - Otherwise, it opens the card directly at the click coordinates (`options.point: { x: event.clientX, y: event.clientY }`).\n   - Standard left-click annotation in annotate mode remains 100% untouched.\n2. **Modifier-click passthrough**:\n   - In `click` capture: `if (event.ctrlKey || event.metaKey) return;`.\n   - Allows users in annotate mode to Ctrl/Cmd-click links to open them in a new tab without being captured.\n\n## Verification & Implementation\n\nWe implemented and tested this in our fork (`simfor99/lavish-axi@feat/right-click-annotate-and-initial-mode`). All existing tests and new checks pass cleanly (1,153 passing). In practical daily use, having right-click always available makes annotating seamless while leaving left-click and browsing behaviors predictable.\n\nWe would be happy to open a clean PR if you feel this aligns with the project direction!",
+    "createdAt": "2026-09-02T11:38:17Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 317,
+    "title": "Feature idea: Additive right-click to annotate + modifier-click passthrough",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/317"
+  },
+  {
+    "body": "### What happened?\n\nIf a reviewer has a layout-warnings chip in their queue and the artifact is rewritten before they hit Send, `POST /api/:key/prompts` returns `409 conflict` and **rejects the whole batch** — every unrelated annotation and comment queued alongside it. The client handles that 409 by refreshing the warnings list and returning, so nothing is shown to the reviewer. Send just looks dead.\n\nTwo things compound it:\n\n1. **The rejection is all-or-nothing.** One stale layout chip takes down every unrelated prompt in the batch. Verified: the server persisted `prompts: []`, `pending_prompts: 0` after the 409.\n2. **Nothing surfaces.** No hint, no chip marking, no console message from the client. The queue is left intact, Send stays enabled, and the composer clears — so it reads as \"sent\". The reviewer's reasonable conclusion is that the agent is not listening.\n\nIt is easy to hit because it needs no reviewer mistake: any agent write to the artifact bumps `artifact_revision`, re-runs the detector, and flips the warning `open` → `resolved`. The chip the reviewer queued a minute ago is now stale.\n\nThis cost us several hours in a real review session and nearly lost a few dozen annotations, which only survived because `sessionStorage` had not been cleared.\n\n### How to reproduce\n\nReproduced on a synthetic artifact against an isolated server (`LAVISH_AXI_PORT=4399`, `LAVISH_AXI_STATE_DIR=./state`), driving the real browser chrome and the real layout detector.\n\n`stale-warning.html` — the `.clipped` div reliably files one `clipped-text` error:\n\n```html\n<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <title>Stale layout warning repro</title>\n    <style>\n      html, body { overflow-x: hidden; }\n      body { font-family: system-ui, sans-serif; background: #fff; color: #111; margin: 2rem; }\n      .clipped { width: 220px; overflow: hidden; white-space: nowrap; border: 1px solid #ccc; padding: .5rem; }\n    </style>\n  </head>\n  <body>\n    <h1>Stale layout warning repro</h1>\n    <div class=\"clipped\">\n      ThisIsASingleUnbreakableTokenThatIsFarWiderThanItsContainerAndGetsClippedEntirely\n    </div>\n  </body>\n</html>\n```\n\n1. `lavish-axi ./stale-warning.html`, open the session URL.\n2. Open the Layout issues inbox. One issue: *Text cut off by its container*, `clipped-text`, severe, open. Tick it, click **Queue selected fixes**. The chip lands in the queue carrying `target.artifact_revision: 3`.\n3. Now let an agent \"fix\" the artifact — replace `overflow: hidden; white-space: nowrap` with `overflow-wrap: anywhere` and save. Lavish live-reloads, revision goes to 4, and the warning flips to `resolved` / `selectable: false`. The inbox badge reads *0 unresolved layout issues*, but the queued chip is untouched and still says revision 3.\n4. Type an ordinary comment in the composer and click **Send to Agent**.\n\nResult:\n\n```\nPOST /api/<key>/prompts  ->  409 Conflict\n{\"status\":\"conflict\",\n \"error\":\"a layout warning changed before it was sent; review the warning again\",\n \"warning_ids\":[\"a79f7d0d14e46538\"],\n \"warnings\":[{\"id\":\"a79f7d0d14e46538\",\"rule\":\"clipped-text\",\"status\":\"resolved\",\n              \"selectable\":false,\"active\":false, ...}]}\n```\n\nState after the click:\n\n| | |\n|---|---|\n| Prompts persisted server-side | `0` (`pending_prompts: 0`, `status: \"open\"`) |\n| Queue in the tab | still 2 entries (the stale chip **and** the unrelated comment) |\n| `#sendHint` | `hidden: true` |\n| Send button | still enabled, unchanged label |\n| Visible text matching /conflict\\|stale\\|changed\\|error\\|fail\\|reject/ | none |\n| Composer | cleared, which reads as success |\n\nThen, to confirm the unrelated comment was only ever blocked by the chip: delete the layout chip from the queue, click Send with the *same* comment — `200 OK`, `{\"status\":\"queued\",\"pending_prompts\":1}`.\n\n### Code path\n\n- `src/session-store.js:216` — `#queuePromptsLocked` collects conflicts across all prompts into one set and returns `{ conflict: true }` for the whole payload before anything is accepted. The per-prompt `layoutPlans` array immediately above already has the shape needed to accept the non-conflicting entries.\n- `src/layout-warnings.js` `planLayoutWarningPrompt` — a warning conflicts when the prompt carries `target.artifact_revision` that no longer matches the session revision, or when the warning is no longer selectable (the `resolved` case above hits both).\n- `src/server.js:725` — the route maps `result.conflict` to `409` with `warning_ids` and `warnings`.\n- `src/chrome-client.js:1229` — the client's 409 branch. The `data?.status === \"ended\"` case is handled deliberately; the conflict case calls `setLayoutWarnings(data.warnings)` and `return false` with no `showSendHint`. Contrast the `400` branch four lines below at `:1243`, which does call `showSendHint(describeAttachmentRejection(...))` for the equivalent atomic-reject case.\n- The rejection has no other consumer: `submitQueuedOnce` returns `false`, and the sole caller (`submitQueued().catch(() => {})`, `src/chrome-client.js`) swallows it.\n\n### Suggested fixes, in preference order\n\n1. **Partial accept.** Reject only the stale layout prompts and queue the rest. `layoutPlans` is already per-prompt, and the 409 response already names the offending `warning_ids`, so the response could become a `207`-style \"queued N, rejected these warning ids\". This is the fix that matches what the reviewer expects: an unrelated comment should not be collateral.\n2. **Failing that, surface the rejection.** In the 409 conflict branch, call `showSendHint` with copy naming the offending chip, mirroring the existing `400` handling. Small and self-contained.\n3. **At minimum, mark the chip.** The response already carries `warning_ids`; flagging those chips in the queue would at least let the reviewer see which one to remove.\n\nHappy to open a PR for (2), and for (3) if you want it. (1) looks like your design call.\n\n### lavish-axi version\n\n0.1.63\n\n### OS and Node version\n\nmacOS 26.6.2 / Node v26.0.0\n\n### Anything else\n\nAdjacent but distinct: #143 reports a different silent-Send cause (the snapshot handshake never replying) and #296 asks for acknowledged delivery generally. This one is specifically the 409 conflict path.\n\nI hit a second silent-Send cause in the same session, filed separately as #314: the 2MB body limit on this route.\n",
+    "createdAt": "2026-09-02T04:17:00Z",
+    "labels": [
+      { "id": "LA_kwDOSanIos8AAAACiygkqw", "name": "bug", "description": "Something isn't working", "color": "d73a4a" },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 313,
+    "title": "A stale layout-warning chip rejects the reviewer's entire batch, with no error shown anywhere",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/313"
+  },
+  {
+    "body": "## Problem\n\nHitting the server root today (`127.0.0.1:PORT/` locally, or the tailnet MagicDNS root once #216 lands) always shows a static \"Lavish Editor is running\" placeholder — no matter how many sessions are actually open. `lavish-axi` with no args already returns the full list, but only as agent-facing text output. On a phone via Tailscale there's no CLI at all, and even on the desktop it's convenient to just open the root URL in a tab and see what's live instead of asking the agent.\n\n## Relationship to #243\n\n#243 asked for this same \"see all sessions in a browser\" idea and was closed as out of scope — the stated reasons were desktop tab clutter (fixed by `--no-open`) and the agent already having the list via CLI. This request is the same surface (a browser-viewable list) but a narrower shape: read-only, no cross-project grouping, no session management — literally just today's placeholder card with a list of open sessions where the \"wait for your agent to tell you\" copy currently sits. Flagging the precedent directly rather than pretending it doesn't exist.\n\n## Proposal\n\nReplace the static placeholder at the server root with a minimal read-only list when sessions are open: file name, status, a link per session. Same visual shell as today's card. Applies both on plain `127.0.0.1` and (once merged) the tailnet root from #216.\n\nIf the maintainer would rather not change the default local behavior, an opt-in flag/env var (mirroring `LAVISH_AXI_NO_OPEN`'s shape) is a fallback that keeps today's default and just stops relitigating #243.\n\n## Mockup — today vs. proposed\n\nSame visual shell, just replacing the \"wait for your agent\" copy with the list when sessions are open:\n\n**Today:**\n![today](https://files.catbox.moe/kavc7m.png)\n\n**Proposed:**\n![proposed](https://files.catbox.moe/0sopan.png)\n\n## Out of scope\n\n- Cross-project grouping.\n- Any session management from this page (close, rename, etc.) — read-only.\n\n## References\n\n- #215 / #216 — the tailnet feature this would sit on top of once merged.\n- #243 — the earlier, broader ask this deliberately narrows.\n",
+    "createdAt": "2026-08-31T22:03:42Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 308,
+    "title": "Feature: read-only session list at the server root (local + tailnet), companion to #215/#216",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/308"
+  },
+  {
+    "body": "**Problem.** The mermaid CDN snippet emitted by `lavish-axi design` initializes with `mermaid.initialize({ startOnLoad: false, theme, securityLevel: \"strict\" })` — no `flowchart.curve`, no `themeVariables.fontFamily`. Every flowchart in every artifact therefore inherits mermaid's factory defaults:\n\n1. `curve: \"basis\"` — a B-spline that overshoots dagre's computed waypoints, producing wavy \"noodle\" edges that visually detach from node borders and blur parallel edges together.\n2. `fontFamily: \"trebuchet ms\"` (mermaid's theme default) — while the recommended artifact design uses a system sans stack, so diagram text visibly switches typeface vs surrounding prose, and its 16px default towers over 15px body text.\n\n**Why it's worth a fix — measured, not taste.** The graph-drawing literature has studied exactly this:\n\n- **Purchase, Hamer, Nöllenburg, Kobourov — *On the Usability of Lombardi Graph Drawings* (GD 2012, [doi:10.1007/978-3-642-36763-2_40](https://doi.org/10.1007/978-3-642-36763-2_40))**: 69 participants × 72 trials comparing straight-line vs curved-edge (Lombardi-style) drawings. Straight-line was **both more accurate and faster** across nearly all comparisons (overall p < 0.001), including the shortest-path edge-following task — the reading task architecture/flow diagrams exist for. Participants *preferred* the curved look yet performed measurably worse on it: aesthetic preference ≠ legibility.\n- **Purchase — *Which aesthetic has the greatest effect on human understanding?* (GD 1997, doi 10.1007/3-540-63938-1_67)**: minimizing edge bends is among the aesthetics with the strongest measured effect on diagram comprehension.\n\n**Proposal.** In the bundled snippet:\n\n```js\nmermaid.initialize({\n  startOnLoad: false,\n  theme,\n  securityLevel: \"strict\",\n  flowchart: { curve: \"linear\" },\n  themeVariables: { fontFamily: \"inherit\", fontSize: \"14px\" },\n})\n```\n\n- `linear` renders dagre's waypoints as straight polylines (the draw.io/Graphviz convention). Per-diagram `--- config ---` overrides survive, so genuinely organic diagrams can still opt into splines.\n- If `\"inherit\"` proves flaky, resolve `getComputedStyle(document.body).fontFamily` at init time — the snippet already derives colors from the page.\n- Minor, same spirit: on render failure the snippet only `console.error`s and leaves raw source text in the page; an inline error box would stop broken diagrams failing silently. (Also worth noting: `mermaid.run()` mid-load races stylesheet application — dagre label measuring can throw `Could not find a suitable point for the given distance` even though the graph is valid; rendering after `document.fonts.ready` with a bounded retry avoided it.)\n\n**Repro/verification.** Any artifact flowchart rendered with the stock snippet emits bezier edge paths (`C` commands in the SVG); with `curve: \"linear\"` the same diagram contains only straight `L` segments (verified by diffing SVG path data, 10/10 edges). The squiggle-vs-straight difference is immediately visible on any `lavish-axi <file.html>` artifact containing a `flowchart` with subgraphs/cross edges.\n",
+    "createdAt": "2026-08-31T12:43:36Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 307,
+    "title": "Mermaid snippet inherits presentation defaults: basis-spline edges + Trebuchet text",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/307"
+  },
+  {
+    "body": "`npx lavish-axi design` instructs agents to default artifacts to `<html data-theme=\"luxury\">`. I measured the actual DaisyUI 5.5.19 `luxury` palette (converted its OKLCH tokens to sRGB and computed WCAG 2.x contrast ratios):\n\n| Element | Token | sRGB | Contrast on `base-100` |\n|---|---|---|---|\n| background | `base-100` `oklch(14.076% .004 285.822)` | `#09090b` | — |\n| **body text** | `base-content` `oklch(75.687% .123 76.89)` | `#dca54d` | **4.66:1** |\n| warning | `oklch(86.127% .136 102.891)` | `#e2d563` | 9.0:1 |\n| success | `oklch(78.119% .192 132.154)` | `#87d03a` | 6.3:1 |\n\nTwo problems:\n\n**1. The body text itself is a saturated amber.** Contrast passes WCAG AA by only 0.16 (and fails AAA's 7:1), but the deeper issue is hue/chroma: at OKLCH chroma 0.123 / hue 77°, *every word of body copy* is rendered in a bronze tint instead of a neutral near-white. Material's dark-theme guidance addresses exactly this:\n\n> \"A dark theme should avoid using saturated colors, as they don't meet WCAG's accessibility standard of at least 4.5:1 for body text against dark surfaces. Saturated colors also produce optical vibrations against a dark background, which can cause eye strain. Instead, use desaturated colors as a more legible alternative.\"\n\n— https://developer.android.com/design/ui/mobile/guides/styles/color (dark theme section)\n\nSaturated accents are fine (`warning` at 9:1 reads well); saturated **text** across an entire review document is where this theme hurts.\n\n**2. The theme is forced regardless of the user's OS preference.** NN/g's dark-mode research review concludes:\n\n> \"we don't recommend switching to dark mode by default if your target audience includes the general population… we strongly recommend that designers allow users to switch to dark mode if they want to\"\n\n— https://www.nngroup.com/articles/dark-mode/\n\nand their follow-up study notes users think about dark mode at the *system* level (OS setting), not per-application: https://www.nngroup.com/articles/dark-mode-users-issues/\n\nFor reading-heavy artifacts specifically, the controlled studies behind that review found positive (light) polarity outperforms dark for proofreading and visual acuity across age groups, with the advantage growing as font size shrinks — Piepenbrock et al. 2013, *Ergonomics*, https://doi.org/10.1080/00140139.2013.790485\n\n**Proposal:**\n\n1. Default to the user's system preference: a small script in the artifact template reads `matchMedia('(prefers-color-scheme: dark)')` and picks a light/dark `data-theme` pair (e.g. `corporate` ↔ `dim`), with an optional persisted user override.\n2. If a fixed dark default is preferred for brand consistency, use a neutral-text dark theme (e.g. `dim`) rather than `luxury` — same look-and-feel intent, without amber body copy.\n\nThis is roughly five lines of JS in the skill template; no dependency changes. Happy to open a PR if the direction sounds right.\n",
+    "createdAt": "2026-08-31T08:12:14Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 306,
+    "title": "Change default theme from luxury: saturated amber body text (4.66:1) and no prefers-color-scheme respect",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/306"
+  },
+  {
+    "body": "Could you please add a switch from dark mode to light mode for the reports. it could help to read the reports produced in dark colors outside in a sunny day ",
+    "createdAt": "2026-08-30T19:19:19Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 305,
+    "title": "The report is hardly readable in a sunny day",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/305"
+  },
+  {
+    "body": "## Problem\\n\\nLavish accepts browser feedback durably, but poll delivery is still destructive before the receiving agent acknowledges it. A poll disconnect, process exit, truncated consumer, or missing reply path can therefore lose a delivered batch or leave the browser in an indefinite Working state.\\n\\nThis consolidates the unresolved portions of #267, #229, and #228. PR #168 establishes useful acknowledgement prior art, but it is still open and does not cover the complete presence and stalled-state contract below.\\n\\n## Acceptance criteria\\n\\n- Persist one leased in-flight feedback batch with an immutable receipt ID.\\n- Poll returns the leased batch; explicit acknowledgement commits delivery.\\n- Poll disconnect or process exit before acknowledgement, and lease expiry, restore the same batch exactly once without duplication.\\n- Presence exposes meaningful queued, delivering, awaiting-reply, and stalled states.\\n- Never report indefinite Working when no live acknowledged consumer or reply path exists.\\n- Sending with no poll keeps feedback durable and tells the browser that the agent is not listening and the feedback is queued.\\n- Acknowledgement followed by an agent reply clears Working.\\n- Acknowledgement without a reply becomes an actionable stalled state after a bounded timeout.\\n- Preserve Send, Send & End, annotations, image attachments, session persistence, and compatibility where possible.\\n- Do not add a daemon, registry, watcher, or broad redesign.\\n\\n## Focused verification\\n\\n- No poll: feedback remains durable and the UI reports not-listening/queued.\\n- Poll disconnect before acknowledgement: the batch is restored exactly once with no duplicate.\\n- Acknowledgement then reply: Working clears.\\n- Acknowledgement without reply: presence becomes stalled after a bounded timeout.\\n- Existing poll, session, annotation, and attachment tests remain green.\\n- One disposable local end-to-end run with a tracked poll process proves disconnect recovery and successful acknowledged delivery.\\n",
+    "createdAt": "2026-08-26T10:16:08Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 296,
+    "title": "Make feedback delivery acknowledged, recoverable, and presence-bounded",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/296"
+  },
+  {
+    "body": "## Summary\n\nThe Lavish Editor chrome is dark-only. There is no way to run it in light mode, and no way to have it follow the OS appearance. I'd like `System` / `Light` / `Dark`, defaulting to `System`.\n\n## Current state (on `main`)\n\n`src/chrome.css` hardcodes a single dark palette:\n\n- `color-scheme: dark` at `src/chrome.css:127`, unconditional\n- one `:root` block with the `--ink-*` / `--steel-*` / `--cream-*` / `--brass-*` ramp\n- zero occurrences of `prefers-color-scheme` or `data-theme` in the whole file\n\nThe good news: the file already has a semantic token layer sitting on top of that ramp (`--bg`, `--bg-panel`, `--bg-bar`, `--bg-elevated`, `--fg`, `--fg-muted`, `--fg-dim`, `--fg-faint`, `--fg-label`, `--border`, `--border-subtle`, `--border-strong`, `--accent`, `--danger`, …). A light theme is mostly a second set of assignments for those tokens, not a rewrite of the rules that consume them.\n\n## Why\n\nReviewing a light artifact inside dark chrome is visually jarring, the chrome fights the thing you're actually reviewing. On a bright desk the dark chrome is the uncomfortable part of the screen, and \"the editor ignores my OS appearance\" is the kind of papercut you notice every single session. Every other local dev tool in the loop already follows the system setting.\n\n## Prior art, and why I'm filing rather than just opening a PR\n\nThis has been attempted once: **#131 \"feat(chrome): add device-wide theme preference and config command\"** (@gfiorav), closed unmerged on 2026-07-10.\n\nWorth reading the thread before anyone restarts this, because the maintainer already wrote down the shape they'd accept. The original PR injected a `content-theme.css` + no-FOUC boot script into the artifact, and @kunchenguid rejected that on **portability**: the artifact would no longer render identically outside Lavish without an opt-out attribute. The rescope requested was:\n\n1. a device-wide preference (folded under a `config` command) persisted in `~/.lavish-axi/state.json`, not per-browser `localStorage`\n2. that preference drives the **editor chrome**, keeping the System/Light/Dark idea\n3. no injection into the artifact, pass the preferred theme to the agent as generation guidance instead so it gets baked into the artifact's own markup\n\n@gfiorav did rework it along those lines, and the PR was still closed without landing. So the design conversation got most of the way there and then stalled. Nothing shipped: 0.1.43 has no `config theme` command and no `data-theme-pref` on the chrome HTML.\n\n## Proposal: scope this to the chrome only, which makes it much smaller than #131\n\nThe `wontfix` energy on #131 was \"this adds more complexity/maintenance than I want\", and I think that's fair about #131 *as a whole*. But most of that complexity came from the parts that aren't the chrome. Dropping those gets you the actual user-visible win for a fraction of the surface:\n\n**Drop the OS-appearance resolver entirely.** #131 added `src/appearance.js`, which shells out to `osascript` on macOS, reads the registry on Windows, and calls `gsettings` on Linux. That was only necessary to resolve `system` into a concrete light/dark directive *at CLI time*, for the agent-guidance half of the feature. The chrome runs in a browser. `prefers-color-scheme` is right there, it needs no platform-specific code, and it live-follows the OS for free when the preference is `system`. Three platform shellouts and their tests disappear.\n\n**Leave artifact theming out.** That's a separate, genuinely harder question, and it's already being explored in **#180** (`LAVISH_AXI_DEFAULT_THEME` as generation guidance). Keeping the two apart means this issue can't reintroduce the portability regression that sank #131, because it never touches the artifact bytes.\n\nAlso relevant, from the #162 investigation: the artifact runs in a sandboxed iframe without `allow-same-origin`, so `prefers-color-scheme` inside it resolves from the OS rather than from the chrome. The chrome's appearance is genuinely self-contained, there's no leakage to reason about in either direction.\n\nThat leaves roughly:\n\n- `lavish-axi config theme <system|light|dark>`, default `system`, persisted as `config.theme` in `state.json` (per the maintainer's point 1)\n- `createChromeHtml` emits the preference as an attribute on `<html>`, plus a small inline head script that resolves it before paint so there's no flash\n- `chrome.css` gains a light counterpart for the existing semantic tokens, plus theme-aware values for the few raw ones (`--hover`, `--scrim`, `--banner-*`, `--accent-divider`)\n- `chrome-client.js` re-applies on load and follows `prefers-color-scheme` while the preference is `system`\n\n@gfiorav's #131 already contains working versions of most of these pieces and shipped light/dark chrome screenshots, so this is closer to salvage than to greenfield.\n\n## Open question for the maintainer\n\nIs the objection to #131 specifically the artifact-injection/portability part and the maintenance surface, or is chrome light mode itself not wanted? Happy to put up a PR for the reduced scope above if it's the former. @gfiorav also floated on #131 that Lavish should ship \"two very good themes (light and dark)\" plus curated components, so there's at least a second contributor interested in this landing.\n",
+    "createdAt": "2026-07-27T14:14:44Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAAC4H2PXQ",
+        "name": "existing-pr",
+        "description": "An open PR is already the help for this issue",
+        "color": "1565c0"
+      }
+    ],
+    "number": 202,
+    "title": "feat(chrome): light and system appearance for the editor chrome",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/202"
+  },
+  {
+    "body": "### What happened?\nThe skill doesn't appear to work for me on firefox (151.0.2 (aarch64)), but it does work fine on Chrome. If that's a known issue, might be good to make the skill force launch chrome.  Here are my firefox logs:\n\n```\nThe connection to http://127.0.0.1:4387/events/4e0dc9318e218867 was interrupted while the page was loading. [chrome-client.js:1300:16](http://127.0.0.1:4387/chrome-client.js)\nLayout was forced before the page was fully loaded. If stylesheets are not yet loaded this may cause a flash of unstyled content. [4e0dc9318e218867](http://127.0.0.1:4387/session/4e0dc9318e218867)\nMermaid diagram render failed: \nObject { str: \"Could not find a suitable point for the given distance\", message: \"Could not find a suitable point for the given distance\", hash: \"Error\", error: Error }\n[index.html:767:19](http://127.0.0.1:4387/artifact/4e0dc9318e218867/index.html)\nunreachable code after return statement [whiteboard.js:1087:45799](http://127.0.0.1:4387/whiteboard-assets/whiteboard.js)\ndownloadable font: glyf: empty gid 410 used as component in glyph 16 (font-family: \"Assistant\" style:normal weight:400 stretch:100 src index:0) source: http://127.0.0.1:4387/whiteboard-assets/Assistant-Regular-PLF2XOGW.woff2\ndownloadable font: glyf: empty gid 410 used as component in glyph 16 (font-family: \"Assistant\" style:normal weight:700 stretch:100 src index:0) source: http://127.0.0.1:4387/whiteboard-assets/Assistant-Bold-ZDZZ6JHA.woff2\ndownloadable font: glyf: empty gid 410 used as component in glyph 16 (font-family: \"Assistant\" style:normal weight:500 stretch:100 src index:0) source: http://127.0.0.1:4387/whiteboard-assets/Assistant-Medium-DZ25RZU3.woff2\n```\n\n### How to reproduce\n\n1. Tell agent to use lavish for something\n2. It launches a tab in firefox which renders a blank page.\n\n### lavish-axi version\n\nv0.1.43 \n\n### OS and Node version\n\n26.5.2 (25F84) / v23.11.0\n\n### CLI output\n\n```text\n\n```\n\n### Anything else\n\n_No response_",
+    "createdAt": "2026-07-26T21:00:09Z",
+    "labels": [
+      { "id": "LA_kwDOSanIos8AAAACiygkqw", "name": "bug", "description": "Something isn't working", "color": "d73a4a" },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 201,
+    "title": "Not rendering in Firefox",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/201"
+  },
+  {
+    "body": "Every control inside a Lavish artifact does nothing in Arc. Queue, annotate, the choice inputs. No error, nothing in the page's own console. It just looks like a working page that ignores you.\n\nArc is the default browser on my machine (LaunchServices maps `http`, `https` and `public.html` to `company.thebrowser.browser`). Every page `lavish-axi` opened for me went there. I lost a while to this before I worked out that the browser was the variable and not my HTML.\n\nThe chrome loads fine. What never loads is the script inside the artifact iframe:\n\n| request | Chrome | Arc |\n| --- | --- | --- |\n| `/session/<key>` | yes | yes |\n| `/chrome-client.js`, `/chrome.css` | yes | yes |\n| `/artifact/<key>/index.html` (the sandboxed iframe document) | yes | yes |\n| `/sdk.js?key=…` (injected into that iframe) | yes | **never** |\n| `/api/<key>/layout-warnings` | yes | never |\n\n`html-transform.js:2` injects `<script src=\"/sdk.js?key=...\">` into the artifact iframe, and `artifact-sdk.js` defines `window.lavish` (`queuePrompt`, `sendQueuedPrompts`). That iframe is `sandbox=\"allow-scripts allow-forms allow-popups allow-downloads\"` with no `allow-same-origin`, which makes it an opaque origin. Arc fetches the iframe's document and then never fetches the script inside it, so `window.lavish` is undefined and every control that depends on it is dead. The in-iframe layout audit never runs either, which is the last row.\n\nI ruled out a filename block. I served the same SDK bytes from `/lavish-artifact-bridge.js` and rewrote the script tag. Chrome fetched the renamed script. Arc still fetched nothing.\n\nI don't know why Arc suppresses scripts in that iframe, whether that's its content blocker or a stricter policy on opaque origins. I didn't drive Arc's DevTools, so I stopped at the mechanism I could measure.\n\nRepro: open any artifact in Arc, click a queue button, nothing happens, and `/sdk.js` is absent from the network log. The same page in Chrome works.\n\nArc has real users and this fails with no visible symptom. The page presents live controls over an SDK that was never there. Even without a fix for whatever Arc is doing, the artifact could notice that `window.lavish` never arrived and say so.\n",
+    "createdAt": "2026-07-14T08:14:56Z",
+    "labels": [
+      { "id": "LA_kwDOSanIos8AAAACiygkqw", "name": "bug", "description": "Something isn't working", "color": "d73a4a" },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 172,
+    "title": "Artifact controls are silently inert in Arc: the sandboxed iframe loads but its script never fetches",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/172"
+  },
+  {
+    "body": "A follow-up to #148 with the smaller things we hit. Same context — an agent fleet using lavish as its review surface.\n\n**Large media.** Two parts. Native video is swallowed in annotate mode (that's #148). Past that, `export`/`share` inline local assets with a 25 MB bundle cap, so a real walkthrough clip — ours were ~500 MB — can't ride along, and hitting the cap is a silent omission rather than a warning. The dev server already honors range requests (206), so the streaming piece is there. I'd suggest keeping large binaries as a sibling-file reference past the cap (emit a folder or zip, or upload on `share` and rewrite the URL) instead of dropping them, and at minimum warning when the cap is hit.\n\n**An evidence/review playbook.** The single most common thing our agents build is a verdict banner + captioned real screenshots + a findings table + a recommendation. It's what lavish is best at and what `visual_guidance` already pushes toward, but there's no playbook for it, and agents reassemble it from `table` + prose every time. It's also where lavish fits the proof-of-work pattern forming around agents. Simon Willison's showboat ([post](https://simonwillison.net/2026/Feb/10/showboat-and-rodney/), [HN thread](https://news.ycombinator.com/item?id=46963887)) has an agent build a runnable demo doc that proves its work, on the premise that a passing test suite doesn't show the software works the way a real demo does. Showboat proves the work; lavish is where a human reviews that proof and decides. A first-class `evidence` playbook next to `table`/`plan`/`comparison` would bank the conventions — banner first, screenshots as annotation targets, a severity/status findings table, a recommendation block — and it pairs naturally with `input` (queue \"ship / hold / fix finding #3\").\n\n**Two papercuts.**\n\n- Nested assets 404 silently. The docs are clear that assets must be siblings of the HTML, but when we nested ours a level deeper every reference 404'd with no diagnostic — the page just looks authored-wrong rather than mis-pathed. The SDK already audits the DOM, so surfacing failed resource loads on `poll` (the way layout warnings already surface) would catch it.\n- `export` can render mojibake. A copy opened with no server, when the source has no `<meta charset>`, shows em-dashes as `â€\"` because the browser guesses the encoding. `export` already rewrites the head, so injecting `<meta charset=\"utf-8\">` there when one's missing would fix the exact serverless case `export` exists for.\n\nTwo stretch ideas while I'm here:\n\n- A present/kiosk mode for `slides` — full-bleed, chrome hidden, annotation still available — so an agent-built deck can be presented, not only reviewed in the sidebar.\n- Structured accept/reject on findings. The `input` playbook queues free-form prompts, but for a verdict artifact the useful feedback is often a decision on a specific row (\"finding #3: accept / reject\"). A per-row control that queues a machine-readable answer anchored to the row would close the loop into something the agent can act on directly. `data-lavish-question` / `queueKey` look like they're already partway there.\n\nNone of these are urgent. Thanks again.\n",
+    "createdAt": "2026-07-07T05:41:27Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 149,
+    "title": "Smaller asks: large-media handling, an evidence/review playbook, two asset papercuts",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/149"
+  },
+  {
+    "body": "Context first: I run a fleet of coding agents, and lavish is where a human on my team reviews what they built — screenshots of the real product, a findings table, a verdict, then annotate-and-send-back. It's the best tool we've found for \"here's what I found, tell me what to change.\" This is from using it hard.\n\nOne thing keeps catching us, and I think it's the same interactivity the README is after.\n\nIn annotate mode (the default), the capture-phase click handler swallows any click that isn't lavish's own UI, a `data-lavish-action` element, or a narrow native allowlist (`cli.mjs:5157-5171`, allowlist at `4340-4343`). `a`, `video`, and `audio` aren't on the list, so a custom `<div onclick>`, a plain `<a href>`, and a native `<video controls>` all become annotations instead of running. We embedded a click-to-play video in a review page and it never played inside lavish — the click turned into an annotation card. The identical page served from a plain static server played it fine (206 range responses, ran to 0:15). So it was the annotation layer, not our HTML.\n\nThere are two escape hatches, but both are easy to miss. `Cmd+I` flips to explore mode and clicks pass through, but it's a hidden global toggle with no hint — the first click is always swallowed. And `data-lavish-action` on a container does pass clicks through — but it's documented only as a feedback control, forces `cursor:pointer` on the whole subtree, and its name points you at `queuePrompt` rather than \"let my JS run.\" We read the whole surface and still concluded lavish couldn't host an interactive artifact. I'd call this as much a docs/mental-model gap as a mechanism one.\n\nWhat surprised me is that lavish already does the right thing — just only for Mermaid. Diagrams pan/zoom while you explore and freeze when you annotate (`setFrozen(annotationMode)`, `cli.mjs:4544-4549`, `4666`). That's exactly the coexistence an interactive artifact needs; it's hardcoded to one element type.\n\nWhat I'd propose, all building on machinery you already ship:\n\n- A `data-lavish-interactive` attribute on a subtree: native interaction runs there, and annotation targets the region's frame instead of the elements inside. A value picks the annotate-mode behavior — `live` (operable while the human annotates around it) or `freeze` (today's Mermaid treatment).\n- Widen the native allowlist to `a[href]`, `video`, `audio`, `[tabindex]`, and interactive roles, so standard HTML works — which matches the docs already saying native controls are interactive.\n- Separate the two ideas in the docs and API: a feedback control that queues a prompt is different from an interactive region that isn't a feedback target. Conflating them under `data-lavish-action` is why interactivity reads as impossible.\n- A small affordance: when a click lands on something interactive, hint \"press ⌘I to explore\" instead of silently annotating — and maybe let the artifact request its initial mode.\n\n30-second repro — save as `repro.html`, run `lavish-axi repro.html`, click each box in annotate mode, then press ⌘I and click again:\n\n```html\n<!doctype html>\n<meta charset=\"utf-8\">\n<title>lavish interaction repro</title>\n<style>\n  body { font: 16px system-ui; margin: 2rem; max-width: 640px; }\n  .box { padding: 1rem; margin: .75rem 0; border: 2px solid #888; border-radius: 8px; cursor: pointer; }\n  .fired { background: #d9f5d9; border-color: #2a2; }\n</style>\n<h1>Does my click reach the artifact?</h1>\n\n<div class=\"box\" onclick=\"this.classList.add('fired'); this.textContent='1) fired ✓'\">\n  1) plain &lt;div onclick&gt; — expect: annotate mode swallows it, explore mode fires\n</div>\n\n<div class=\"box\" data-lavish-action onclick=\"this.classList.add('fired'); this.textContent='2) fired ✓'\">\n  2) &lt;div data-lavish-action onclick&gt; — expect: fires in BOTH modes\n</div>\n\n<a class=\"box\" href=\"#hit\" onclick=\"this.classList.add('fired'); this.textContent='3) fired ✓'\">\n  3) native &lt;a href&gt; link — expect: annotate mode swallows it too\n</a>\n\n<button class=\"box\" onclick=\"this.classList.add('fired'); this.textContent='4) fired ✓'\">\n  4) native &lt;button&gt; — expect: fires in BOTH modes\n</button>\n```\n\n| Box | Annotate (default) | Explore (⌘I) |\n| --- | --- | --- |\n| plain `<div onclick>` | swallowed → annotation | fires |\n| `<div data-lavish-action>` | fires | fires |\n| native `<a href>` | swallowed → annotation | fires |\n| native `<button>` | fires | fires |\n\nBox 2 firing in annotate mode is the proof the coexistence primitive is already there — it's just framed as a feedback control and per-element.\n\nI can open separate issues for the smaller things we hit (large-media handling, an evidence/review playbook, a couple of asset-path/charset papercuts). Kept this one to the interaction model since it's the big one. Thanks for building lavish — the core loop is genuinely good.\n",
+    "createdAt": "2026-07-07T05:40:51Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 148,
+    "title": "Let artifacts declare an interactive region (generalize the Mermaid explore/annotate coexistence)",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/148"
+  },
+  {
+    "body": "Just a place to see where we annotated things so we can visually see stuff on the doc as well. With an on/off button maybe on the chatbar.",
+    "createdAt": "2026-06-29T19:36:32Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 120,
+    "title": "feat: show comments location on doc",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/120"
+  },
+  {
+    "body": "I want to be able to ask questions in a specific area and have llm answer and then keep asking more questions for that specific area before i give a decision on what to do there if anything at all. So if an area is unclear i can clarify to myself first.",
+    "createdAt": "2026-06-29T19:32:03Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACiygk3A",
+        "name": "enhancement",
+        "description": "New feature or request",
+        "color": "a2eeef"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 118,
+    "title": "feature request - questions/chat",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/118"
+  },
+  {
+    "body": "First of all, `lavish-axi` is a great idea and a project !\n\nI tried out the same wiht GH Copilot and though the local browser opened, I was not able to send any annotated chat message to GH Copilot Agent.\n\nDo I need to add the Agent Skill?\n\n",
+    "createdAt": "2026-05-13T08:01:00Z",
+    "labels": [
+      {
+        "id": "LA_kwDOSanIos8AAAACjF15Cw",
+        "name": "ezoss/triaged",
+        "description": "Managed by ezoss",
+        "color": "E99695"
+      },
+      {
+        "id": "LA_kwDOSanIos8AAAACxNNGYQ",
+        "name": "ready-for-pr",
+        "description": "Triage: ready for a contributor PR",
+        "color": "0E8A16"
+      }
+    ],
+    "number": 26,
+    "title": "Did not work with GH Copilot",
+    "url": "https://github.com/kunchenguid/lavish-axi/issues/26"
+  }
+]
