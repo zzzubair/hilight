@@ -114,6 +114,50 @@ export function deriveLavishQueueKey(element, options = {}) {
   return "";
 }
 
+// The selector an annotation, a queued note, a stored draft and a comment thread all identify
+// their element by. It is normally the familiar shortest path of up to five steps (stopping at an
+// id), but repeated page structure can make those five steps match several elements, and then a
+// click on the second copy would be taken for the first copy's note. So it keeps climbing while
+// the selector still matches another element in `root`.
+export function uniqueElementSelector(el, root) {
+  if (!el || !el.tagName) return "";
+  const escapeIdent =
+    typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? (value) => CSS.escape(value)
+      : (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, (char) => "\\" + char);
+  // Only a selector proven to match another element is ambiguous. One that matches nothing (an
+  // element outside `root`, such as inside a shadow tree) gains nothing from a longer path.
+  const matchesAnother = (candidate) => {
+    try {
+      return [...root.querySelectorAll(candidate)].some((match) => match !== el);
+    } catch {
+      return false;
+    }
+  };
+  const parts = [];
+  let node = el;
+  while (node && node.nodeType === 1) {
+    const tag = node.tagName.toLowerCase();
+    const parent = node.parentElement;
+    let position = "";
+    if (parent) {
+      const same = [...parent.children].filter((x) => x.tagName === node.tagName);
+      if (same.length > 1) position = ":nth-of-type(" + (same.indexOf(node) + 1) + ")";
+    }
+    if (node.id) {
+      parts.unshift(tag + "#" + escapeIdent(node.id));
+      // An id names one element unless the page repeats it; only then keep climbing.
+      if (!matchesAnother(parts.join(" > "))) break;
+      parts[0] += position;
+    } else {
+      parts.unshift(tag + position);
+    }
+    node = parent;
+    if (parts.length >= 5 && !matchesAnother(parts.join(" > "))) break;
+  }
+  return parts.join(" > ");
+}
+
 export function isNativeInteractiveControl(el) {
   if (!el || !el.closest) return false;
   if (
@@ -797,28 +841,7 @@ export function createArtifactSdk(
   }
 
   function selector(el) {
-    if (!el || !el.tagName) return "";
-
-    const parts = [];
-    let node = el;
-    while (node && node.nodeType === 1 && parts.length < 5) {
-      let part = node.tagName.toLowerCase();
-      if (node.id) {
-        part += "#" + CSS.escape(node.id);
-        parts.unshift(part);
-        break;
-      }
-
-      const parent = node.parentElement;
-      if (parent) {
-        const same = [...parent.children].filter((x) => x.tagName === node.tagName);
-        if (same.length > 1) part += ":nth-of-type(" + (same.indexOf(node) + 1) + ")";
-      }
-      parts.unshift(part);
-      node = parent;
-    }
-
-    return parts.join(" > ");
+    return uniqueElementSelector(el, document);
   }
 
   // `table` is opt-in because resolving a cell's row and column walks the whole table, while
@@ -1122,9 +1145,11 @@ export function createArtifactSdk(
 
   function textSelectionContext(selection) {
     if (!selection || selection.rangeCount === 0) return null;
+    return textRangeContext(selection.getRangeAt(0), selection.toString());
+  }
 
-    const range = selection.getRangeAt(0);
-    const text = selection.toString().trim().replace(/\s+/g, " ");
+  function textRangeContext(range, selectedText = range.toString()) {
+    const text = String(selectedText).trim().replace(/\s+/g, " ");
     if (range.collapsed || !text) return null;
 
     const ancestor = closestElement(range.commonAncestorContainer);
@@ -2086,6 +2111,8 @@ export function createArtifactSdk(
   // ---------------------------------------------------------------------------
 
   let activeCardContext = null;
+  /** @type {HTMLTextAreaElement | null} */
+  let activeCardTextarea = null;
   let reviewStateTimer = 0;
   let draftRestoreTimer = 0;
   const REVIEW_DRAFT_ANCHOR_SETTLE_MS = 1500;
@@ -2138,16 +2165,10 @@ export function createArtifactSdk(
   }
 
   function collectReviewState() {
-    const card = shadow ? shadow.querySelector(".lavish-annotation-card") : null;
-    const textarea = card ? card.querySelector("textarea") : null;
-    const text = textarea ? String(textarea.value || "") : "";
+    const text = activeCardTextarea ? String(activeCardTextarea.value || "") : "";
     return {
-      // A text-range card is anchored to a live Range, which a reload invalidates - restoring it
-      // could point the annotation at different text, so only element cards come back.
-      card:
-        activeCardContext && activeCardContext.tag !== "text" && text.trim()
-          ? { selector: String(activeCardContext.selector || ""), text: text.slice(0, 4000) }
-          : null,
+      card: activeCardContext && text.trim() ? reviewCardDraft(activeCardContext, text) : null,
+      disclosures: changedDisclosures(),
       fields: lavishQuestionControls().map((entry) => ({
         key: entry.key,
         index: entry.index,
@@ -2157,6 +2178,73 @@ export function createArtifactSdk(
         checked: entry.type === "checkbox" || entry.type === "radio" ? Boolean(entry.el.checked) : null,
       })),
     };
+  }
+
+  // Disclosures (`<details>`) the reviewer opened or closed. Only a change from how the page wrote
+  // the disclosure is reported, so a save that deliberately changes its default still wins for
+  // every disclosure the reviewer never touched. Restoring sets `open` directly.
+  const disclosureAuthoredOpen = new WeakMap();
+  const changedDisclosureElements = new Set();
+
+  function disclosureKey(el) {
+    return el.id ? "#" + (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(el.id) : el.id) : selector(el);
+  }
+
+  function changedDisclosures() {
+    const entries = [];
+    for (const el of changedDisclosureElements) {
+      if (el.isConnected === false) continue;
+      if (Boolean(el.open) === disclosureAuthoredOpen.get(el)) continue;
+      if (entries.length >= 200) break;
+      entries.push({ key: disclosureKey(el).slice(0, 300), open: Boolean(el.open) });
+    }
+    return entries;
+  }
+
+  function restoreDisclosures(disclosures) {
+    for (const entry of Array.isArray(disclosures) ? disclosures.slice(0, 200) : []) {
+      const el = /** @type {HTMLDetailsElement | null} */ (safeQuerySelector(entry?.key));
+      if (!el || String(el.tagName || "").toUpperCase() !== "DETAILS" || isLavishUi(el)) continue;
+      if (!disclosureAuthoredOpen.has(el)) disclosureAuthoredOpen.set(el, Boolean(el.open));
+      changedDisclosureElements.add(el);
+      el.open = Boolean(entry.open);
+    }
+  }
+
+  for (const el of document.querySelectorAll("details")) disclosureAuthoredOpen.set(el, el.open);
+
+  // `toggle` does not bubble, so it is caught on the way down.
+  document.addEventListener(
+    "toggle",
+    (event) => {
+      const el = /** @type {any} */ (event.target);
+      if (!el || String(el.tagName || "").toUpperCase() !== "DETAILS" || isLavishUi(el)) return;
+      // A disclosure built after load is first seen here, already toggled.
+      if (!disclosureAuthoredOpen.has(el)) disclosureAuthoredOpen.set(el, !el.open);
+      changedDisclosureElements.add(el);
+      scheduleReviewStateReport();
+    },
+    true,
+  );
+
+  // A text-range card is anchored to a live Range, which a reload invalidates, so its draft also
+  // carries the saved range target: the restore rebuilds the range only when it still reads the
+  // same words, and otherwise reopens the words on their container rather than losing them.
+  function reviewCardDraft(c, text) {
+    const draft = { selector: String(c.selector || ""), text: text.slice(0, 4000) };
+    const target = c.tag === "text" ? c.target : null;
+    if (target?.type === "text-range" && String(target.text || "").length <= 4000) draft.target = target;
+    return draft;
+  }
+
+  function restoredTextRangeContext(target) {
+    if (target?.type !== "text-range") return null;
+    try {
+      const range = threadRange({ target });
+      return range ? textRangeContext(range) : null;
+    } catch {
+      return null;
+    }
   }
 
   function scheduleReviewStateReport() {
@@ -2169,6 +2257,7 @@ export function createArtifactSdk(
 
   function restoreReviewState(state) {
     if (!state || typeof state !== "object") return;
+    restoreDisclosures(state.disclosures);
     const fields = Array.isArray(state.fields) ? state.fields : [];
     if (fields.length) {
       const entries = lavishQuestionControls();
@@ -2185,6 +2274,15 @@ export function createArtifactSdk(
     }
     const card = state.card;
     if (!card || !card.selector || !String(card.text || "").trim()) return;
+    const textContext = restoredTextRangeContext(card.target);
+    if (textContext) {
+      showAnnotationCard(textContext.element, {
+        context: textContext,
+        range: textContext.range,
+        restoreText: String(card.text),
+      });
+      return;
+    }
     const target = safeQuerySelector(card.selector);
     if (!target) {
       // The load event says the document parsed, not that it finished rendering: a section this
@@ -2243,6 +2341,7 @@ export function createArtifactSdk(
   function closeCard() {
     const hadCard = activeCardContext !== null;
     activeCardContext = null;
+    activeCardTextarea = null;
     if (activeAttachments) {
       activeAttachments.destroy();
       activeAttachments = null;
@@ -2347,6 +2446,7 @@ export function createArtifactSdk(
     const attachInput = /** @type {HTMLInputElement | null} */ (card.querySelector(".lavish-attach-input"));
     const attachNotice = /** @type {HTMLDivElement | null} */ (card.querySelector(".lavish-hint"));
     if (!textarea || !cancelButton || !sendButton || !attachmentsList || !attachButton || !attachInput) return;
+    activeCardTextarea = textarea;
 
     // The card has one notice line, shared by the neutral keyboard hint and by
     // attachment problems (the count cap, a stalled upload, a failed one). A rejected

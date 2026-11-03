@@ -816,6 +816,13 @@ const DEFAULT_SEND_HINT = "Nothing queued in this tab. " + UNSENT_OWNERSHIP_COPY
 const EMPTY_SEND_HINT_HOLD_MS = 9000;
 const EMPTY_END_HINT = "Nothing to send. To end without feedback, use End session in the More menu (⋮).";
 
+const LAYOUT_REQUEST_CONFLICT_COPY =
+  "Could not send because the layout issues changed after you queued the layout fix request. Your feedback is still queued. Remove the layout fix request, or open Layout issues and queue the current ones, then send again.";
+const LAYOUT_REQUEST_HELD_COPY =
+  "Sent. Your layout fix request is still queued because those layout issues changed after you queued it. Remove it, or open Layout issues and queue the current ones.";
+const LAYOUT_REQUEST_RETIRED_COPY =
+  "Your queued layout fix request was not sent: those issues were already fixed or dismissed.";
+
 function showSendHint(message = DEFAULT_SEND_HINT, holdMs = 2600, focusInput = true) {
   sendHint.textContent = message;
   sendHint.hidden = false;
@@ -1212,7 +1219,8 @@ function setReviewState(state) {
   lastReviewState = state;
   // The artifact reported a card, so its anchor exists: whatever miss was recorded is answered.
   if (state?.card) unrestorableDraftMiss = null;
-  if (!state || (!state.card && !(Array.isArray(state.fields) && state.fields.length))) {
+  const hasEntries = (list) => Array.isArray(list) && list.length > 0;
+  if (!state || (!state.card && !hasEntries(state.fields) && !hasEntries(state.disclosures))) {
     try {
       sessionStorage.removeItem(reviewStateStorageKey);
     } catch {
@@ -2269,10 +2277,7 @@ async function submitQueuedOnce(submission, preserveFailureState = false) {
         return false;
       }
       if (Array.isArray(data?.warnings)) setLayoutWarnings(data.warnings);
-      showQueuedSendFailure(
-        "Could not send because the layout issue selection changed. Your feedback is still queued. Review the current issues, then click Send to Agent to retry.",
-        { kind: "submission", operation: submission },
-      );
+      showQueuedSendFailure(LAYOUT_REQUEST_CONFLICT_COPY, { kind: "submission", operation: submission });
       if (submission.terminal) releaseTerminalSubmission(submission.terminal);
       return;
     }
@@ -2311,8 +2316,15 @@ async function submitQueuedOnce(submission, preserveFailureState = false) {
       ? acceptedChat
       : mergeAcceptedChat(acceptedChat, submission.chatAtRequest)
     : null;
+  // A layout fix request whose issue changed after it was queued was held back by the server,
+  // so it stays queued here for the reviewer; everything else in the batch was delivered.
+  const heldIds = new Set(Array.isArray(accepted?.held_prompt_ids) ? accepted.held_prompt_ids : []);
+  const held = prompts.filter((prompt) => heldIds.has(promptIdentity(prompt)));
+  const retired = Array.isArray(accepted?.retired_prompt_ids) && accepted.retired_prompt_ids.length > 0;
+  if (Array.isArray(accepted?.warnings)) setLayoutWarnings(accepted.warnings);
   if (!acceptedChat || reconciledChat) {
     for (const prompt of prompts) {
+      if (held.includes(prompt)) continue;
       deliveredPrompts.add(prompt);
       const index = queued.indexOf(prompt);
       if (index !== -1) queued.splice(index, 1);
@@ -2327,6 +2339,8 @@ async function submitQueuedOnce(submission, preserveFailureState = false) {
     markSessionEnded();
     return;
   }
+  if (held.length) showQueuedSendFailure(LAYOUT_REQUEST_HELD_COPY, { kind: "submission", operation: submission });
+  else if (retired) showSendHint(LAYOUT_REQUEST_RETIRED_COPY, 8000, false);
 }
 
 function submissionResolvesSendFailure(submission) {
@@ -3490,6 +3504,26 @@ function scheduleArtifactLoadRecovery() {
   return true;
 }
 
+// Every navigation of the artifact frame goes through here. The first fills the frame's initial
+// empty document, which never adds a history entry; each later one replaces the frame's current
+// entry through its window's `location.replace`, which a parent may call even across the opaque
+// sandbox origin. Assigning `frame.src` again pushed one joint session-history entry per save,
+// until Chrome refused a script's `window.close()` of the review tab.
+function navigateArtifactFrame(src) {
+  if (frame.src) {
+    try {
+      const location = frame.contentWindow?.location;
+      if (location && typeof location.replace === "function") {
+        location.replace(src);
+        return;
+      }
+    } catch {
+      // Fall back to the attribute below.
+    }
+  }
+  frame.src = src;
+}
+
 // The backoff budget belongs to the load attempt that started it, not to the page: anything
 // asking for a fresh load - a live reload, Reload artifact, a takeover - gets the whole budget
 // again, and only the recovery timer's own retries spend it down. A page that carried an
@@ -3507,7 +3541,7 @@ async function replaceArtifactFrame({ recoveryRetry = false } = {}) {
     resetRevisionLegend();
     startLayoutGateCycle();
     const currentSrc = frame.src || "about:blank";
-    frame.src = currentSrc + (currentSrc.includes("?") ? "&" : "?") + "lavish_reload=" + Date.now();
+    navigateArtifactFrame(currentSrc + (currentSrc.includes("?") ? "&" : "?") + "lavish_reload=" + Date.now());
     return true;
   }
   const requestSequence = ++artifactLoadRequestSequence;
@@ -3628,7 +3662,7 @@ async function replaceArtifactFrame({ recoveryRetry = false } = {}) {
   // The next document reports its own registry once it loads; until then the
   // previous revision's legend would point at blocks that may no longer exist.
   resetRevisionLegend();
-  frame.src = artifactFrameSrcForLoad({ revision, token });
+  navigateArtifactFrame(artifactFrameSrcForLoad({ revision, token }));
   return true;
 }
 

@@ -1594,7 +1594,122 @@ test("a recoverable terminal layout conflict restores ordinary review controls",
   assert.equal(chrome.element("chatInput").disabled, false);
   assert.equal(chrome.element("end").disabled, false);
   assert.equal(chrome.element("sendHint").classList.contains("persistent"), true);
-  assert.match(chrome.element("sendHint").textContent, /layout issue selection changed/i);
+  assert.match(chrome.element("sendHint").textContent, /layout issues? changed/i);
+});
+
+const STALE_LAYOUT_PROMPT = {
+  uid: "",
+  prompt: "Fix the stale layout issue",
+  selector: "",
+  tag: "layout-warnings",
+  text: "Layout issue: 1 selected",
+  target: { type: "layout-warnings", artifact_revision: 1, warnings: [{ id: "w1" }] },
+  prompt_id: "aaaaaaaa-1111-4222-8333-444444444444",
+};
+const QUEUED_QUESTION = {
+  uid: "",
+  prompt: "This ordinary question should still be sent.",
+  selector: "",
+  tag: "message",
+  text: "Freeform message",
+  prompt_id: "bbbbbbbb-1111-4222-8333-444444444444",
+};
+const SENT_QUESTION_ENTRY = {
+  role: "user",
+  kind: "message",
+  text: QUEUED_QUESTION.prompt,
+  prompt_id: QUEUED_QUESTION.prompt_id,
+};
+
+test("a layout fix request the server held back stays queued while the rest of the batch is sent", async () => {
+  const chrome = await createChromeHarness({
+    storedQueue: [STALE_LAYOUT_PROMPT, QUEUED_QUESTION],
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/prompts")) {
+        return {
+          ok: true,
+          json: async () => ({
+            status: "queued",
+            chat: [SENT_QUESTION_ENTRY],
+            chat_revision: 1,
+            ack_ids: [],
+            held_prompt_ids: [STALE_LAYOUT_PROMPT.prompt_id],
+            warning_ids: ["w1"],
+            warnings: [warningPayload({ status: "open", status_label: "Open" })],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    },
+  });
+
+  chrome.element("send").click();
+  chrome.sendSnapshot("");
+  await flushPromises();
+  await flushPromises();
+
+  assert.deepEqual(
+    chrome.queued().map((prompt) => prompt.prompt_id),
+    [STALE_LAYOUT_PROMPT.prompt_id],
+  );
+  assert.match(chrome.element("sendHint").textContent, /layout fix request is still queued/i);
+  assert.match(chrome.element("sendHint").textContent, /Remove it/);
+});
+
+test("a layout fix request the server retired leaves the queue with a reason", async () => {
+  const chrome = await createChromeHarness({
+    storedQueue: [STALE_LAYOUT_PROMPT, QUEUED_QUESTION],
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/prompts")) {
+        return {
+          ok: true,
+          json: async () => ({
+            status: "queued",
+            chat: [SENT_QUESTION_ENTRY],
+            chat_revision: 1,
+            ack_ids: [STALE_LAYOUT_PROMPT.prompt_id],
+            retired_prompt_ids: [STALE_LAYOUT_PROMPT.prompt_id],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    },
+  });
+
+  chrome.element("send").click();
+  chrome.sendSnapshot("");
+  await flushPromises();
+  await flushPromises();
+
+  assert.deepEqual(chrome.queued(), []);
+  assert.match(chrome.element("sendHint").textContent, /already fixed/i);
+});
+
+test("a layout conflict names the queued fix request that blocks the send", async () => {
+  const chrome = await createChromeHarness({
+    storedQueue: [STALE_LAYOUT_PROMPT],
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/prompts")) {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            status: "conflict",
+            warning_ids: ["w1"],
+            warnings: [warningPayload({ status: "open", status_label: "Open" })],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    },
+  });
+
+  chrome.element("send").click();
+  chrome.sendSnapshot("");
+  await flushPromises();
+
+  assert.equal(chrome.queued().length, 1);
+  assert.match(chrome.element("sendHint").textContent, /Remove the layout fix request/i);
 });
 
 test("an actionable terminal attachment rejection restores editable review controls", async () => {
@@ -5035,6 +5150,22 @@ async function loadNextArtifactRevision(chrome) {
   await flushPromises();
 }
 
+// Assigning `frame.src` again pushes a joint session-history entry on every save, until the tab has
+// enough history that Chrome refuses `window.close()` from a script. Every load after the first
+// replaces the frame's current entry instead.
+test("a live reload replaces the artifact frame's history entry instead of adding one", async () => {
+  const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html" });
+  assert.equal(chrome.srcLoads.length, 1, "the first load navigates the empty frame");
+  const replaced = [];
+  chrome.frame.contentWindow.location = { replace: (url) => replaced.push(String(url)) };
+
+  await loadNextArtifactRevision(chrome);
+
+  assert.equal(chrome.srcLoads.length, 1, "a reload does not assign frame.src again");
+  assert.equal(replaced.length, 1);
+  assert.match(replaced[0], /^\/artifact\/abc\/index\.html\?artifact_revision=\d+&artifact_load_token=/);
+});
+
 function reportDraft(chrome, selector, text) {
   chrome.sendFrameMessage({
     artifact_load_token: chrome.artifactLoadToken(),
@@ -5063,6 +5194,19 @@ async function restoredDraft(storage) {
   const next = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html", storage });
   return next.postedToFrame.filter((message) => message.type === "lavish:restoreReviewState");
 }
+
+test("a review state holding only opened disclosures survives a full page reload", async () => {
+  const storage = new Map();
+  const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html", storage });
+  chrome.sendFrameMessage({
+    artifact_load_token: chrome.artifactLoadToken(),
+    type: "lavish:reviewState",
+    state: { card: null, fields: [], disclosures: [{ key: "#details", open: true }] },
+  });
+
+  const restored = await restoredDraft(storage);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.at(-1)?.state?.disclosures)), [{ key: "#details", open: true }]);
+});
 
 // A draft whose anchor the agent removed can never be replayed, so it must not be retried against
 // every later load. Two artifact revisions have to agree that it is gone: the element a user is
