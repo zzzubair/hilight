@@ -4726,7 +4726,9 @@ function positionThreads() {
   if (ceiling > floor) {
     let limit = ceiling;
     for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i].anchor >= ceiling) continue;
+      // Anchors below the button line but still on screen (the last line of a page) lift too, and
+      // the open card always does, so the card being typed in is never under the button.
+      if (!items[i].open && items[i].anchor >= (comments.clientHeight || 0)) continue;
       if (tops[i] + items[i].height > limit) tops[i] = limit - items[i].height;
       limit = tops[i] - THREAD_CARD_GAP;
     }
