@@ -1502,6 +1502,21 @@ function postToFrame(message) {
   if (frame.contentWindow) frame.contentWindow.postMessage(message, "*");
 }
 
+// The margin cards ride the artifact's scroll, so a wheel over the comments column scrolls the
+// page under them. Inner scrollers (an open thread's messages, a textarea) keep their own wheel.
+comments.addEventListener(
+  "wheel",
+  (event) => {
+    if (isMobileSheet()) return;
+    for (let el = /** @type {Element | null} */ (event.target); el && el !== comments; el = el.parentElement) {
+      if (el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) return;
+    }
+    event.preventDefault();
+    postToFrame({ type: "lavish:scrollBy", dy: event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY });
+  },
+  { passive: false },
+);
+
 function requestSnapshot(action, prompts = [], endAfter = false, terminal = null) {
   const requestId = "snapshot-" + ++nextSnapshotRequestId;
   const request =
