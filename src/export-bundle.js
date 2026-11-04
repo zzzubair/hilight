@@ -1,8 +1,9 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readEnv } from "./env.js";
 
-// Builds a portable copy of a Lavish artifact by inlining only its LOCAL assets - files on disk
+// Builds a portable copy of a Hilight artifact by inlining only its LOCAL assets - files on disk
 // the artifact references by relative path, fetchable file:// URL, or a trusted root-absolute
 // resolver - as inline <style>/<script> blocks and data URIs. Remote references (http(s) CDN/font URLs,
 // protocol-relative URLs, CSS url() pointing at the network) are deliberately LEFT AS-IS: the
@@ -135,12 +136,12 @@ export async function buildSelfContainedHtml(html, options = {}) {
     resolveAbsolute: typeof options.resolveAbsolute === "function" ? options.resolveAbsolute : () => null,
     maxAssetBytes: resolveBytes(
       options.maxAssetBytes,
-      process.env.LAVISH_AXI_EXPORT_MAX_ASSET_BYTES,
+      readEnv(process.env, "EXPORT_MAX_ASSET_BYTES"),
       DEFAULT_MAX_ASSET_BYTES,
     ),
     maxBundleBytes: resolveBytes(
       options.maxBundleBytes,
-      process.env.LAVISH_AXI_EXPORT_MAX_BUNDLE_BYTES,
+      readEnv(process.env, "EXPORT_MAX_BUNDLE_BYTES"),
       DEFAULT_MAX_BUNDLE_BYTES,
     ),
     maxDepth: Number.isFinite(options.maxDepth) ? options.maxDepth : DEFAULT_MAX_DEPTH,

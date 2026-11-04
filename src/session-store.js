@@ -202,7 +202,7 @@ export class SessionStore {
     // because restore re-enters the same trust boundary.
     const restoring = options.restore === true;
     const alreadyEnded = session.status === "ended";
-    // A session already ended by someone else (an agent's `lavish-axi end`, or the user in
+    // A session already ended by someone else (an agent's `hilight end`, or the user in
     // another tab) must not accept a further batch as if it were queued for delivery: no agent
     // will ever poll it again, so a 200 here would be a promise the server cannot keep. This
     // applies even to a batch that also requests `endSession` - a redundant end of an
@@ -731,7 +731,7 @@ export class SessionStore {
   }
 
   // `endedBy` distinguishes a human ending review from the browser chrome ("user") from an
-  // agent explicitly closing the loop via `lavish-axi end` ("agent"). Only a user-initiated end
+  // agent explicitly closing the loop via `hilight end` ("agent"). Only a user-initiated end
   // blocks a plain reopen - see `SessionStore` callers in server.js.
   async endSession(key, endedBy = "agent") {
     return this.runExclusive(async () => {

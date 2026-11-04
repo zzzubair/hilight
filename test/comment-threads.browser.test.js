@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.HILIGHT_BROWSER_E2E === "1";
 
 function run(command, args, env, timeout = 45_000) {
   const result = spawnSync(command, args, {
@@ -91,20 +91,20 @@ ${PROBE_SCRIPT}</body></html>`;
 
 function harness(temp, port, sessionName) {
   const lavishEnv = {
-    LAVISH_AXI_PORT: String(port),
-    LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
-    LAVISH_AXI_NO_OPEN: "1",
-    LAVISH_AXI_TELEMETRY: "0",
-    LAVISH_AXI_HOST: "127.0.0.1",
-    LAVISH_AXI_LINK_HOST: "127.0.0.1",
+    HILIGHT_PORT: String(port),
+    HILIGHT_STATE_DIR: path.join(temp, "state"),
+    HILIGHT_NO_OPEN: "1",
+    HILIGHT_TELEMETRY: "0",
+    HILIGHT_HOST: "127.0.0.1",
+    HILIGHT_LINK_HOST: "127.0.0.1",
   };
   const chromeEnv = {
     CHROME_DEVTOOLS_AXI_SESSION: `${sessionName}-${process.pid}`,
     CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
   };
-  const evidence = process.env.LAVISH_AXI_THREADS_EVIDENCE;
+  const evidence = process.env.HILIGHT_THREADS_EVIDENCE;
   const browser = (...args) => run("chrome-devtools-axi", args, chromeEnv);
-  const cli = (...args) => run(process.execPath, ["bin/lavish-axi.js", ...args], lavishEnv);
+  const cli = (...args) => run(process.execPath, ["bin/hilight.js", ...args], lavishEnv);
   function evaluate(expression) {
     const output = browser("eval", expression);
     const raw = output.match(/result:\s*("(?:[^"\\]|\\.)*")/s)?.[1];
@@ -164,7 +164,7 @@ function harness(temp, port, sessionName) {
     }
   }
   async function stop() {
-    run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15000);
+    run(process.execPath, ["bin/hilight.js", "stop", "--port", String(port)], lavishEnv, 15000);
     browser("stop");
   }
   return {

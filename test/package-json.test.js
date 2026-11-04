@@ -19,7 +19,7 @@ test("check script runs all verification commands", async () => {
 
 test("committed skill matches the generator stub", async () => {
   const { createSkillMarkdown } = await import("../src/skill.js");
-  const committed = await readFile(new URL("../skills/lavish/SKILL.md", import.meta.url), "utf8");
+  const committed = await readFile(new URL("../skills/hilight/SKILL.md", import.meta.url), "utf8");
 
   assert.equal(committed, createSkillMarkdown(), "run `npm run build:skill` and commit the result");
 });
@@ -27,7 +27,7 @@ test("committed skill matches the generator stub", async () => {
 test("published package includes the installable skill", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
-  assert.ok(packageJson.files.includes("skills/lavish"));
+  assert.ok(packageJson.files.includes("skills/hilight"));
 });
 
 test("published package root is a complete Agent Plugin", async () => {
@@ -36,7 +36,7 @@ test("published package root is a complete Agent Plugin", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
   assert.ok(packageJson.files.includes("plugin.json"));
-  assert.ok(packageJson.files.includes("skills/lavish"));
+  assert.ok(packageJson.files.includes("skills/hilight"));
 });
 
 test("release-please keeps the plugin manifest version in step with the package", async () => {
@@ -53,8 +53,8 @@ test("lavish-design agent skill is marked internal for skills CLI discovery", as
   assert.match(frontmatter, /^metadata:\n {2}internal: true$/m);
 });
 
-test("public lavish skill is not marked internal", async () => {
-  const skillMd = await readFile(new URL("../skills/lavish/SKILL.md", import.meta.url), "utf8");
+test("public hilight skill is not marked internal", async () => {
+  const skillMd = await readFile(new URL("../skills/hilight/SKILL.md", import.meta.url), "utf8");
   const frontmatter = skillMd.slice(4, skillMd.indexOf("\n---\n", 4));
 
   assert.doesNotMatch(frontmatter, /^metadata:\n {2}internal: true$/m);
@@ -68,12 +68,20 @@ test("build copies local design assets for published artifact injection", async 
   assert.match(buildScript, /tailwindcss-browser\.js/);
 });
 
-test("package metadata matches the GitHub repository used for npm provenance", async () => {
+test("package metadata points at the Hilight repository", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
-  assert.equal(packageJson.repository.url, "git+https://github.com/kunchenguid/lavish-axi.git");
-  assert.equal(packageJson.bugs.url, "https://github.com/kunchenguid/lavish-axi/issues");
-  assert.equal(packageJson.homepage, "https://github.com/kunchenguid/lavish-axi#readme");
+  assert.equal(packageJson.repository.url, "git+https://github.com/zzzubair/hilight.git");
+  assert.equal(packageJson.bugs.url, "https://github.com/zzzubair/hilight/issues");
+  assert.equal(packageJson.homepage, "https://github.com/zzzubair/hilight#readme");
+});
+
+test("the package installs only the hilight command", async () => {
+  // A lavish-axi bin would clash with a real Lavish install on the same machine.
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+
+  assert.equal(packageJson.name, "hilight-axi");
+  assert.deepEqual(packageJson.bin, { hilight: "dist/cli.mjs" });
 });
 
 test("pnpm lock root importer matches the publish manifest", async () => {
@@ -97,11 +105,54 @@ test("release workflow publishes from the release tag checkout", async () => {
   );
 });
 
-test("release workflow keeps telemetry env during npm publish prepack", async () => {
+test("release workflow attaches the fixed-name tarball instead of publishing to npm", async () => {
+  // Hilight is not on the npm registry. Installs use releases/latest/download/hilight-axi.tgz,
+  // so every release must carry an asset with exactly that name.
   const workflow = await readFile(new URL("../.github/workflows/release-please.yml", import.meta.url), "utf8");
 
+  assert.doesNotMatch(workflow, /npm publish/);
+  assert.match(workflow, /run: pnpm run pack:release\n/);
   assert.match(
     workflow,
-    /run: npm publish --access public --provenance\n\s+if: \$\{\{ steps\.release\.outputs\.release_created \}\}\n\s+env:\n\s+LAVISH_AXI_UMAMI_HOST: https:\/\/a\.kunchenguid\.com\n\s+LAVISH_AXI_UMAMI_WEBSITE_ID: \$\{\{ vars\.LAVISH_AXI_UMAMI_WEBSITE_ID \}\}/,
+    /gh release upload "\$\{\{ steps\.release\.outputs\.tag_name \}\}" hilight-axi\.tgz --clobber/,
   );
+});
+
+test("a release created by hand also gets the tarball", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/release-asset.yml", import.meta.url), "utf8");
+
+  assert.match(workflow, /release:\n\s+types: \[published\]/);
+  assert.match(workflow, /run: pnpm run pack:release\n/);
+  assert.match(workflow, /gh release upload "\$TAG" hilight-axi\.tgz --clobber/);
+});
+
+test("pack:release writes hilight-axi.tgz holding the hilight bin, dist, and skill", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const out = mkdtempSync(path.join(os.tmpdir(), "hilight-pack-"));
+  try {
+    // --no-build packs the dist/ that `pnpm run check` already built, so this test never
+    // rewrites dist/ while other test files read it.
+    execFileSync(process.execPath, ["scripts/pack-release.js", "--no-build", "--out", out], {
+      cwd: new URL("..", import.meta.url),
+      stdio: "pipe",
+    });
+    const tarball = path.join(out, "hilight-axi.tgz");
+    const listing = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).split(/\r?\n/);
+    for (const file of [
+      "package/package.json",
+      "package/dist/cli.mjs",
+      "package/dist/server.mjs",
+      "package/skills/hilight/SKILL.md",
+    ]) {
+      assert.ok(listing.includes(file), `${file} is in the tarball`);
+    }
+    const manifest = JSON.parse(execFileSync("tar", ["-xzOf", tarball, "package/package.json"], { encoding: "utf8" }));
+    assert.equal(manifest.name, "hilight-axi");
+    assert.deepEqual(manifest.bin, { hilight: "dist/cli.mjs" });
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });

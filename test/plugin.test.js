@@ -133,25 +133,25 @@ test("the package root is itself a discoverable Agent Plugin", async () => {
   );
   assert.deepEqual(
     discovered.map((entry) => entry.name),
-    ["lavish"],
-    "exactly the lavish skill is discovered",
+    ["hilight"],
+    "exactly the hilight skill is discovered",
   );
 
-  const skill = await readFile(path.join(root, "skills", "lavish", "SKILL.md"), "utf8");
-  assert.deepEqual(validateSkillMarkdown(skill, { directoryName: "lavish" }).errors, []);
+  const skill = await readFile(path.join(root, "skills", "hilight", "SKILL.md"), "utf8");
+  assert.deepEqual(validateSkillMarkdown(skill, { directoryName: "hilight" }).errors, []);
 });
 
 test("the plugin declares no MCP servers", async () => {
-  // lavish-axi's agent surface is the CLI itself; an mcp.json would add a second contract.
+  // hilight's agent surface is the CLI itself; an mcp.json would add a second contract.
   assert.equal(existsSync(path.join(resolvePluginRoot(), "mcp.json")), false);
 });
 
 test("VS Code registration adds the plugin root and is idempotent", () => {
-  const [first, changedFirst] = computeVsCodePluginLocationsUpdate({}, "/pkg/lavish-axi", "lavish-axi");
+  const [first, changedFirst] = computeVsCodePluginLocationsUpdate({}, "/pkg/hilight", "hilight");
   assert.equal(changedFirst, true);
-  assert.deepEqual(first["chat.pluginLocations"], { "/pkg/lavish-axi": true });
+  assert.deepEqual(first["chat.pluginLocations"], { "/pkg/hilight": true });
 
-  const [second, changedSecond] = computeVsCodePluginLocationsUpdate(first, "/pkg/lavish-axi", "lavish-axi");
+  const [second, changedSecond] = computeVsCodePluginLocationsUpdate(first, "/pkg/hilight", "hilight");
   assert.equal(changedSecond, false, "re-running registers nothing new");
   assert.deepEqual(second, first);
 });
@@ -161,49 +161,49 @@ test("VS Code registration preserves unrelated settings and other plugins", () =
     "editor.fontSize": 13,
     "chat.pluginLocations": { "/somewhere/other-plugin": true },
   };
-  const [updated] = computeVsCodePluginLocationsUpdate(settings, "/pkg/lavish-axi", "lavish-axi");
+  const [updated] = computeVsCodePluginLocationsUpdate(settings, "/pkg/hilight", "hilight");
 
   assert.equal(updated["editor.fontSize"], 13);
   assert.equal(updated["chat.pluginLocations"]["/somewhere/other-plugin"], true, "another plugin is untouched");
-  assert.equal(updated["chat.pluginLocations"]["/pkg/lavish-axi"], true);
+  assert.equal(updated["chat.pluginLocations"]["/pkg/hilight"], true);
   assert.deepEqual(settings["chat.pluginLocations"], { "/somewhere/other-plugin": true }, "input is not mutated");
 });
 
 test("VS Code registration repairs a relocated install without dropping foreign entries", () => {
   const dir = tempDir();
-  const stale = writePlugin(path.join(dir, "old", "lavish-axi"), "lavish-axi");
+  const stale = writePlugin(path.join(dir, "old", "hilight"), "hilight");
   const foreign = writePlugin(path.join(dir, "other-plugin"), "other-plugin");
-  const current = writePlugin(path.join(dir, "new", "lavish-axi"), "lavish-axi");
+  const current = writePlugin(path.join(dir, "new", "hilight"), "hilight");
 
   const settings = { "chat.pluginLocations": { [stale]: true, [foreign]: true } };
-  const [updated, changed] = computeVsCodePluginLocationsUpdate(settings, current, "lavish-axi");
+  const [updated, changed] = computeVsCodePluginLocationsUpdate(settings, current, "hilight");
 
   assert.equal(changed, true);
-  assert.equal(updated["chat.pluginLocations"][stale], undefined, "the previous lavish-axi location is dropped");
+  assert.equal(updated["chat.pluginLocations"][stale], undefined, "the previous hilight location is dropped");
   assert.equal(updated["chat.pluginLocations"][foreign], true, "a different plugin survives");
   assert.equal(updated["chat.pluginLocations"][current], true);
 });
 
 test("a removed install directory is only treated as stale when it was ours", () => {
   const dir = tempDir();
-  assert.equal(isStalePluginLocation(path.join(dir, "gone", "lavish-axi"), "lavish-axi"), true);
-  assert.equal(isStalePluginLocation(path.join(dir, "gone", "someone-else"), "lavish-axi"), false);
+  assert.equal(isStalePluginLocation(path.join(dir, "gone", "hilight"), "hilight"), true);
+  assert.equal(isStalePluginLocation(path.join(dir, "gone", "someone-else"), "hilight"), false);
 });
 
 test("Cursor registration links, no-ops, and repairs the local plugin slot", { skip: symlinkSupport.skip }, () => {
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
-  const pluginRoot = writePlugin(path.join(dir, "pkg", "lavish-axi"), "lavish-axi");
+  const pluginRoot = writePlugin(path.join(dir, "pkg", "hilight"), "hilight");
 
-  const linked = linkCursorLocalPlugin(localPlugins, pluginRoot, "lavish-axi");
+  const linked = linkCursorLocalPlugin(localPlugins, pluginRoot, "hilight");
   assert.equal(linked.status, "linked");
   assert.equal(path.resolve(readlinkSync(linked.target)), pluginRoot);
 
-  assert.equal(linkCursorLocalPlugin(localPlugins, pluginRoot, "lavish-axi").status, "current");
+  assert.equal(linkCursorLocalPlugin(localPlugins, pluginRoot, "hilight").status, "current");
 
-  const moved = writePlugin(path.join(dir, "pkg2", "lavish-axi"), "lavish-axi");
+  const moved = writePlugin(path.join(dir, "pkg2", "hilight"), "hilight");
   // Exercise Windows' move-aside replacement path even when this suite runs elsewhere.
-  const repaired = linkCursorLocalPlugin(localPlugins, moved, "lavish-axi", { platform: "win32" });
+  const repaired = linkCursorLocalPlugin(localPlugins, moved, "hilight", { platform: "win32" });
   assert.equal(repaired.status, "repaired");
   assert.equal(path.resolve(readlinkSync(repaired.target)), moved);
 });
@@ -211,11 +211,11 @@ test("Cursor registration links, no-ops, and repairs the local plugin slot", { s
 test("Cursor registration refuses to clobber a real directory in the slot", () => {
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
-  const occupied = path.join(localPlugins, "lavish-axi");
+  const occupied = path.join(localPlugins, "hilight");
   mkdirSync(occupied, { recursive: true });
   writeFileSync(path.join(occupied, "keep.txt"), "user content");
 
-  const result = linkCursorLocalPlugin(localPlugins, path.join(dir, "pkg"), "lavish-axi");
+  const result = linkCursorLocalPlugin(localPlugins, path.join(dir, "pkg"), "hilight");
 
   assert.equal(result.status, "occupied");
   assert.equal(lstatSync(occupied).isDirectory(), true);
@@ -226,10 +226,10 @@ test("Cursor registration replaces a dangling symlink", { skip: symlinkSupport.s
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
   mkdirSync(localPlugins, { recursive: true });
-  symlinkSync(path.join(dir, "vanished"), path.join(localPlugins, "lavish-axi"));
-  const pluginRoot = writePlugin(path.join(dir, "pkg", "lavish-axi"), "lavish-axi");
+  symlinkSync(path.join(dir, "vanished"), path.join(localPlugins, "hilight"));
+  const pluginRoot = writePlugin(path.join(dir, "pkg", "hilight"), "hilight");
 
-  const result = linkCursorLocalPlugin(localPlugins, pluginRoot, "lavish-axi");
+  const result = linkCursorLocalPlugin(localPlugins, pluginRoot, "hilight");
 
   assert.equal(result.status, "repaired");
   assert.equal(path.resolve(readlinkSync(result.target)), pluginRoot);
@@ -238,13 +238,13 @@ test("Cursor registration replaces a dangling symlink", { skip: symlinkSupport.s
 test("Cursor registration preserves the old link when replacement fails", { skip: symlinkSupport.skip }, async () => {
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
-  const original = writePlugin(path.join(dir, "old", "lavish-axi"), "lavish-axi");
-  const replacement = writePlugin(path.join(dir, "new", "lavish-axi"), "lavish-axi");
+  const original = writePlugin(path.join(dir, "old", "hilight"), "hilight");
+  const replacement = writePlugin(path.join(dir, "new", "hilight"), "hilight");
   mkdirSync(localPlugins, { recursive: true });
-  const target = path.join(localPlugins, "lavish-axi");
+  const target = path.join(localPlugins, "hilight");
   symlinkSync(original, target);
 
-  const result = linkCursorLocalPlugin(localPlugins, replacement, "lavish-axi", {
+  const result = linkCursorLocalPlugin(localPlugins, replacement, "hilight", {
     renameSync: () => {
       throw new Error("replacement failed");
     },
@@ -254,7 +254,7 @@ test("Cursor registration preserves the old link when replacement fails", { skip
   assert.equal(result.status, "unsupported");
   assert.match(result.reason, /replacement failed/);
   assert.equal(path.resolve(readlinkSync(target)), original, "the old registration survives");
-  assert.deepEqual(await readdir(localPlugins), ["lavish-axi"]);
+  assert.deepEqual(await readdir(localPlugins), ["hilight"]);
 });
 
 test("Cursor registration reports rather than throws when links cannot be created", () => {
@@ -264,7 +264,7 @@ test("Cursor registration reports rather than throws when links cannot be create
     throw Object.assign(new Error("EPERM: operation not permitted, symlink"), { code: "EPERM" });
   };
 
-  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "lavish-axi", {
+  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "hilight", {
     symlinkSync: denied,
   });
 
@@ -277,7 +277,7 @@ test("Cursor registration links with a junction on Windows", () => {
   const dir = tempDir();
   const attempts = [];
 
-  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "lavish-axi", {
+  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "hilight", {
     platform: "win32",
     symlinkSync: (target, linkPath, type) => attempts.push(type),
   });
@@ -290,7 +290,7 @@ test("Cursor registration falls back to a symlink when a junction is refused", (
   const dir = tempDir();
   const attempts = [];
 
-  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "lavish-axi", {
+  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "hilight", {
     platform: "win32",
     symlinkSync: (target, linkPath, type) => {
       attempts.push(type);
@@ -353,7 +353,7 @@ test("plugin client launch preserves Windows batch arguments", { skip: process.p
   const script = path.join(dir, "copilot-stub.cjs");
   const launcher = path.join(dir, "copilot.cmd");
   const output = path.join(dir, "received.json");
-  const pluginRoot = path.join(dir, "Jane Doe & team", "lavish-axi");
+  const pluginRoot = path.join(dir, "Jane Doe & team", "hilight");
   writeFileSync(script, `require("node:fs").writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)))`);
   writeFileSync(launcher, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`);
 

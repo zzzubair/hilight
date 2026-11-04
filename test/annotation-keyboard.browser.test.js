@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.HILIGHT_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function run(command, args, env, timeout = 45_000) {
@@ -62,12 +62,12 @@ test(
     const temp = await mkdtemp(path.join(tmpdir(), "lavish-keyboard-e2e-"));
     const port = await freePort();
     const lavishEnv = {
-      LAVISH_AXI_PORT: String(port),
-      LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
-      LAVISH_AXI_NO_OPEN: "1",
-      LAVISH_AXI_TELEMETRY: "0",
-      LAVISH_AXI_HOST: "127.0.0.1",
-      LAVISH_AXI_LINK_HOST: "127.0.0.1",
+      HILIGHT_PORT: String(port),
+      HILIGHT_STATE_DIR: path.join(temp, "state"),
+      HILIGHT_NO_OPEN: "1",
+      HILIGHT_TELEMETRY: "0",
+      HILIGHT_HOST: "127.0.0.1",
+      HILIGHT_LINK_HOST: "127.0.0.1",
     };
     const chromeEnv = {
       CHROME_DEVTOOLS_AXI_SESSION: `lavish-keyboard-e2e-${process.pid}`,
@@ -83,7 +83,7 @@ test(
     try {
       const artifact = path.join(temp, "deck.html");
       await writeFile(artifact, ARTIFACT_HTML);
-      const output = run(process.execPath, ["bin/lavish-axi.js", artifact, "--no-open"], lavishEnv);
+      const output = run(process.execPath, ["bin/hilight.js", artifact, "--no-open"], lavishEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
 
@@ -102,7 +102,7 @@ test(
       const outside = browser("press", "ArrowRight");
       assert.match(outside, /"Slide 2"/, outside);
     } finally {
-      run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
+      run(process.execPath, ["bin/hilight.js", "stop", "--port", String(port)], lavishEnv, 15_000);
       run("chrome-devtools-axi", ["stop"], chromeEnv);
       await rm(temp, { recursive: true, force: true });
     }

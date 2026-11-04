@@ -4,7 +4,7 @@
 // in the file it regenerates: one `<script type="application/json"
 // data-lavish-revisions>` registry plus `data-lavish-revision="<id>"` on each
 // block it touched. Both are ordinary artifact content, so they survive a
-// reload, an export, and opening the file with Lavish absent - the same way
+// reload, an export, and opening the file with Hilight absent - the same way
 // `data-lavish-question` does. An artifact without the registry is unchanged.
 //
 // Nothing here writes to the document. The reader sees the revision history in

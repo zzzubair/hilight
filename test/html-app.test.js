@@ -41,7 +41,7 @@ test("createHtmlAppPayload sends html_content and only adds a password when prov
 
 test("htmlAppApiUrl defaults to ht-ml.app and honors the override env", () => {
   assert.equal(htmlAppApiUrl({}), "https://api.ht-ml.app");
-  assert.equal(htmlAppApiUrl({ LAVISH_AXI_HTML_APP_API_URL: "http://127.0.0.1:9/" }), "http://127.0.0.1:9");
+  assert.equal(htmlAppApiUrl({ HILIGHT_HTML_APP_API_URL: "http://127.0.0.1:9/" }), "http://127.0.0.1:9");
 });
 
 test("publishToHtmlApp posts the HTML to /v1/sites and returns the public url and update key", async () => {
@@ -78,7 +78,7 @@ test("publishToHtmlApp posts the HTML to /v1/sites and returns the public url an
 test("publishToHtmlApp sends a bearer token when one is configured", async () => {
   const { fetchImpl, calls } = recordingFetch(jsonResponse(200, { url: "https://x.ht-ml.app/", update_key: "uk" }));
 
-  await publishToHtmlApp("<h1>Hi</h1>", { fetch: fetchImpl, env: { LAVISH_AXI_HTML_APP_TOKEN: "tok_123" } });
+  await publishToHtmlApp("<h1>Hi</h1>", { fetch: fetchImpl, env: { HILIGHT_HTML_APP_TOKEN: "tok_123" } });
 
   assert.equal(calls[0].init.headers.authorization, "Bearer tok_123");
 });
@@ -153,7 +153,7 @@ test("hostRejectedShareWrite separates an answered rejection from an unknown out
   }
 });
 
-test("a site_id the host echoes cannot smuggle flags into what Lavish reports", async () => {
+test("a site_id the host echoes cannot smuggle flags into what Hilight reports", async () => {
   // The echoed id reaches a backticked republish command an agent may run, so `abc123 --password
   // evil` must not survive. It is a path segment; anything normalizeSiteId refuses is not one.
   const { fetchImpl } = recordingFetch(jsonResponse(200, { site_id: "abc123 --password evil", url: "https://x/" }));
@@ -251,7 +251,7 @@ test("createHtmlAppUpdatePayload omits the password to preserve it and sends one
 
 test("createHtmlAppUpdatePayload never sends an empty password the host accepts and ignores", () => {
   // Probed live: PUT with password "" answers 200 and leaves the original password working, so
-  // sending one would make Lavish report a page as public while it is still gated.
+  // sending one would make Hilight report a page as public while it is still gated.
   for (const password of ["", "   ", null, undefined]) {
     assert.deepEqual(createHtmlAppUpdatePayload("<h1>Hi</h1>", { password }), { html_content: "<h1>Hi</h1>" });
   }

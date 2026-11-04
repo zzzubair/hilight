@@ -1,10 +1,10 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
-export const ARTIFACT_HTML_ERROR = "Lavish Editor expects an HTML file";
+export const ARTIFACT_HTML_ERROR = "Hilight expects an HTML file";
 
 /**
- * Match the CLI: Lavish reviews HTML files, so only `.html` / `.htm` (any case) count.
+ * Match the CLI: Hilight reviews HTML files, so only `.html` / `.htm` (any case) count.
  * @param {unknown} file
  * @returns {boolean}
  */

@@ -1,22 +1,22 @@
 # Self-hosting the share backend
 
-`lavish-axi share` publishes to [ht-ml.app](https://ht-ml.app) by default. Set
-`LAVISH_AXI_HTML_APP_API_URL` to point `share` at a backend you control instead.
+`hilight share` publishes to [ht-ml.app](https://ht-ml.app) by default. Set
+`HILIGHT_HTML_APP_API_URL` to point `share` at a backend you control instead.
 This page documents the contract that backend must implement.
 
 ## Configuration
 
-| Env var                       | Purpose                                                                                                                                                                                                                      |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LAVISH_AXI_HTML_APP_API_URL` | Base URL of your share backend. Defaults to `https://api.ht-ml.app`; trailing slashes are stripped.                                                                                                                          |
-| `LAVISH_AXI_HTML_APP_TOKEN`   | Optional bearer token for `POST /v1/sites` only, sent as `Authorization: Bearer <token>`. Also settable per call with `--token`. Republishes authorize with the page's `update_key` instead, so `--token` is rejected there. |
+| Env var                    | Purpose                                                                                                                                                                                                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HILIGHT_HTML_APP_API_URL` | Base URL of your share backend. Defaults to `https://api.ht-ml.app`; trailing slashes are stripped.                                                                                                                          |
+| `HILIGHT_HTML_APP_TOKEN`   | Optional bearer token for `POST /v1/sites` only, sent as `Authorization: Bearer <token>`. Also settable per call with `--token`. Republishes authorize with the page's `update_key` instead, so `--token` is rejected there. |
 
 ## Contract
 
 `share` creates a page with one request, and republishes an existing one with a second:
 
 ```
-POST {LAVISH_AXI_HTML_APP_API_URL}/v1/sites
+POST {HILIGHT_HTML_APP_API_URL}/v1/sites
 Content-Type: application/json
 Authorization: Bearer <token>          # only when a token is configured
 
@@ -49,7 +49,7 @@ errors if either is missing:
 replaces an existing page in place:
 
 ```
-PUT {LAVISH_AXI_HTML_APP_API_URL}/v1/sites/{site_id}
+PUT {HILIGHT_HTML_APP_API_URL}/v1/sites/{site_id}
 Content-Type: application/json
 Authorization: Bearer <update_key>
 
@@ -59,7 +59,7 @@ Authorization: Bearer <update_key>
 }
 ```
 
-There is no way to remove a page's password. Lavish never sends an empty `password`, and offers no
+There is no way to remove a page's password. Hilight never sends an empty `password`, and offers no
 flag that would: ht-ml.app answers `200` to a clear and leaves the page gated, so a backend that
 implements one cannot be told apart from one that does not, and the CLI would report a page as
 public while it is still private.

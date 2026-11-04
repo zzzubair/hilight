@@ -1,6 +1,6 @@
 // Render-free check for the one authoring failure that makes a review surface silently
 // unusable: an artifact that never paints its own page background, so its text renders
-// over whatever surface hosts it (the Lavish chrome, a shared page, a captain's light
+// over whatever surface hosts it (the Hilight chrome, a shared page, a captain's light
 // theme) and can be invisible. The check is deliberately fail-open - any stylesheet
 // link, @import, Tailwind runtime script, or root paint signal suppresses the warning -
 // because a wrong warning here is noise on every open. It must stay a warning:
@@ -12,7 +12,7 @@ const CSS_RULE_RE = /([^{}]+)\{([^{}]*)\}/g;
 const ROOT_SELECTOR_TOKEN_RE = /(^|[\s,>~+])(html|body|:root|\*)(?![\w-])/i;
 
 export const SELF_PAINT_WARNING =
-  "This artifact never paints its own page surface: no background on html/body/:root, no bg-* class or data-theme on html/body, and no stylesheet that could set one. Lavish injects no design system, so text that assumes a dark or light host surface can render invisible. Set an explicit background and readable text.";
+  "This artifact never paints its own page surface: no background on html/body/:root, no bg-* class or data-theme on html/body, and no stylesheet that could set one. Hilight injects no design system, so text that assumes a dark or light host surface can render invisible. Set an explicit background and readable text.";
 
 /**
  * @param {string} html

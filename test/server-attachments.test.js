@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-process.env.LAVISH_AXI_HOST = "127.0.0.1";
-process.env.LAVISH_AXI_LINK_HOST = "127.0.0.1";
+process.env.HILIGHT_HOST = "127.0.0.1";
+process.env.HILIGHT_LINK_HOST = "127.0.0.1";
 
 import { isAttachmentUploadApiPath, serve } from "../src/server.js";
 
@@ -377,7 +377,7 @@ test("upload rejects bytes over the configured per-image cap with 413", async ()
       const res = await uploadImage(base, key, PNG_2x1);
       assert.equal(res.status, 413);
     },
-    { env: { LAVISH_AXI_MAX_ATTACHMENT_BYTES: "8" } },
+    { env: { HILIGHT_MAX_ATTACHMENT_BYTES: "8" } },
   );
 });
 
@@ -419,8 +419,8 @@ test("the server sweeps an expired, unreferenced attachment at startup", async (
   const old = Date.now() - 30 * 24 * 60 * 60 * 1000;
   await utimes(attachmentFile, new Date(old), new Date(old));
 
-  const saved = process.env.LAVISH_AXI_ATTACHMENT_TTL_MS;
-  process.env.LAVISH_AXI_ATTACHMENT_TTL_MS = "1000";
+  const saved = process.env.HILIGHT_ATTACHMENT_TTL_MS;
+  process.env.HILIGHT_ATTACHMENT_TTL_MS = "1000";
   const server = await serve({ port: 0, stateFile, version: "9.9.9-test" });
   try {
     const deadline = Date.now() + 2000;
@@ -437,8 +437,8 @@ test("the server sweeps an expired, unreferenced attachment at startup", async (
     assert.ok(gone, "expired orphan attachment should be swept on startup");
   } finally {
     await server.close();
-    if (saved === undefined) delete process.env.LAVISH_AXI_ATTACHMENT_TTL_MS;
-    else process.env.LAVISH_AXI_ATTACHMENT_TTL_MS = saved;
+    if (saved === undefined) delete process.env.HILIGHT_ATTACHMENT_TTL_MS;
+    else process.env.HILIGHT_ATTACHMENT_TTL_MS = saved;
     await rm(dir, { recursive: true, force: true });
   }
 });

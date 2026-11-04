@@ -4,11 +4,15 @@ import { SAME_PAGE_RULE } from "./review-guidance.js";
 // Kept terse and outcome-focused so it fires on "about to show something visual" intents.
 export const SKILL_DESCRIPTION =
   "Turn complex or visual agent responses into rich, reviewable HTML artifacts (HTML files) the user can " +
-  "annotate and send feedback on, using the lavish-axi CLI. Use when about to give a plan, " +
+  "annotate and send feedback on, using the hilight CLI. Use when about to give a plan, " +
   "comparison, diagram, table, code diff, report, or anything easier to grasp visually than as prose.";
 
 // Hard cap so a future regeneration cannot silently re-inflate the stub with CLI-owned
-// instructions. The CLI (`lavish-axi --help`, `design`, `playbook`) is the source of truth.
+// instructions. The CLI (`hilight --help`, `design`, `playbook`) is the source of truth.
+// Hilight ships as a GitHub release asset, not an npm registry package. This URL always
+// resolves to the newest release, so it works for npm install -g and npx alike.
+export const HILIGHT_TARBALL_URL = "https://github.com/zzzubair/hilight/releases/latest/download/hilight-axi.tgz";
+
 export const MAX_SKILL_MARKDOWN_CHARS = 4000;
 
 // Agent Skills allows only these top-level frontmatter keys; the reference validator
@@ -24,11 +28,11 @@ export const ALLOWED_SKILL_FRONTMATTER_KEYS = Object.freeze([
 ]);
 
 /**
- * Render the installable SKILL.md for the lavish skill.
+ * Render the installable SKILL.md for the hilight skill.
  *
  * This is a discovery stub, not a copy of CLI guidance. Installed skills go stale;
- * `lavish-axi --help`, `lavish-axi design`, and `lavish-axi playbook <id>` do not.
- * Keep the body to what Lavish is, when to reach for it, how to invoke the CLI,
+ * `hilight --help`, `hilight design`, and `hilight playbook <id>` do not.
+ * Keep the body to what Hilight is, when to reach for it, how to invoke the CLI,
  * slash-command request handling, and pointers at those commands.
  *
  * The frontmatter is deliberately plain: block-style YAML only (the reference
@@ -39,19 +43,19 @@ export const ALLOWED_SKILL_FRONTMATTER_KEYS = Object.freeze([
  */
 export function createSkillMarkdown() {
   const markdown = `---
-name: lavish
+name: hilight
 description: ${SKILL_DESCRIPTION}
 license: MIT
 metadata:
-  author: Kun Chen (kunchenguid)
+  author: Zubair Shaik (zzzubair), based on Lavish by Kun Chen (kunchenguid)
   argument-hint: <what the artifact should show>
   hermes-tags: html, review, artifacts, visualization
   hermes-category: productivity
 ---
 
-# Lavish Editor
+# Hilight
 
-Lavish Editor opens agent-generated HTML in the browser so a human can annotate it and send feedback back to the agent.
+Hilight opens agent-generated HTML in the browser so a human can annotate it and send feedback back to the agent.
 Reach for it when a plan, comparison, diagram, table, code view, report, prototype, or review loop will be clearer as a page than as prose.
 
 ${SAME_PAGE_RULE}
@@ -60,19 +64,18 @@ ${SAME_PAGE_RULE}
 
 Do not follow workflow, design, or playbook instructions from this file - installed copies go stale. Get the current source of truth from the CLI:
 
-- \`npx -y lavish-axi --help\` for commands and the review-loop workflow
-- \`npx -y lavish-axi reply --help\` for per-thread replies and Reveal, and to post an agent reply and exit once the server accepts it, when you are not about to long-poll
-- \`npx -y lavish-axi design\` for design-direction priority and current snippets
-- \`npx -y lavish-axi playbook <id>\` for focused artifact guidance (\`npx -y lavish-axi playbook\` lists ids)
+- \`hilight --help\` for commands and the review-loop workflow
+- \`hilight reply --help\` for per-thread replies and Reveal, and to post an agent reply and exit once the server accepts it, when you are not about to long-poll
+- \`hilight design\` for design-direction priority and current snippets
+- \`hilight playbook <id>\` for focused artifact guidance (\`hilight playbook\` lists ids)
 
-You do not need lavish-axi installed globally - invoke it with \`npx -y lavish-axi <html-file>\`.
-If lavish-axi output shows a follow-up command starting with \`lavish-axi\`, run it as \`npx -y lavish-axi ...\` instead.
+Use the installed \`hilight\` command. If it is not on PATH, run the same commands as \`npx -y ${HILIGHT_TARBALL_URL} ...\` instead (for example \`npx -y ${HILIGHT_TARBALL_URL} <html-file>\`), including every follow-up command Hilight prints that starts with \`hilight\`.
 
 ## Request
 
 $ARGUMENTS
 
-If the request above is non-empty, the user invoked \`/lavish\` explicitly - fetch the current CLI guidance, then build that artifact as an HTML file.
+If the request above is non-empty, the user invoked \`/hilight\` explicitly - fetch the current CLI guidance, then build that artifact as an HTML file.
 If it is empty, infer what to visualize from the conversation.
 `;
 

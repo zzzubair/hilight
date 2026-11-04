@@ -7,7 +7,7 @@ const packageJson = JSON.parse(await readFile(new URL("../package.json", import.
 await mkdir("dist", { recursive: true });
 
 await esbuild.build({
-  entryPoints: ["bin/lavish-axi.js"],
+  entryPoints: ["bin/hilight.js"],
   outfile: "dist/cli.mjs",
   bundle: true,
   packages: "external",
@@ -15,8 +15,8 @@ await esbuild.build({
   format: "esm",
   target: "node22",
   define: {
-    "process.env.LAVISH_AXI_BUILD_UMAMI_HOST": JSON.stringify(process.env.LAVISH_AXI_UMAMI_HOST || ""),
-    "process.env.LAVISH_AXI_BUILD_UMAMI_WEBSITE_ID": JSON.stringify(process.env.LAVISH_AXI_UMAMI_WEBSITE_ID || ""),
+    "process.env.LAVISH_AXI_BUILD_UMAMI_HOST": JSON.stringify(process.env.HILIGHT_UMAMI_HOST || ""),
+    "process.env.LAVISH_AXI_BUILD_UMAMI_WEBSITE_ID": JSON.stringify(process.env.HILIGHT_UMAMI_WEBSITE_ID || ""),
     "process.env.LAVISH_AXI_BUILD_VERSION": JSON.stringify(packageJson.version),
   },
 });
@@ -24,7 +24,7 @@ await esbuild.build({
 await chmod("dist/cli.mjs", 0o755);
 
 await esbuild.build({
-  entryPoints: ["bin/lavish-axi-server.js"],
+  entryPoints: ["bin/hilight-server.js"],
   outfile: "dist/server.mjs",
   bundle: true,
   packages: "external",
@@ -35,7 +35,7 @@ await esbuild.build({
     {
       name: "external-cli",
       setup(build) {
-        build.onResolve({ filter: /^\.\/lavish-axi\.js$/ }, () => ({
+        build.onResolve({ filter: /^\.\/hilight\.js$/ }, () => ({
           path: "./cli.mjs",
           external: true,
         }));

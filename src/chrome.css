@@ -1,4 +1,4 @@
-/* Lavish's own chrome: sparse and monochrome, with one cool accent. Dark first; the same tokens
+/* Hilight's own chrome: sparse and monochrome, with one cool accent. Dark first; the same tokens
    flip for a light system theme. System font, hairlines instead of fills, no page tint. The
    artifact inside the frame keeps its own styling; nothing here reaches it. */
 :root {
@@ -167,15 +167,13 @@ body {
   letter-spacing: -0.02em;
   line-height: 1;
 }
-.brand-mark::before {
-  content: "";
+.brand-bulb {
   display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 7px;
-  border-radius: 2px;
-  background: var(--accent);
-  vertical-align: 1px;
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
+  color: var(--accent);
+  vertical-align: -2px;
 }
 .spacer {
   flex: 1;

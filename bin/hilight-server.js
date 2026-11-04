@@ -5,7 +5,7 @@ installServerStdioTimestamps();
 let fatalExitScheduled = false;
 function handleFatalServerError(kind, error) {
   const detail = error instanceof Error ? error.stack || error.message : String(error);
-  console.error(`[lavish] ${kind}: ${detail}`);
+  console.error(`[hilight] ${kind}: ${detail}`);
   if (fatalExitScheduled) return;
   fatalExitScheduled = true;
   process.exitCode = 1;
@@ -17,7 +17,7 @@ function handleFatalServerError(kind, error) {
 process.on("uncaughtException", (error) => handleFatalServerError("uncaught exception", error));
 
 try {
-  await import("./lavish-axi.js");
+  await import("./hilight.js");
 } catch (error) {
   handleFatalServerError("server startup failed", error);
 }

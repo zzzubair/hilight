@@ -3,7 +3,7 @@
 This file is loaded every session. It keeps only rules that apply to almost every change. Detail lives in the doc that owns it.
 
 - [README.md](README.md) owns the user-facing contract: features, CLI flags, environment variables, keyboard shortcuts, export and share, and session-end etiquette.
-- CLI output owns what agents are told while using Lavish: `lavish-axi --help`, `lavish-axi design`, and `lavish-axi playbook <id>` (`src/cli.js`, `src/design-reference.js`, `src/playbooks.js`). The generated skill (`src/skill.js` to `skills/lavish/SKILL.md`) stays a stub that points at those commands. Do not copy CLI-owned instructions into the skill.
+- CLI output owns what agents are told while using Hilight: `hilight --help`, `hilight design`, and `hilight playbook <id>` (`src/cli.js`, `src/design-reference.js`, `src/playbooks.js`). The generated skill (`src/skill.js` to `skills/lavish/SKILL.md`) stays a stub that points at those commands. Do not copy CLI-owned instructions into the skill.
 - [VISION.md](VISION.md) owns the acceptance policy. Change it only through the author.
 - [docs/invariants.md](docs/invariants.md) owns architecture internals, security rationale, and easy-to-reintroduce failure modes. Read the section for the area you are editing before changing it.
 - Update the owner when a contract changes. Edit this file only when an every-session rule changes.
@@ -21,8 +21,8 @@ pnpm run typecheck      # tsc --noEmit (checkJs)
 ```
 
 One file: `node --test test/server.test.js`. One name: `node --test --test-name-pattern "createOpenOutput" test/cli-output.test.js`.
-Opt-in browser suites need `chrome-devtools-axi`: `LAVISH_AXI_BROWSER_E2E=1 node --test test/layout-audit-browser.test.js test/layout-warning-inbox.browser.test.js`.
-Seven-tab pool regression: `LAVISH_AXI_BROWSER_E2E=1 node --test test/event-transport.browser.test.js`.
+Opt-in browser suites need `chrome-devtools-axi`: `HILIGHT_BROWSER_E2E=1 node --test test/layout-audit-browser.test.js test/layout-warning-inbox.browser.test.js`.
+Seven-tab pool regression: `HILIGHT_BROWSER_E2E=1 node --test test/event-transport.browser.test.js`.
 `prepack` and `prepare` both run `build`. `pnpm run check` fails if `skills/lavish/SKILL.md` drifts from `createSkillMarkdown()`, or if root `plugin.json` drifts from `pnpm run build:plugin`. Release-please bumps `plugin.json` through `extra-files`.
 
 ## Project conventions
@@ -33,20 +33,22 @@ Seven-tab pool regression: `LAVISH_AXI_BROWSER_E2E=1 node --test test/event-tran
 - Treat repo-provided `.agents/` skill content as vendored. Prettier ignores it.
 - Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json`. Release-please owns them.
 - Human-authored PRs to `main` go through [no-mistakes](https://github.com/kunchenguid/no-mistakes) >= 1.46.0. [CONTRIBUTING.md](CONTRIBUTING.md) owns the gate, the attestation contract, and the workflow-pin rules.
-- Tests that start the server set `LAVISH_AXI_STATE_DIR` and use an ephemeral port.
+- Tests that start the server set `HILIGHT_STATE_DIR` and use an ephemeral port.
 - `run()` returns on `--version` / `-v` / `-V` before `ensureStateDir` and telemetry (`test/cli-version.test.js`). New startup work goes after that short-circuit.
+- The product is Hilight (package `hilight-axi`, command `hilight`), a fork of Lavish. Read settings through `readEnv` (`src/env.js`): `HILIGHT_*` first, then the legacy `LAVISH_AXI_*` name. Wire and stored identifiers keep the old name so pre-rename servers, tabs, and artifacts keep working: the `/health` `app: "lavish-axi"` id, `lavish-axi:*` storage keys, `data-lavish-*` attributes, `window.lavish`, and `lavish-*` classes. Do not rename them.
+- A test that runs a pre-rename build must pass `LAVISH_AXI_*` env names. That build ignores `HILIGHT_*` and falls back to the real `~/.lavish-axi` and port 4387.
 - `canonicalFile` runs `realpath`. Two paths to the same file are one session.
-- `normalizeArgv` must let AXI `RESERVED_COMMANDS` (including `update`) pass through. A bare `lavish-axi update` must not become `open update`.
+- `normalizeArgv` must let AXI `RESERVED_COMMANDS` (including `update`) pass through. A bare `hilight update` must not become `open update`.
 
 ## Safety and correctness
 
 Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure mode.
 
 - The session key is the canonical artifact path. It is not a secret. No route may treat key possession as authorization. [Process model](docs/invariants.md#process-model).
-- Never signal a listener by port alone. Stop only a Lavish PID bound to that exact address, or `POST /shutdown` on an owned server. [Process model](docs/invariants.md#process-model).
+- Never signal a listener by port alone. Stop only a Hilight PID bound to that exact address, or `POST /shutdown` on an owned server. [Process model](docs/invariants.md#process-model).
 - Adopt, replace, or stop only a server `isOwnedServer` owns. Another installation's server at a control address is a `SERVER_ERROR`, never used, replaced, or stopped. [Process model](docs/invariants.md#process-model).
 - Every server replacement passes all previously requested hosts through `inheritedListenHosts` (`--also-listen`), dropping only IPs no longer on a local interface. [Process model](docs/invariants.md#process-model).
-- Loopback is always requested. An unresolvable `LAVISH_AXI_HOST` is kept (`keepUnresolved`) and retried, never silently dropped. [Process model](docs/invariants.md#process-model).
+- Loopback is always requested. An unresolvable `HILIGHT_HOST` is kept (`keepUnresolved`) and retried, never silently dropped. [Process model](docs/invariants.md#process-model).
 - A wildcard listen request becomes loopback, and an alias that resolves to an all-interfaces address is refused. Never open a wildcard listener. [Process model](docs/invariants.md#process-model).
 - Health probes use `node:http` and destroy the socket on every exit. Do not use `fetch`. [Process model](docs/invariants.md#process-model).
 - Loopback binds first and is the port lock. A failed requested address stays in `pendingBinds` and is retried. Declare request-handler timers before the first bind. [Process model](docs/invariants.md#process-model).
@@ -59,7 +61,7 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - The artifact route injects only the one SDK `<script>` tag. Served artifact bytes otherwise match the file on disk. [Request flow](docs/invariants.md#request-flow).
 - `/api/sessions` refuses a path that is not a regular `.html`/`.htm` file after `realpath`. [Request flow](docs/invariants.md#request-flow).
 - Artifact asset serving (`/artifact/:key/<path>`) stays inside that session's HTML-file directory, resolves with `realpath`, and never serves a symlink target outside that tree. [Request flow](docs/invariants.md#request-flow).
-- Layout detection never emits `feedback`. Only a user prompt and the narrow fatal artifact-failure path may wake `lavish-axi poll`. [Request flow](docs/invariants.md#request-flow).
+- Layout detection never emits `feedback`. Only a user prompt and the narrow fatal artifact-failure path may wake `hilight poll`. [Request flow](docs/invariants.md#request-flow).
 - Layout-diagnostics reports are fire-and-forget and never hold the artifact behind a round-trip. Ordinary layout findings are never relabelled fatal. [Request flow](docs/invariants.md#request-flow).
 - The chrome mints each queued prompt's `prompt_id` (never from the iframe) and removes a queued note only when the transcript acknowledges that id. Evicted ids stay on `chat_ack_ids`. [Request flow](docs/invariants.md#request-flow).
 - Only agent chat entries render as HTML. User entries are always escaped. [Request flow](docs/invariants.md#request-flow).
@@ -76,7 +78,7 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - A layout warning clears only on a newer artifact revision plus a complete pass at the same viewport class. Do not emit `feedback` for a detection. [Passive layout-warning inbox](docs/invariants.md#passive-layout-warning-inbox).
 - The chrome never decides that a warning went away. Display strings come from `serializeLayoutWarnings`. [Passive layout-warning inbox](docs/invariants.md#passive-layout-warning-inbox).
 - The active artifact load is durable in `session.artifact_load`. Only a newer `beginArtifactLoad` retires it, and only an explicit takeover reload replaces a superseded reviewer. [Passive layout-warning inbox](docs/invariants.md#passive-layout-warning-inbox).
-- Reload and gate recovery probe `/health` before navigating. Do not call `location.reload()` directly for these recovery actions; the superseded-reviewer takeover card may reload directly after its 409 response. Sticky "Lavish is not running." copy is never cleared by a later successful load. [Live reload](docs/invariants.md#live-reload).
+- Reload and gate recovery probe `/health` before navigating. Do not call `location.reload()` directly for these recovery actions; the superseded-reviewer takeover card may reload directly after its 409 response. Sticky "Hilight is not running." copy is never cleared by a later successful load. [Live reload](docs/invariants.md#live-reload).
 - Every recovery `/health` probe is bounded by an abort timeout, and its caller restores the control whether the probe answers, fails, or times out. [Live reload](docs/invariants.md#live-reload).
 - Sticky copy never makes the gate overlay sticky. Every failure card keeps the bounded timeout and the **Show anyway** bypass. [Live reload](docs/invariants.md#live-reload).
 - Shutdown banner text must be true for the `reason` that fired. Idle shutdown reloads nothing. [Live reload](docs/invariants.md#live-reload).
@@ -105,7 +107,7 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - Export and share inline confined same-directory resources and redact every other absolute `file://` URL to `about:blank` so local paths never leak. [Export (local-asset inlining)](docs/invariants.md#export-local-asset-inlining).
 - Exports strip the injected SDK and escape inlined `</script>`/`</style>`. Hosted shares never include the SDK. [Export (local-asset inlining)](docs/invariants.md#export-local-asset-inlining).
 - `--unpublish` is not a deletion. There is no clear-password path. Empty share flag values are refused. A lost create response must not offer a recovery the host cannot perform. Suggested commands never contain a password placeholder. [Hosted sharing (ht-ml.app)](docs/invariants.md#hosted-sharing-ht-mlapp).
-- Share passwords are minted only in `src/share-password.js`. Lavish persists neither the password nor `update_key`. [Hosted sharing (ht-ml.app)](docs/invariants.md#hosted-sharing-ht-mlapp).
+- Share passwords are minted only in `src/share-password.js`. Hilight persists neither the password nor `update_key`. [Hosted sharing (ht-ml.app)](docs/invariants.md#hosted-sharing-ht-mlapp).
 - The share route echoes a password only when it minted one. [Hosted sharing (ht-ml.app)](docs/invariants.md#hosted-sharing-ht-mlapp).
 - Share writes classify failure through `hostRejectedShareWrite`, where only a 4xx proves nothing landed. An echoed `site_id` is untrusted, and recovery commands come only from `republishCommand`/`unpublishCommand`. [Hosted sharing (ht-ml.app)](docs/invariants.md#hosted-sharing-ht-mlapp).
 - Every surface reporting a page as newly gated carries the CDN public-to-private caveat. [Hosted sharing (ht-ml.app)](docs/invariants.md#hosted-sharing-ht-mlapp).
@@ -114,7 +116,7 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - The internal brand skill keeps `metadata.internal: true`. The generated skill omits a `version` frontmatter field. [AXI integration](docs/invariants.md#axi-integration).
 - `plugin.json` and `skills/lavish` stay in `package.json` `files`. Skill frontmatter stays inside `validateSkillMarkdown`'s allowed shape. An unlinkable plugin client is reported, never thrown. Do not ship `mcp.json`. [Agent Plugins packaging](docs/invariants.md#agent-plugins-packaging).
 - Plugin setup runs only on explicit invocation, drops only locations `isStalePluginLocation` attributes to this plugin, and never rewrites unparseable VS Code settings. [Agent Plugins packaging](docs/invariants.md#agent-plugins-packaging).
-- Telemetry is best-effort and must never affect CLI behavior. Users opt out with `LAVISH_AXI_TELEMETRY=0`. [Telemetry](docs/invariants.md#telemetry).
+- Telemetry is best-effort and must never affect CLI behavior. Users opt out with `HILIGHT_TELEMETRY=0`. [Telemetry](docs/invariants.md#telemetry).
 - Comment threads are never deleted, and the artifact only ever receives thread ids, selectors and range targets, never comment text. A reply with an unknown `## c<n>` section is rejected whole before any write. [Margin comment threads](docs/invariants.md#margin-comment-threads).
 - Every artifact-to-chrome message goes through `postArtifactMessage`. The artifact iframe stays sandboxed without `allow-same-origin`. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).
 - Every `/artifact/*` response carries the CSP `sandbox` policy matching the iframe, so an escaped popup stays opaque-origin. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).

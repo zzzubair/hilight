@@ -2,8 +2,8 @@ import os from "node:os";
 
 import { isWildcardHost } from "./paths.js";
 
-// Every concrete address on this machine's interfaces that a Lavish server could be listening on.
-// A server pinned to a Tailscale or LAN address by one agent's LAVISH_AXI_HOST is invisible to a
+// Every concrete address on this machine's interfaces that a Hilight server could be listening on.
+// A server pinned to a Tailscale or LAN address by one agent's HILIGHT_HOST is invisible to a
 // CLI that only dials its own configured host and loopback, so discovery also sweeps these before
 // concluding nothing is running on the port. IPv6 link-local addresses need a zone to be dialed
 // and are skipped. Older Node releases report `family` as a number.

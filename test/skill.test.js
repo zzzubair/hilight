@@ -11,13 +11,14 @@ import {
   createSkillMarkdown,
   parseSkillFrontmatter,
   validateSkillMarkdown,
+  HILIGHT_TARBALL_URL,
 } from "../src/skill.js";
 
-test("createSkillMarkdown emits valid frontmatter naming the lavish skill", () => {
+test("createSkillMarkdown emits valid frontmatter naming the hilight skill", () => {
   const { frontmatter, errors } = parseSkillFrontmatter(createSkillMarkdown());
 
   assert.deepEqual(errors, [], "frontmatter parses as plain block-style YAML");
-  assert.equal(frontmatter.name, "lavish");
+  assert.equal(frontmatter.name, "hilight");
   assert.equal(frontmatter.description, SKILL_DESCRIPTION);
 });
 
@@ -25,7 +26,7 @@ test("createSkillMarkdown emits Hermes Agent metadata as string-valued frontmatt
   const { frontmatter } = parseSkillFrontmatter(createSkillMarkdown());
 
   assert.deepEqual(frontmatter.metadata, {
-    author: "Kun Chen (kunchenguid)",
+    author: "Zubair Shaik (zzzubair), based on Lavish by Kun Chen (kunchenguid)",
     "argument-hint": "<what the artifact should show>",
     "hermes-tags": "html, review, artifacts, visualization",
     "hermes-category": "productivity",
@@ -36,7 +37,7 @@ test("createSkillMarkdown emits Hermes Agent metadata as string-valued frontmatt
 test("createSkillMarkdown conforms to the Agent Skills frontmatter contract", () => {
   // Agent Plugins delegates skill validity to Agent Skills and silently skips any skill
   // that fails it, so a regression here would quietly remove the skill from the plugin.
-  const { valid, errors } = validateSkillMarkdown(createSkillMarkdown(), { directoryName: "lavish" });
+  const { valid, errors } = validateSkillMarkdown(createSkillMarkdown(), { directoryName: "hilight" });
 
   assert.deepEqual(errors, []);
   assert.ok(valid);
@@ -70,7 +71,7 @@ test("validateSkillMarkdown rejects the shapes the reference validator rejects",
   assert.match(validateSkillMarkdown(missing).errors.join("\n"), /`description` is required/);
 });
 
-test("createSkillMarkdown handles explicit /lavish invocation arguments", () => {
+test("createSkillMarkdown handles explicit /hilight invocation arguments", () => {
   const md = createSkillMarkdown();
   const body = md.slice(md.indexOf("\n---\n", 4) + 5);
 
@@ -82,18 +83,18 @@ test("createSkillMarkdown stays a short stub that defers to the CLI", () => {
   const md = createSkillMarkdown();
 
   assert.ok(md.length <= MAX_SKILL_MARKDOWN_CHARS, "the generated skill stays drastically smaller than CLI guidance");
-  assert.match(md, /Lavish Editor/);
-  assert.match(md, /`npx -y lavish-axi --help`/);
-  assert.match(md, /`npx -y lavish-axi reply --help`/);
+  assert.match(md, /Hilight/);
+  assert.match(md, /`hilight --help`/);
+  assert.match(md, /`hilight reply --help`/);
   assert.match(md, /not about to long-poll/);
-  assert.match(md, /`npx -y lavish-axi design`/);
-  assert.match(md, /`npx -y lavish-axi playbook <id>`/);
+  assert.match(md, /`hilight design`/);
+  assert.match(md, /`hilight playbook <id>`/);
   assert.match(md, /stale/i);
 });
 
 test("createSkillMarkdown does not bake CLI-owned guidance into the skill", () => {
   const md = createSkillMarkdown();
-  const home = createHomeOutput({ bin: "lavish-axi", sessions: [], includeSessions: false, agent: "static" });
+  const home = createHomeOutput({ bin: "hilight", sessions: [], includeSessions: false, agent: "static" });
 
   for (const item of home.visual_guidance) {
     assert.ok(!md.includes(item), `must not copy visual guidance: ${item.slice(0, 48)}...`);
@@ -130,12 +131,15 @@ test("createSkillMarkdown omits setup guidance", () => {
   assert.doesNotMatch(md, /setup plugin/);
 });
 
-test("createSkillMarkdown uses non-interactive npx commands", () => {
+test("createSkillMarkdown prefers the installed command and falls back to a non-interactive npx of the release tarball", () => {
   const md = createSkillMarkdown();
 
-  assert.match(md, /`npx -y lavish-axi <html-file>`/);
-  assert.match(md, /If lavish-axi output shows a follow-up command starting with `lavish-axi`/);
-  assert.match(md, /run it as `npx -y lavish-axi/);
-  assert.doesNotMatch(md, /`npx lavish-axi/);
-  assert.doesNotMatch(md, /Run `lavish-axi/);
+  assert.match(md, /Use the installed `hilight` command/);
+  assert.ok(
+    md.includes(`\`npx -y ${HILIGHT_TARBALL_URL} <html-file>\``),
+    "npx fallback runs the GitHub release tarball",
+  );
+  assert.match(md, /every follow-up command Hilight prints that starts with `hilight`/);
+  assert.doesNotMatch(md, /`npx hilight/, "npx without -y would prompt");
+  assert.doesNotMatch(md, /npx -y hilight[ `]/, "there is no hilight package on the npm registry");
 });

@@ -1,5 +1,6 @@
+import { readEnv } from "./env.js";
 // Hosted sharing transport: publish a self-contained HTML page to ht-ml.app
-// (https://ht-ml.app), a third-party hosting service not part of Lavish, and return a visitable
+// (https://ht-ml.app), a third-party hosting service not part of Hilight, and return a visitable
 // share URL. Creation needs no account or API key - `POST /v1/sites` sends the HTML to
 // ht-ml.app's servers with an optional password, then returns a `url` plus a secret
 // `update_key` (the only credential, returned once, used later to update the page).
@@ -17,7 +18,7 @@ const PUBLISH_TIMEOUT_MS = 30_000;
 const SITE_ID_RE = /^[A-Za-z0-9._-]+$/;
 
 export function htmlAppApiUrl(env = process.env) {
-  return String(env.LAVISH_AXI_HTML_APP_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
+  return String(readEnv(env, "HTML_APP_API_URL") || DEFAULT_API_URL).replace(/\/+$/, "");
 }
 
 export function createHtmlAppPayload(html, options = {}) {
@@ -36,7 +37,7 @@ export function createHtmlAppPayload(html, options = {}) {
  *   ORIGINAL password, while serving the new HTML. Preservation is observed, not assumed.
  * - `password: "<new>"`: the old password stopped working and the new one opened the page.
  * - `password: ""`: answered 200 and changed nothing - the original password still opened the
- *   page. The host silently ignores a clear despite documenting one, which is why Lavish has no
+ *   page. The host silently ignores a clear despite documenting one, which is why Hilight has no
  *   clear-password path: reporting a page as public while it is still gated is the worse failure.
  *
  * The none -> set transition was probed separately, on a page published with NO password, because
@@ -55,7 +56,7 @@ export function createHtmlAppPayload(html, options = {}) {
  * performs it: `--unpublish` and a `--private`/`--password` republish both hit it, so EVERY
  * surface reporting a page as newly gated carries the caveat. It is also no wider than that - a
  * page that was already private has no publicly cached copy, so rotating its password leaks
- * nothing, and Lavish cannot tell the two apart because it persists no site state.
+ * nothing, and Hilight cannot tell the two apart because it persists no site state.
  *
  * The PUT response shape was observed in the same probes: a successful update answers 200 with
  * `url`, `site_id`, `status`, and `update_key`, so the republish and unpublish surfaces get a real
@@ -113,7 +114,7 @@ export function createUnpublishedPageHtml() {
  * @param {object} [options]
  * @param {string} [options.password] Make the site private behind this password.
  * @param {string} [options.token] Optional bearer token (never required to create a site).
- * @param {string} [options.apiUrl] Override the API base (defaults to LAVISH_AXI_HTML_APP_API_URL or ht-ml.app).
+ * @param {string} [options.apiUrl] Override the API base (defaults to HILIGHT_HTML_APP_API_URL or ht-ml.app).
  * @param {typeof fetch} [options.fetch] Injected fetch for testing.
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {number} [options.timeoutMs]
@@ -121,7 +122,7 @@ export function createUnpublishedPageHtml() {
  */
 export async function publishToHtmlApp(html, options = {}) {
   const env = options.env || process.env;
-  const token = optionalString(options.token ?? env.LAVISH_AXI_HTML_APP_TOKEN);
+  const token = optionalString(options.token ?? readEnv(env, "HTML_APP_TOKEN"));
   const data = await requestHtmlApp({
     method: "POST",
     path: "/v1/sites",
@@ -263,7 +264,7 @@ async function requestHtmlApp({ method, path, body, bearer, options, env, action
   const apiUrl = (options.apiUrl ? String(options.apiUrl).replace(/\/+$/, "") : "") || htmlAppApiUrl(env);
   const fetchImpl = options.fetch || fetch;
 
-  const headers = { "content-type": "application/json", "user-agent": "lavish-axi" };
+  const headers = { "content-type": "application/json", "user-agent": "hilight" };
   if (bearer) headers.authorization = `Bearer ${bearer}`;
 
   const controller = new AbortController();

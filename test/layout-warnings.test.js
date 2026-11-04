@@ -258,11 +258,11 @@ test("a viewport removed from the diagnostic set is marked obsolete with a reaso
 
 test("the configured diagnostic viewport set falls back to every class", () => {
   assert.deepEqual(resolveDiagnosticViewportClasses({}), ["mobile", "compact", "desktop"]);
-  assert.deepEqual(resolveDiagnosticViewportClasses({ LAVISH_AXI_DIAGNOSTIC_VIEWPORTS: "desktop, mobile" }), [
+  assert.deepEqual(resolveDiagnosticViewportClasses({ HILIGHT_DIAGNOSTIC_VIEWPORTS: "desktop, mobile" }), [
     "desktop",
     "mobile",
   ]);
-  assert.deepEqual(resolveDiagnosticViewportClasses({ LAVISH_AXI_DIAGNOSTIC_VIEWPORTS: "nonsense" }), [
+  assert.deepEqual(resolveDiagnosticViewportClasses({ HILIGHT_DIAGNOSTIC_VIEWPORTS: "nonsense" }), [
     "mobile",
     "compact",
     "desktop",

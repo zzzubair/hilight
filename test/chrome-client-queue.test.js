@@ -454,7 +454,7 @@ async function createChromeHarness({
     },
     document: {
       // The tab as the server served it: the artifact's title and its icon link.
-      title: "Plan \u00b7 Lavish",
+      title: "Plan \u00b7 Hilight",
       body: element("body"),
       head: { appendChild: (link) => (tabIcon = link) },
       querySelector: (selector) => (selector === 'link[rel~="icon"]' ? tabIcon : null),
@@ -3949,7 +3949,7 @@ test("an indeterminate publish keeps the password it minted and shows no credent
 
 test("an incomplete 200 reports a landed publish and shows the fields the host did return", async () => {
   // The host answered 200, so the page IS live. Hedging that as "may or may not have published"
-  // also threw away the url Lavish was holding for a page that is public by default.
+  // also threw away the url Hilight was holding for a page that is public by default.
   const chrome = await createChromeHarness({
     fetchImpl: async () => ({
       ok: false,
@@ -4410,7 +4410,7 @@ test("a first begin-load that never recovers surfaces a reloadable failure inste
 
   assert.equal(chrome.frame.src, "");
   assert.equal(chrome.element("layoutGateOverlay").hidden, false);
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish could not load this artifact.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight could not load this artifact.");
   assert.equal(chrome.element("layoutGateAction").textContent, "Check and reload");
 
   // This card is raised in the state where the server may be gone, so it must not navigate into
@@ -4445,7 +4445,7 @@ test("a load that asks for the artifact again gets the whole recovery backoff ag
     await exhaustOneBeginLoadAttempt(chrome);
   }
   assert.equal(chrome.artifactBeginRequests.length, 15);
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish could not load this artifact.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight could not load this artifact.");
 
   // A fresh attempt whose own begin fails must schedule the backoff again instead of giving up.
   chrome.element("reloadArtifact").click();
@@ -4619,7 +4619,7 @@ test("a chrome whose replacement server never returns says so instead of reloadi
 
   assert.equal(chrome.reloadCount(), 0);
   assert.equal(chrome.element("layoutGateOverlay").hidden, false);
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
   assert.equal(chrome.element("layoutGateAction").textContent, "Check and reload");
 });
 
@@ -4651,7 +4651,7 @@ test("a chrome confirms the server is gone before saying it never came back", as
   }
 
   assert.equal(chrome.reloadCount(), 1);
-  assert.notEqual(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.notEqual(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 });
 
 test("the not-running card reloads only once the server answers again", async () => {
@@ -4675,7 +4675,7 @@ test("the not-running card reloads only once the server answers again", async ()
     chrome.runTimers(100);
     await flushPromises();
   }
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 
   // Clicking while nothing is listening must not navigate into the dead port - that is the
   // browser connection-error page this whole path exists to avoid.
@@ -4720,7 +4720,7 @@ test("a chrome re-checks a stale healthy probe before reloading", async () => {
   }
 
   assert.equal(chrome.reloadCount(), 0, "never reload into a port nothing is listening on");
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 });
 
 test("the not-running card survives a later successful artifact load", async () => {
@@ -4744,7 +4744,7 @@ test("the not-running card survives a later successful artifact load", async () 
     chrome.runTimers(100);
     await flushPromises();
   }
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 
   // The replacement server binds and serves this artifact again. The page is still running the
   // pre-upgrade client, so the card the user was told to act on must stay up.
@@ -4754,7 +4754,7 @@ test("the not-running card survives a later successful artifact load", async () 
   await flushPromises();
 
   assert.match(chrome.frame.src, /artifact_load_token=/, "the artifact still reloads");
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
   assert.match(chrome.element("layoutGateCopy").textContent, /did not come back/);
   assert.equal(chrome.element("layoutGateAction").textContent, "Check and reload");
   assert.equal(chrome.element("layoutGateOverlay").hidden, false);
@@ -4768,7 +4768,7 @@ test("the not-running card survives a later successful artifact load", async () 
     findings: [],
   });
   assert.equal(chrome.element("layoutGateOverlay").hidden, true);
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 
   chrome.eventSource().listeners.get("reload")();
   await flushPromises();
@@ -4796,7 +4796,7 @@ test("a sticky failure cannot outlive the layout gate timeout", async () => {
     chrome.runTimers(100);
     await flushPromises();
   }
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
   assert.equal(chrome.element("layoutGateOverlay").hidden, false);
 
   // setLayoutGateFailure() is sticky here; its hold timer must still release the visual gate.
@@ -4824,7 +4824,7 @@ test("a no-gate sticky failure reveals by pass, manual bypass, or timeout", asyn
       chrome.runTimers(100);
       await flushPromises();
     }
-    assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+    assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
     assert.equal(chrome.element("layoutGateOverlay").hidden, false);
     return chrome;
   }
@@ -4910,11 +4910,11 @@ test("the outdated banner says what actually happened to the server", async () =
   sendChromeOutdated(chrome, "upgrade");
   assert.equal(
     chrome.element("outdatedText").textContent,
-    "Lavish was updated. This page is running the previous version.",
+    "Hilight was updated. This page is running the previous version.",
   );
 
   sendChromeOutdated(chrome, "stop");
-  assert.equal(chrome.element("outdatedText").textContent, "Lavish was stopped. Reload after you start it again.");
+  assert.equal(chrome.element("outdatedText").textContent, "Hilight was stopped. Reload after you start it again.");
 
   sendChromeOutdated(chrome, "local-build");
   const localBuild = chrome.element("outdatedText").textContent;
@@ -4943,7 +4943,7 @@ test("the outdated banner's reload asks the server before navigating", async () 
     },
   });
 
-  // `lavish-axi stop` leaves no replacement behind, so this button must not navigate into a port
+  // `hilight stop` leaves no replacement behind, so this button must not navigate into a port
   // nothing is listening on.
   sendChromeOutdated(chrome, "stop");
   await chrome.element("outdatedReload").click();
@@ -5034,7 +5034,7 @@ test("a restart wait whose port never answers still reaches the not-running card
   }
 
   assert.equal(chrome.reloadCount(), 0);
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 });
 
 // A probe can take until its timeout, and by then the overlay may have moved on to a different
@@ -5055,7 +5055,7 @@ test("a slow probe does not write its failure copy over a card that moved on", a
     chrome.runTimers(delay);
     await exhaustOneBeginLoadAttempt(chrome);
   }
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish could not load this artifact.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight could not load this artifact.");
 
   chrome.element("layoutGateAction").click();
   await flushPromises();
@@ -5110,7 +5110,7 @@ test("a health check that never answers hands the failure card's button back", a
     chrome.runTimers(delay);
     await exhaustOneBeginLoadAttempt(chrome);
   }
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish could not load this artifact.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight could not load this artifact.");
 
   chrome.element("layoutGateAction").click();
   await flushPromises();
@@ -5152,7 +5152,7 @@ test("an ordinary load failure cannot replace the not-running card", async () =>
     chrome.runTimers(100);
     await flushPromises();
   }
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 
   // The replacement binds late; a live reload then fails its begin-loads for the whole backoff.
   chrome.eventSource().listeners.get("reload")();
@@ -5162,7 +5162,7 @@ test("an ordinary load failure cannot replace the not-running card", async () =>
     await exhaustOneBeginLoadAttempt(chrome);
   }
 
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
   assert.match(chrome.element("layoutGateCopy").textContent, /did not come back/);
 });
 
@@ -5253,7 +5253,7 @@ test("a draft the artifact can no longer anchor is retired after a second revisi
   await flushPromises();
 
   assert.deepEqual(await restoredDraft(storage), []);
-  // Retiring ends Lavish's ability to replay the note, so the text is handed back where the user
+  // Retiring ends Hilight's ability to replay the note, so the text is handed back where the user
   // can read and copy it instead of disappearing.
   assert.equal(retiredDraftNotes(chrome).length, 1);
   assert.match(retiredDraftNotes(chrome)[0].innerHTML, /needs a shorter headline/);
@@ -5302,7 +5302,7 @@ test("a probe that never answers leaves the not-running card's title and body ag
     chrome.runTimers(4000);
     await flushPromises();
   }
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
 
   chrome.element("layoutGateAction").click();
   await flushPromises();
@@ -5321,7 +5321,7 @@ test("a probe that never answers leaves the not-running card's title and body ag
   chrome.element("layoutGateAction").click();
   await flushPromises();
   await flushPromises();
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish is not running.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight is not running.");
   assert.match(chrome.element("layoutGateCopy").textContent, /still not running/);
 });
 
@@ -5516,7 +5516,7 @@ test("a restart reload with an unsent draft offers the banner instead of reloadi
   assert.equal(chrome.element("outdatedBanner").hidden, false);
   assert.equal(
     chrome.element("outdatedText").textContent,
-    "Lavish was updated. This page is running the previous version.",
+    "Hilight was updated. This page is running the previous version.",
   );
 });
 
@@ -6214,7 +6214,7 @@ test("a docked phone sheet makes its pinned Send footer inert, and opening the s
   assert.equal(chrome.element("commentsFoot").inert, false, "the desktop margin footer is never inert");
 });
 
-// #171: a tab left open across `lavish-axi end` (or the browser's own End in another tab) must go
+// #171: a tab left open across `hilight end` (or the browser's own End in another tab) must go
 // visibly read-only the moment the server tells it, instead of leaving Send enabled for feedback
 // nobody will ever poll for.
 test("chrome goes read-only when the server forwards an ended SSE event (#171)", async () => {
@@ -7072,7 +7072,7 @@ test("chrome renders queued-prompt attachment thumbnails from the server endpoin
 });
 
 test("a queued prompt over the thumbnail limit shows the hidden images as a +N badge (W-A)", async () => {
-  // LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT is configurable, so a prompt can legitimately
+  // HILIGHT_MAX_ATTACHMENTS_PER_PROMPT is configurable, so a prompt can legitimately
   // carry more images than the compact bubble can show. The overflow must be counted, not
   // silently dropped - otherwise the queue looks like it lost the extra attachments.
   const chrome = await createChromeHarness();
@@ -7361,7 +7361,7 @@ test("a load that recovers after the failure card retires it even when the gate 
     await exhaustOneBeginLoadAttempt(chrome);
   }
   assert.equal(chrome.element("layoutGateOverlay").hidden, false);
-  assert.equal(chrome.element("layoutGateTitle").textContent, "Lavish could not load this artifact.");
+  assert.equal(chrome.element("layoutGateTitle").textContent, "Hilight could not load this artifact.");
 
   // An explicit reload-artifact action is a fresh attempt, and the harness answers it. The card
   // must come down even though the bypass keeps startLayoutGateCycle from running its body.
@@ -8704,14 +8704,14 @@ test("a reconnect does not retire the banner a server replacement raised", async
   const banner = chrome.element("outdatedBanner");
   chrome.webSocket().listeners.get("chrome-outdated")({ data: JSON.stringify({ reason: "upgrade" }) });
   assert.equal(banner.hidden, false);
-  assert.match(chrome.element("outdatedText").textContent, /Lavish was updated/);
+  assert.match(chrome.element("outdatedText").textContent, /Hilight was updated/);
 
   // The server really was replaced; reconnecting to its successor does not make that untrue, and
   // the page is still running the previous chrome.
   dropLiveStream(chrome, LIVE_EVENT_RECONNECT_DELAYS_MS[0]);
   recoverLiveStream(chrome);
   assert.equal(banner.hidden, false);
-  assert.match(chrome.element("outdatedText").textContent, /Lavish was updated/);
+  assert.match(chrome.element("outdatedText").textContent, /Hilight was updated/);
 });
 
 // ---------------------------------------------------------------------------
@@ -9312,34 +9312,34 @@ async function sendDocumentMeta(chrome, meta, { token = chrome.artifactLoadToken
 
 test("a page can set the tab title and icon after it loaded", async () => {
   const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html" });
-  assert.deepEqual(chrome.tab(), { title: "Plan \u00b7 Lavish", icon: SERVED_TAB_ICON });
+  assert.deepEqual(chrome.tab(), { title: "Plan \u00b7 Hilight", icon: SERVED_TAB_ICON });
   await sendDocumentMeta(chrome, { title: "(2) Agent canvas", icon: PAGE_ICON });
-  assert.deepEqual(chrome.tab(), { title: "(2) Agent canvas \u00b7 Lavish", icon: PAGE_ICON });
+  assert.deepEqual(chrome.tab(), { title: "(2) Agent canvas \u00b7 Hilight", icon: PAGE_ICON });
 });
 
 test("a field the page leaves out stays as it was", async () => {
   const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html" });
   await sendDocumentMeta(chrome, { title: "Only title" });
-  assert.deepEqual(chrome.tab(), { title: "Only title \u00b7 Lavish", icon: SERVED_TAB_ICON });
+  assert.deepEqual(chrome.tab(), { title: "Only title \u00b7 Hilight", icon: SERVED_TAB_ICON });
   await sendDocumentMeta(chrome, { icon: PAGE_ICON });
-  assert.deepEqual(chrome.tab(), { title: "Only title \u00b7 Lavish", icon: PAGE_ICON });
+  assert.deepEqual(chrome.tab(), { title: "Only title \u00b7 Hilight", icon: PAGE_ICON });
 });
 
 test("null puts back the title and icon the tab loaded with", async () => {
   const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html" });
   await sendDocumentMeta(chrome, { title: "Changed", icon: PAGE_ICON });
   await sendDocumentMeta(chrome, { title: null, icon: null });
-  assert.deepEqual(chrome.tab(), { title: "Plan \u00b7 Lavish", icon: SERVED_TAB_ICON });
+  assert.deepEqual(chrome.tab(), { title: "Plan \u00b7 Hilight", icon: SERVED_TAB_ICON });
 });
 
 test("the tab title is flattened, trimmed and capped; a blank one restores the load-time title", async () => {
   const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html" });
   await sendDocumentMeta(chrome, { title: "  two\n\tlines\u0000 here  " });
-  assert.equal(chrome.tab().title, "two lines here \u00b7 Lavish");
+  assert.equal(chrome.tab().title, "two lines here \u00b7 Hilight");
   await sendDocumentMeta(chrome, { title: "x".repeat(500) });
-  assert.equal(chrome.tab().title, "x".repeat(120) + " \u00b7 Lavish");
+  assert.equal(chrome.tab().title, "x".repeat(120) + " \u00b7 Hilight");
   await sendDocumentMeta(chrome, { title: " \n " });
-  assert.equal(chrome.tab().title, "Plan \u00b7 Lavish");
+  assert.equal(chrome.tab().title, "Plan \u00b7 Hilight");
 });
 
 for (const [label, icon] of [
@@ -9353,7 +9353,7 @@ for (const [label, icon] of [
   test(`the tab icon refuses ${label}`, async () => {
     const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html" });
     await sendDocumentMeta(chrome, { icon, title: "still applies" });
-    assert.deepEqual(chrome.tab(), { title: "still applies \u00b7 Lavish", icon: SERVED_TAB_ICON });
+    assert.deepEqual(chrome.tab(), { title: "still applies \u00b7 Hilight", icon: SERVED_TAB_ICON });
   });
 }
 
@@ -9368,7 +9368,7 @@ test("a document-meta message without the current load token is ignored", async 
   const chrome = await createChromeHarness({ artifactSrc: "/artifact/abc/index.html" });
   await sendDocumentMeta(chrome, { title: "stale", icon: PAGE_ICON }, { token: "an-old-load" });
   await sendDocumentMeta(chrome, { title: "tokenless" }, { token: "" });
-  assert.deepEqual(chrome.tab(), { title: "Plan \u00b7 Lavish", icon: SERVED_TAB_ICON });
+  assert.deepEqual(chrome.tab(), { title: "Plan \u00b7 Hilight", icon: SERVED_TAB_ICON });
 });
 
 test("a window that is not the artifact frame cannot set the tab", async () => {
@@ -9380,7 +9380,7 @@ test("a window that is not the artifact frame cannot set the tab", async () => {
       data: { type: "lavish:documentMeta", artifact_load_token: chrome.artifactLoadToken(), title: "spoof" },
     });
   }
-  assert.equal(chrome.tab().title, "Plan \u00b7 Lavish");
+  assert.equal(chrome.tab().title, "Plan \u00b7 Hilight");
 });
 
 test("thread anchor messages never expose reviewer writing to the artifact", async () => {

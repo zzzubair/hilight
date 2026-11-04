@@ -534,7 +534,7 @@ export function createArtifactSdk(
   // server re-validates size and enforces the per-prompt count/byte caps at queue
   // time (see attachment-store.js), rejecting the entire send batch on a mismatch
   // so the chrome can preserve the queue and surface the correction to the user.
-  // The count cap mirrors the server's LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT, passed
+  // The count cap mirrors the server's HILIGHT_MAX_ATTACHMENTS_PER_PROMPT, passed
   // in via createSdkJs (W1); the literal 4 is only the fallback when the SDK runs
   // without that wiring (e.g. a unit-test call to createArtifactSdk).
   const ATTACHMENT_MAX_COUNT =
@@ -2104,10 +2104,10 @@ export function createArtifactSdk(
 
   // ---------------------------------------------------------------------------
   // Review-context preservation. A live reload replaces this document wholesale, so anything the
-  // user typed or answered inside it is lost unless the chrome replays it. Lavish only ever
+  // user typed or answered inside it is lost unless the chrome replays it. Hilight only ever
   // replays state it owns: an open annotation card, and controls inside a `data-lavish-question`
-  // scope (the documented Lavish input contract). Application-owned form state is left alone
-  // because Lavish cannot tell an intentional reset from a preserved answer.
+  // scope (the documented Hilight input contract). Application-owned form state is left alone
+  // because Hilight cannot tell an intentional reset from a preserved answer.
   // ---------------------------------------------------------------------------
 
   let activeCardContext = null;
@@ -2328,7 +2328,7 @@ export function createArtifactSdk(
     document.documentElement.appendChild(host);
 
     shadow = host.attachShadow({ mode: "open" });
-    // Keep the artifact's own key handlers from seeing, and cancelling, typing in Lavish controls.
+    // Keep the artifact's own key handlers from seeing, and cancelling, typing in Hilight controls.
     for (const type of ["keydown", "keypress", "keyup"]) {
       shadow.addEventListener(type, (event) => event.stopPropagation());
     }
@@ -2549,7 +2549,7 @@ export function createArtifactSdk(
         else closeCard();
       }
     });
-    // Unsent annotation text is review context Lavish owns, so it is reported to the chrome and
+    // Unsent annotation text is review context Hilight owns, so it is reported to the chrome and
     // replayed after a live reload.
     textarea.addEventListener("input", scheduleReviewStateReport);
     if (typeof options.restoreText === "string") {
@@ -2594,7 +2594,7 @@ export function createArtifactSdk(
     snapshot,
   };
 
-  // Margin comment highlights are overlays inside Lavish's excluded shadow root. They never wrap or
+  // Margin comment highlights are overlays inside Hilight's excluded shadow root. They never wrap or
   // modify artifact text, and a text range must still match its saved selection exactly.
   let threadAnchors = [];
   let threadPositions = [];
@@ -2823,7 +2823,7 @@ export function createArtifactSdk(
     }
   });
 
-  // Bring a warning's element into view and flash it. The marker is Lavish UI, so it is excluded
+  // Bring a warning's element into view and flash it. The marker is Hilight UI, so it is excluded
   // from the layout audit and never becomes a finding of its own.
   let clearRevealMarker = () => {};
   function revealElement(selector) {
@@ -3003,7 +3003,7 @@ export function createArtifactSdk(
   // Report the agent-declared revision registry so the chrome can offer its
   // legend. Read-only: the SDK never marks up the page for it, because a
   // highlight painted here would make the served artifact differ from the file
-  // opened without Lavish. The message is sent even when the artifact declares
+  // opened without Hilight. The message is sent even when the artifact declares
   // nothing, so a reload that removed the registry clears a stale legend.
   function reportArtifactRevisions() {
     let payload = { revisions: [], marks: [] };

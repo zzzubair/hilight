@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 import { isVersionOnlyArgv, VERSION } from "../src/cli.js";
 
 const execFileAsync = promisify(execFile);
-const BIN = fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/hilight.js", import.meta.url));
 
 // Accepts the telemetry connection and never answers, so a regression pays the whole
 // drain timeout instead of a fast connection refusal.
@@ -61,10 +61,10 @@ test("--version prints the version fast and skips telemetry and state-dir init",
 
   const env = {
     ...process.env,
-    LAVISH_AXI_STATE_DIR: stateDir,
-    LAVISH_AXI_TELEMETRY: "1",
-    LAVISH_AXI_UMAMI_WEBSITE_ID: "version-fast-path-test",
-    LAVISH_AXI_UMAMI_HOST: telemetry.host,
+    HILIGHT_STATE_DIR: stateDir,
+    HILIGHT_TELEMETRY: "1",
+    HILIGHT_UMAMI_WEBSITE_ID: "version-fast-path-test",
+    HILIGHT_UMAMI_HOST: telemetry.host,
   };
 
   for (const flag of ["--version", "-v", "-V"]) {
@@ -91,10 +91,10 @@ test("a non-version invocation still runs the telemetry init the fast path skips
   await execFileAsync(process.execPath, [BIN, "design"], {
     env: {
       ...process.env,
-      LAVISH_AXI_STATE_DIR: stateDir,
-      LAVISH_AXI_TELEMETRY: "1",
-      LAVISH_AXI_UMAMI_WEBSITE_ID: "version-fast-path-test",
-      LAVISH_AXI_UMAMI_HOST: telemetry.host,
+      HILIGHT_STATE_DIR: stateDir,
+      HILIGHT_TELEMETRY: "1",
+      HILIGHT_UMAMI_WEBSITE_ID: "version-fast-path-test",
+      HILIGHT_UMAMI_HOST: telemetry.host,
     },
   });
 
