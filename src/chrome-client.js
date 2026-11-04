@@ -4720,6 +4720,17 @@ function positionThreads() {
   for (let i = pivot - 1; i >= 0; i--) {
     tops[i] = Math.min(desired[i], tops[i + 1] - THREAD_CARD_GAP - items[i].height);
   }
+  // Cards whose anchors are on screen never sit under the pinned Send button: the bottom of the
+  // stack is lifted above it (and cards above are lifted with it), like the page-bar floor on top.
+  const ceiling = (comments.clientHeight || 0) - (commentsFoot.offsetHeight || 0) - THREAD_CARD_GAP;
+  if (ceiling > floor) {
+    let limit = ceiling;
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].anchor >= ceiling) continue;
+      if (tops[i] + items[i].height > limit) tops[i] = limit - items[i].height;
+      limit = tops[i] - THREAD_CARD_GAP;
+    }
+  }
   items.forEach((item, i) => {
     item.el.classList.toggle("is-compact", item.compact);
     item.el.style.transform = "translateY(" + Math.round(tops[i]) + "px)";
