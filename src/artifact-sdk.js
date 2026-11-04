@@ -2745,7 +2745,12 @@ export function createArtifactSdk(
     const clicked = forClick ? annotationTargetEl(event.target) : null;
     for (const position of threadPositions) {
       if (!position.rects.length) continue;
-      const hit = forClick && position.element ? clicked === position.element : pointInRects(event, position.rects);
+      // Text-range threads have no element, so a click falls back to the highlighted rects; a click
+      // on a child of a commented element (a <b> inside a card) still counts as that element.
+      const hit =
+        forClick && position.element
+          ? clicked === position.element || position.element.contains(event.target)
+          : pointInRects(event, position.rects);
       if (!hit) continue;
       for (const rect of position.rects) {
         const candidateArea = rect.width * rect.height;
@@ -2774,11 +2779,13 @@ export function createArtifactSdk(
   document.addEventListener(
     "click",
     (event) => {
-      if (!annotationMode || !threadPositions.length || window.getSelection()?.toString().trim()) return;
+      if (!threadPositions.length || window.getSelection()?.toString().trim()) return;
       const id = threadAtPoint(event, true);
       if (!id) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      if (annotationMode) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
       postArtifactMessage("lavish:focusThread", { id });
     },
     true,
@@ -2814,6 +2821,7 @@ export function createArtifactSdk(
       if (anchor) revealElement(anchor.selector);
     }
     if (msg.type === "lavish:revealElement") revealElement(msg.selector);
+    if (msg.type === "lavish:scrollBy") window.scrollBy({ top: Number(msg.dy) || 0, left: 0, behavior: "instant" });
     if (msg.type === "lavish:queuedAnchors") {
       queuedAnchorSelectors = new Set(Array.isArray(msg.selectors) ? msg.selectors.map(String) : []);
     }

@@ -1502,6 +1502,21 @@ function postToFrame(message) {
   if (frame.contentWindow) frame.contentWindow.postMessage(message, "*");
 }
 
+// The margin cards ride the artifact's scroll, so a wheel over the comments column scrolls the
+// page under them. Inner scrollers (an open thread's messages, a textarea) keep their own wheel.
+comments.addEventListener(
+  "wheel",
+  (event) => {
+    if (isMobileSheet()) return;
+    for (let el = /** @type {Element | null} */ (event.target); el && el !== comments; el = el.parentElement) {
+      if (el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) return;
+    }
+    event.preventDefault();
+    postToFrame({ type: "lavish:scrollBy", dy: event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY });
+  },
+  { passive: false },
+);
+
 function requestSnapshot(action, prompts = [], endAfter = false, terminal = null) {
   const requestId = "snapshot-" + ++nextSnapshotRequestId;
   const request =
@@ -4704,6 +4719,19 @@ function positionThreads() {
   }
   for (let i = pivot - 1; i >= 0; i--) {
     tops[i] = Math.min(desired[i], tops[i + 1] - THREAD_CARD_GAP - items[i].height);
+  }
+  // Cards whose anchors are on screen never sit under the pinned Send button: the bottom of the
+  // stack is lifted above it (and cards above are lifted with it), like the page-bar floor on top.
+  const ceiling = (comments.clientHeight || 0) - (commentsFoot.offsetHeight || 0) - THREAD_CARD_GAP;
+  if (ceiling > floor) {
+    let limit = ceiling;
+    for (let i = items.length - 1; i >= 0; i--) {
+      // Anchors below the button line but still on screen (the last line of a page) lift too, and
+      // the open card always does, so the card being typed in is never under the button.
+      if (!items[i].open && items[i].anchor >= (comments.clientHeight || 0)) continue;
+      if (tops[i] + items[i].height > limit) tops[i] = limit - items[i].height;
+      limit = tops[i] - THREAD_CARD_GAP;
+    }
   }
   items.forEach((item, i) => {
     item.el.classList.toggle("is-compact", item.compact);
