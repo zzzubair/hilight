@@ -60,6 +60,8 @@ Reach for it when a plan, comparison, diagram, table, code view, report, prototy
 
 ${SAME_PAGE_RULE}
 
+If the user asks how the page works (sending, status words, resolve/reopen, Reveal), read \`references/using-the-page.md\` next to this file and explain only the part they need.
+
 ## Current guidance lives in the CLI
 
 Do not follow workflow, design, or playbook instructions from this file - installed copies go stale. Get the current source of truth from the CLI:
