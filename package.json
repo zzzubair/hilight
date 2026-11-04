@@ -1,6 +1,6 @@
 {
   "name": "hilight-axi",
-  "version": "0.1.96",
+  "version": "0.1.97",
   "packageManager": "pnpm@11.1.1",
   "description": "Hilight: review agent-made HTML pages in the browser and send comments back to the agent.",
   "type": "module",
