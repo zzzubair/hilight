@@ -16,6 +16,8 @@ Reach for it when a plan, comparison, diagram, table, code view, report, prototy
 
 One page per topic: keep discussing in the same HTML file and session through comment threads and chat, and edit that file in place, marking changed blocks with the revisions registry. Never create a new HTML file or session for a follow-up unless the user explicitly asks for a new page.
 
+If the user asks how the page works (sending, status words, resolve/reopen, Reveal), read `references/using-the-page.md` next to this file and explain only the part they need.
+
 ## Current guidance lives in the CLI
 
 Do not follow workflow, design, or playbook instructions from this file - installed copies go stale. Get the current source of truth from the CLI:
