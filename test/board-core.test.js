@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   cardElementId,
+  codeColumns,
+  codeChromeWidth,
   codeLinesUnder,
+  codeRows,
   CODE_CARD_LAYOUT,
   createCardElement,
   diffCodeLines,
@@ -205,4 +208,46 @@ test("data-to connectors are drawn from the file, bound to both cards, and never
     { id: "link:cli>server", type: "arrow" },
   ]);
   assert.deepEqual(summarizeBoardMarks(board, elements).lines, []);
+});
+
+test("codeRows wraps a long line at a word boundary, keeps its indent, and marks continuations", () => {
+  const rows = codeRows(["short", "    return someFunction(alpha, beta, gamma) + another(delta);"], 40);
+  assert.deepEqual(
+    rows.map((row) => [row.index, row.cont, row.text]),
+    [
+      [0, false, "short"],
+      [1, false, "    return someFunction(alpha, beta, "],
+      [1, true, "      gamma) + another(delta);"],
+    ],
+  );
+  assert.ok(rows.every((row) => row.text.length <= 40));
+  // Tabs expand before measuring, so a tabbed line wraps where it is drawn.
+  assert.equal(codeRows(["\tx"], 40)[0].text, "    x");
+});
+
+test("codeColumns sizes a card to its longest line within the column limits", () => {
+  assert.equal(codeColumns(["a".repeat(30)]), CODE_CARD_LAYOUT.minCols);
+  assert.equal(codeColumns(["a".repeat(70)]), 70);
+  assert.equal(codeColumns(["a".repeat(300)]), CODE_CARD_LAYOUT.maxCols);
+  // A width from the file is a ceiling, never a reason to grow.
+  assert.equal(codeColumns(["a".repeat(70)], 400), Math.floor((400 - codeChromeWidth()) / CODE_CARD_LAYOUT.char));
+  assert.equal(codeColumns(["a".repeat(50)], 2000), 50);
+});
+
+test("codeLinesUnder maps wrapped rows back to their source line", () => {
+  const card = {
+    note: "",
+    code: { path: "src/a.js", start: 10, end: 12, cols: 40, lines: ["one", "x".repeat(100), "three"] },
+  };
+  const top = CODE_CARD_LAYOUT.header + CODE_CARD_LAYOUT.padTop;
+  const rect = { y: 0, h: 1000 };
+  // Rows: 0 -> line 10, 1..3 -> line 11 (wrapped), 4 -> line 12.
+  assert.deepEqual(
+    codeLinesUnder(card, rect, top + 3 * CODE_CARD_LAYOUT.line + 2, top + 4 * CODE_CARD_LAYOUT.line + 5),
+    {
+      start: 11,
+      end: 12,
+      path: "src/a.js",
+    },
+  );
 });

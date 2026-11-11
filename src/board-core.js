@@ -17,7 +17,93 @@ export const CARD_LINK_PREFIX = "https://hilight.invalid/card/";
 
 // Code-card geometry, shared with the frame's renderer so a mark drawn over a
 // code card can be mapped back to the source lines under it.
-export const CODE_CARD_LAYOUT = Object.freeze({ header: 46, note: 30, padTop: 8, line: 18 });
+// Geometry of a code card, shared by the server (card size), the renderer, and
+// the mark summary (which source line sits under a mark). Code is 13px
+// monospace; `char` is a slightly generous advance so a row never overflows.
+export const CODE_CARD_LAYOUT = Object.freeze({
+  header: 52,
+  note: 30,
+  padTop: 8,
+  padBottom: 12,
+  line: 20,
+  gutter: 48,
+  padRight: 16,
+  char: 8,
+  minCols: 48,
+  maxCols: 100,
+  tab: 4,
+});
+
+/** Horizontal space a code card needs besides its code columns. */
+export function codeChromeWidth() {
+  return CODE_CARD_LAYOUT.gutter + CODE_CARD_LAYOUT.padRight + 2;
+}
+
+function expandTabs(line) {
+  let out = "";
+  for (const char of String(line)) {
+    if (char === "\t") out += " ".repeat(CODE_CARD_LAYOUT.tab - (out.length % CODE_CARD_LAYOUT.tab));
+    else out += char;
+  }
+  return out.replace(/\s+$/, "");
+}
+
+/**
+ * How many code columns a card shows: its longest line, kept between the
+ * column limits. A width from the file is a ceiling, never a reason to grow.
+ * @param {string[]} lines
+ * @param {number | null} [maxWidth]
+ */
+export function codeColumns(lines, maxWidth = null) {
+  const longest = Math.max(0, ...(lines || []).map((line) => expandTabs(line).length));
+  let cols = Math.min(Math.max(longest, CODE_CARD_LAYOUT.minCols), CODE_CARD_LAYOUT.maxCols);
+  if (Number.isFinite(maxWidth) && maxWidth > 0) {
+    const ceiling = Math.floor((maxWidth - codeChromeWidth()) / CODE_CARD_LAYOUT.char);
+    cols = Math.min(cols, Math.max(ceiling, 16));
+  }
+  return cols;
+}
+
+/** Card width for a number of code columns. */
+export function codeCardWidth(cols) {
+  return Math.ceil(codeChromeWidth() + cols * CODE_CARD_LAYOUT.char);
+}
+
+/**
+ * Split source lines into the rows a code card draws. A line longer than
+ * `cols` wraps, preferring a space near the end of the row; continuation rows
+ * keep the line's indent plus two and are flagged so the card can mark them.
+ * Character counts decide the rows, so the server's card height, the drawn rows,
+ * and the line under a mark always agree.
+ * @param {string[]} lines
+ * @param {number} cols
+ * @returns {{ index: number, cont: boolean, text: string }[]}
+ */
+export function codeRows(lines, cols) {
+  const width = Number.isFinite(cols) && cols > 0 ? Math.max(8, Math.floor(cols)) : Infinity;
+  const rows = [];
+  (lines || []).forEach((raw, index) => {
+    const line = expandTabs(raw);
+    if (line.length <= width) {
+      rows.push({ index, cont: false, text: line });
+      return;
+    }
+    const indent = Math.min((/^ */.exec(line)?.[0].length || 0) + 2, Math.floor(width / 2));
+    let rest = line;
+    let room = width;
+    let prefix = "";
+    while (rest.length > room) {
+      let cut = rest.lastIndexOf(" ", room - 1) + 1;
+      if (cut <= Math.floor(room * 0.6)) cut = room;
+      rows.push({ index, cont: prefix !== "", text: prefix + rest.slice(0, cut) });
+      rest = rest.slice(cut);
+      prefix = " ".repeat(indent);
+      room = width - indent;
+    }
+    if (rest.length) rows.push({ index, cont: prefix !== "", text: prefix + rest });
+  });
+  return rows;
+}
 
 const NEAR_PX = 48;
 const MAX_SUMMARY_LINES = 40;
@@ -90,10 +176,10 @@ export function createLinkElements(cards, cardElements) {
           [end.x - start.x, end.y - start.y],
         ],
         angle: 0,
-        strokeColor: "#9a998f",
+        strokeColor: "#6f6e69",
         backgroundColor: "transparent",
         fillStyle: "solid",
-        strokeWidth: 1.5,
+        strokeWidth: 2,
         strokeStyle: "solid",
         roughness: 0,
         opacity: 100,
@@ -298,12 +384,13 @@ function cardName(card) {
 export function codeLinesUnder(card, cardRect, y1, y2, scrollTop = 0) {
   const code = card?.code;
   if (!code || !Array.isArray(code.lines) || !code.lines.length) return null;
+  const rows = codeRows(code.lines, code.cols);
   const top = cardRect.y + CODE_CARD_LAYOUT.header + (card.note ? CODE_CARD_LAYOUT.note : 0) + CODE_CARD_LAYOUT.padTop;
   const first = Math.floor((Math.max(y1, top) - top + scrollTop) / CODE_CARD_LAYOUT.line);
   const last = Math.floor((Math.min(y2, cardRect.y + cardRect.h) - top + scrollTop) / CODE_CARD_LAYOUT.line);
-  if (last < 0 || first > code.lines.length - 1 || last < first) return null;
-  const from = Math.max(0, first);
-  const to = Math.min(code.lines.length - 1, last);
+  if (last < 0 || first > rows.length - 1 || last < first) return null;
+  const from = rows[Math.max(0, first)].index;
+  const to = rows[Math.min(rows.length - 1, last)].index;
   return { start: code.start + from, end: code.start + to, path: code.path };
 }
 

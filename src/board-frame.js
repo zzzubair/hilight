@@ -33,6 +33,7 @@ import "./board-frame.css";
 import {
   CARD_LINK_PREFIX,
   CODE_CARD_LAYOUT,
+  codeRows,
   cardElementId,
   cardIdOfElement,
   diffCodeLines,
@@ -311,18 +312,27 @@ export function startBoard(init, { post }) {
     }
     const changed =
       code.status === "stale" && code.snapshot ? new Set(diffCodeLines(code.snapshot, code.lines).changed) : null;
+    // Rows come from codeRows, the same split the server sized the card with, so
+    // long lines wrap (marked with a hook) instead of being clipped at the edge.
     return h(
       "div",
       { className: "bd-code", style: { paddingTop: CODE_CARD_LAYOUT.padTop + "px" } },
-      code.lines.map((line, index) =>
+      codeRows(code.lines, code.cols).map((row, index) =>
         h(
           "div",
-          { key: index, className: "bd-line" + (changed?.has(index) ? " is-changed" : "") },
-          h("span", { className: "bd-ln" }, String(code.start + index)),
+          {
+            key: index,
+            className: "bd-line" + (changed?.has(row.index) ? " is-changed" : "") + (row.cont ? " is-cont" : ""),
+          },
+          h(
+            "span",
+            { className: "bd-ln", style: { width: CODE_CARD_LAYOUT.gutter + "px" } },
+            row.cont ? "\u21aa" : String(code.start + row.index),
+          ),
           h(
             "span",
             { className: "bd-src" },
-            tokenize(line, code.lang).map(([cls, text], part) =>
+            tokenize(row.text, code.lang).map(([cls, text], part) =>
               cls ? h("span", { key: part, className: "t" + cls }, text) : text,
             ),
           ),
@@ -391,7 +401,15 @@ export function startBoard(init, { post }) {
             h(StatusPill, { code }),
           )
         : card.kind === "board"
-          ? h("div", { className: "bd-meta" }, `Board · ${card.board?.count || 0} cards`)
+          ? h(
+              "div",
+              { className: "bd-meta" },
+              h(
+                "span",
+                { className: "bd-pill is-board" },
+                `Board · ${card.board?.count || 0} card${card.board?.count === 1 ? "" : "s"}`,
+              ),
+            )
           : null;
     return h(
       "div",
@@ -649,7 +667,7 @@ export function startBoard(init, { post }) {
       captureUpdate: CaptureUpdateAction.NEVER,
     });
     s.api.history?.clear?.();
-    if (!view) fitAll();
+    if (!view) openingView();
     renderCrumbs();
     notifyCards();
     editor.classList.remove("is-switching");
@@ -659,32 +677,65 @@ export function startBoard(init, { post }) {
     scheduleSave();
   }
 
-  // Fit the level with a margin, never past 100%, and sit the content slightly low
-  // so the top row clears Excalidraw's floating toolbar. Computed in one update:
-  // scrollToContent applies its state later, so it cannot be adjusted afterwards.
-  function fitAll() {
-    if (!s.api) return;
-    const elements = s.api.getSceneElements();
-    if (!elements.length) return;
-    const [minX, minY, maxX, maxY] = getCommonBounds(elements);
+  // Space Excalidraw's floating toolbar takes at the top of the canvas.
+  const TOOLBAR_SPACE = 56;
+  // The smallest zoom where card text stays readable (13px body text renders at
+  // about 12px), used for the first view of a level.
+  const READABLE_ZOOM = 0.93;
+
+  function fitZoom([minX, minY, maxX, maxY]) {
     const { width, height } = s.api.getAppState();
-    const toolbar = 56;
-    const zoom = Math.max(
+    return Math.max(
       0.1,
       Math.min(
         1,
         ((width - 48) / Math.max(1, maxX - minX)) * 0.94,
-        ((height - toolbar - 48) / Math.max(1, maxY - minY)) * 0.94,
+        ((height - TOOLBAR_SPACE - 48) / Math.max(1, maxY - minY)) * 0.94,
       ),
     );
+  }
+
+  function setView(zoom, scrollX, scrollY) {
     s.api.updateScene({
-      appState: {
-        zoom: { value: zoom },
-        scrollX: width / 2 / zoom - (minX + maxX) / 2,
-        scrollY: (height + toolbar) / 2 / zoom - (minY + maxY) / 2,
-      },
+      appState: { zoom: { value: zoom }, scrollX, scrollY },
       captureUpdate: CaptureUpdateAction.NEVER,
     });
+  }
+
+  // Fit the whole level with a margin, never past 100%, sitting slightly low so
+  // the top row clears the toolbar. Computed in one update: scrollToContent
+  // applies its state later, so it cannot be adjusted afterwards.
+  function fitAll() {
+    if (!s.api) return;
+    const elements = s.api.getSceneElements();
+    if (!elements.length) return;
+    const bounds = getCommonBounds(elements);
+    const [minX, minY, maxX, maxY] = bounds;
+    const { width, height } = s.api.getAppState();
+    const zoom = fitZoom(bounds);
+    setView(zoom, width / 2 / zoom - (minX + maxX) / 2, (height + TOOLBAR_SPACE) / 2 / zoom - (minY + maxY) / 2);
+  }
+
+  // The first view of a level is one a person can read: the whole level when it
+  // fits at a readable zoom, otherwise its top row of cards at a readable zoom,
+  // starting from the left. Fit still shows everything.
+  function openingView() {
+    if (!s.api) return;
+    const elements = s.api.getSceneElements();
+    const cards = elements.filter(isCardElement);
+    if (!cards.length || fitZoom(getCommonBounds(elements)) >= READABLE_ZOOM) {
+      fitAll();
+      return;
+    }
+    const top = Math.min(...cards.map((card) => card.y));
+    const row = cards.filter((card) => card.y < top + 80);
+    const [minX, minY, maxX] = getCommonBounds(row);
+    const { width } = s.api.getAppState();
+    const margin = 32;
+    const zoom = Math.min(1, Math.max(READABLE_ZOOM, (width - margin * 2) / Math.max(1, maxX - minX)));
+    const scrollX =
+      (maxX - minX) * zoom <= width - margin * 2 ? width / 2 / zoom - (minX + maxX) / 2 : margin / zoom - minX;
+    setView(zoom, scrollX, (TOOLBAR_SPACE + margin) / zoom - minY);
   }
 
   async function revealCard(cardId) {
@@ -869,7 +920,7 @@ export function startBoard(init, { post }) {
         if (!view) {
           window.setTimeout(() => {
             try {
-              fitAll();
+              openingView();
             } catch {
               // Cosmetic.
             }

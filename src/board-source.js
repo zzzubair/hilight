@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { parse, serializeOuter } from "parse5";
 
-import { CODE_CARD_LAYOUT } from "./board-core.js";
+import { CODE_CARD_LAYOUT, codeCardWidth, codeColumns, codeRows } from "./board-core.js";
 
 // Server-side reading of a board artifact: one HTML file whose
 // `[data-hilight-board]` element holds `[data-card]` sections. The file on
@@ -272,6 +272,7 @@ export function parseBoardHtml(html) {
         w: finiteAttr(node, "data-w"),
         h: finiteAttr(node, "data-h"),
         has_id: Boolean(attr(node, "id")),
+        placed: finiteAttr(node, "data-x") !== null && finiteAttr(node, "data-y") !== null,
         to: String(attr(node, "data-to") || "")
           .split(/\s+/)
           .filter(Boolean)
@@ -305,48 +306,82 @@ export function parseBoardHtml(html) {
     }
   };
   visitLevel(root, "");
-  for (const level of levels) {
-    layoutLevel(cards.filter((card) => card.level === level.id));
-  }
-  for (const card of cards) {
-    if (card.kind !== "board") continue;
-    const children = cards.filter((child) => child.level === card.id);
-    card.board = { count: children.length, preview: previewRects(children) };
-  }
-  return {
+  const board = {
     title: rootTitle,
     head: headHtml(document),
     main_attrs: wrapperAttrs(root),
     levels,
     cards,
   };
+  layoutBoard(board);
+  return board;
 }
 
-// A code card is always exactly as tall as its pinned range, so every line is
-// on the canvas (no inner scrolling) and a mark drawn over the card maps back
-// to the source lines under it (CODE_CARD_LAYOUT, shared with the renderer).
+// Size and place every card, then refresh the nested-board previews. Safe to
+// run again once live code is read: sizes derive from fixed inputs and only
+// cards the file did not place are moved.
+function layoutBoard(board) {
+  for (const level of board.levels) {
+    layoutLevel(board.cards.filter((card) => card.level === level.id));
+  }
+  for (const card of board.cards) {
+    if (card.kind !== "board") continue;
+    const children = board.cards.filter((child) => child.level === card.id);
+    card.board = { count: children.length, preview: previewRects(children) };
+  }
+}
+
+// A code card is always exactly as tall as the rows it draws (long lines wrap,
+// see codeRows), so every line is on the canvas with no inner scrolling and a
+// mark drawn over the card maps back to the source lines under it.
 export function codeCardHeight(card) {
-  const lines = card.code && !card.code.error ? Math.min(card.code.end - card.code.start + 1, MAX_CODE_CARD_LINES) : 3;
+  const code = card.code;
+  let rows = 3;
+  if (code && !code.error) {
+    const lines = code.lines?.length ? code.lines : code.snapshot?.length ? code.snapshot : null;
+    rows = lines
+      ? codeRows(lines.slice(0, MAX_CODE_CARD_LINES), code.cols).length
+      : Math.min(code.end - code.start + 1, MAX_CODE_CARD_LINES);
+  }
   return (
     CODE_CARD_LAYOUT.header +
     (card.note ? CODE_CARD_LAYOUT.note : 0) +
     CODE_CARD_LAYOUT.padTop +
-    lines * CODE_CARD_LAYOUT.line +
-    14
+    Math.max(rows, 1) * CODE_CARD_LAYOUT.line +
+    CODE_CARD_LAYOUT.padBottom
   );
+}
+
+// A code card is as wide as its longest line within the column limits; a
+// data-w in the file is a ceiling, so the card can shrink but never overlap.
+function sizeCodeCard(card) {
+  if (card.max_w === undefined) card.max_w = card.w;
+  const code = card.code;
+  if (!code || (code.error && !code.lines?.length)) {
+    card.w = card.max_w ?? DEFAULT_SIZE.code.w;
+  } else {
+    const lines = code.lines?.length ? code.lines : code.snapshot || [];
+    code.cols = codeColumns(lines.slice(0, MAX_CODE_CARD_LINES), card.max_w);
+    card.w = codeCardWidth(code.cols);
+  }
+  card.h = codeCardHeight(card);
 }
 
 // Cards without explicit positions flow into a three-column grid after any
 // explicitly placed cards, so an agent can write a board without coordinates.
 export function layoutLevel(cards) {
   for (const card of cards) {
+    if (card.kind === "code") {
+      sizeCodeCard(card);
+      continue;
+    }
     if (card.w === null || card.w <= 0) card.w = DEFAULT_SIZE[card.kind].w;
     if (card.h === null || card.h <= 0) card.h = DEFAULT_SIZE[card.kind].h;
     card.w = Math.min(Math.max(card.w, 160), 2400);
-    card.h = card.kind === "code" ? codeCardHeight(card) : Math.min(Math.max(card.h, 100), 2400);
+    card.h = Math.min(Math.max(card.h, 100), 2400);
   }
-  const placed = cards.filter((card) => card.x !== null && card.y !== null);
-  const floating = cards.filter((card) => card.x === null || card.y === null);
+  const placed = cards.filter((card) => card.placed);
+  const floating = cards.filter((card) => !card.placed);
   let originY = placed.length ? Math.max(...placed.map((card) => card.y + card.h)) + GRID_GAP * 2 : 0;
   const originX = placed.length ? Math.min(...placed.map((card) => card.x)) : 0;
   for (let index = 0; index < floating.length; index += GRID_COLUMNS) {
@@ -543,6 +578,8 @@ export async function readBoard(boardFile, html) {
       ...(result.snapshot ? { snapshot: result.snapshot.slice(0, MAX_CODE_CARD_LINES) } : {}),
     };
   }
+  // Live lines can wrap differently from the pinned copy, so size again.
+  layoutBoard(board);
   board.revision = crypto.createHash("sha256").update(source).digest("hex").slice(0, 16);
   board.root = path.basename(root);
   return board;

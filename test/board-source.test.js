@@ -6,12 +6,14 @@ import test from "node:test";
 
 import {
   checkCodeCard,
+  codeCardHeight,
   codeRangeHash,
   parseBoardHtml,
   parseCodeRef,
   readBoard,
   stampBoardFile,
 } from "../src/board-source.js";
+import { CODE_CARD_LAYOUT, codeCardWidth, codeRows } from "../src/board-core.js";
 
 const SOURCE = ["export function a() {", "  return 1;", "}", "", "export function b() {", "  return 2;", "}"].join(
   "\n",
@@ -201,4 +203,35 @@ test("stampBoardFile reports a moved range and --repin follows it", async (t) =>
   const repinned = await stampBoardFile(file, { repin: true });
   assert.equal(repinned?.cards[0].status, "repinned");
   assert.match(await readFile(file, "utf8"), /data-code="src\/a.js:3-5"/);
+});
+
+test("readBoard sizes code cards to their longest line and wraps past the column limit", async (t) => {
+  const long = `  const message = "${"x".repeat(150)}";`;
+  const dir = await repo(t, {
+    "src/wide.js": ["function wide() {", long, "}"].join("\n"),
+    ".hilight/board.html": board(`
+  <section id="narrow" data-card data-code="src/a.js:1-3" data-x="0" data-y="0"><h3>a()</h3></section>
+  <section id="wide" data-card data-code="src/wide.js:1-3" data-x="0" data-y="400"><h3>wide()</h3></section>
+  <section id="capped" data-card data-code="src/wide.js:1-3" data-x="900" data-y="400" data-w="420"><h3>capped</h3></section>`),
+    "src/a.js": SOURCE,
+  });
+  const model = await readBoard(path.join(dir, ".hilight/board.html"));
+  assert.ok(model);
+  const byId = Object.fromEntries(model.cards.map((card) => [card.id, card]));
+  const { char, line, maxCols, minCols } = CODE_CARD_LAYOUT;
+  // Short code takes the minimum width; long code stops at the column limit and wraps.
+  assert.equal(byId.narrow.code.cols, minCols);
+  assert.equal(byId.narrow.w, codeCardWidth(minCols));
+  assert.equal(byId.wide.code.cols, maxCols);
+  const wideRows = codeRows(byId.wide.code.lines, maxCols);
+  assert.equal(wideRows.length, 4);
+  assert.equal(byId.wide.h, codeCardHeight(byId.wide));
+  assert.ok(byId.wide.h > codeCardHeight(byId.narrow));
+  // A data-w is a ceiling: the card keeps within it and wraps sooner.
+  assert.ok(byId.capped.w <= 420);
+  assert.equal(byId.capped.code.cols, Math.floor((420 - (byId.capped.w - byId.capped.code.cols * char)) / char));
+  assert.ok(
+    codeRows(byId.capped.code.lines, byId.capped.code.cols).every((row) => row.text.length <= byId.capped.code.cols),
+  );
+  assert.equal(line, 20);
 });

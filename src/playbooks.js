@@ -391,7 +391,7 @@ export const PLAYBOOKS = [
   <section id="api" data-card data-x="0" data-y="0" data-w="380" data-h="240">
     <h2>API gateway</h2><p>Every request enters here.</p>
   </section>
-  <section id="charge" data-card data-code="src/payments/charge.ts:40-88" data-x="460" data-y="0" data-w="560" data-h="420">
+  <section id="charge" data-card data-code="src/payments/charge.ts:40-88" data-x="460" data-y="0">
     <h3>Charge path</h3><p>Idempotency key is checked before the PSP call.</p>
   </section>
   <section id="workers" data-card="board" data-x="0" data-y="320" data-w="380" data-h="220">
@@ -401,7 +401,7 @@ export const PLAYBOOKS = [
 </main>
 \`\`\``,
       "Every card is a [data-card] element with a stable id (comments anchor on it). The card's first heading becomes its title on the canvas. data-x, data-y, data-w, data-h place it in canvas pixels; cards without them flow into a grid, so add coordinates when position carries meaning (left-to-right flow, groups, layers).",
-      'A code card is data-code="path:start-end", with the path relative to the repository root. After writing or editing code cards, run `hilight board stamp <file>`: it pins each new card (data-hash plus a <pre data-snapshot> copy for the plain page). Keep the card text to one or two sentences about why these lines matter.',
+      'A code card is data-code="path:start-end", with the path relative to the repository root. After writing or editing code cards, run `hilight board stamp <file>`: it pins each new card (data-hash plus a <pre data-snapshot> copy for the plain page). Keep the card text to one or two sentences about why these lines matter. A code card sizes itself: as wide as its longest line (about 8px per character plus 70px, at most 100 columns, wrapping beyond) and as tall as its lines (20px each plus about 75px), so leave room when placing it; data-w only caps its width and data-h is ignored.',
       'A nested board is data-card="board" holding its own [data-card] children; on the canvas it shows a preview and opens one level deeper.',
     ],
     design_rules: [

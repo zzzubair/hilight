@@ -156,7 +156,7 @@
         </ol>
       </section>
 
-      <section id="trust" data-card data-x="640" data-y="0" data-w="560" data-h="300">
+      <section id="trust" data-card data-x="1740" data-y="0" data-w="560" data-h="300">
         <h2>Who may talk to whom</h2>
         <table>
           <thead>
@@ -191,7 +191,7 @@
         </table>
       </section>
 
-      <section id="canvas" data-card="board" data-x="1280" data-y="0" data-w="420" data-h="300">
+      <section id="canvas" data-card="board" data-x="640" data-y="0" data-w="420" data-h="300">
         <h2>How this canvas works</h2>
         <p>One board file, two views: a plain page without Hilight, this canvas with it.</p>
 
@@ -211,9 +211,8 @@
           data-card
           data-code="src/board-source.js:157-176"
           data-hash="5bd6b4bb3272"
-          data-x="620"
+          data-x="900"
           data-y="0"
-          data-w="600"
           data-to="check-pin"
         >
           <h3>Reading the board from disk</h3>
@@ -243,11 +242,10 @@ function cardKind(node) {
         <section
           id="check-pin"
           data-card
-          data-code="src/board-source.js:464-494"
+          data-code="src/board-source.js:499-529"
           data-hash="ef60bc72f817"
-          data-x="620"
-          data-y="520"
-          data-w="600"
+          data-x="900"
+          data-y="582"
         >
           <h3>The pin check</h3>
           <p>A changed range is stale, unless the same lines moved: then the card follows them.</p>
@@ -290,8 +288,7 @@ function cardKind(node) {
           data-code="src/artifact-sdk.js:1157-1162"
           data-hash="c1d214363489"
           data-x="0"
-          data-y="380"
-          data-w="520"
+          data-y="350"
           data-to="check-pin"
         >
           <h3>Comments follow the cards</h3>
@@ -312,7 +309,6 @@ function cardKind(node) {
         data-hash="5bc127722e9b"
         data-x="0"
         data-y="420"
-        data-w="560"
         data-to="server"
       >
         <h3>CLI starts a detached server</h3>
@@ -342,9 +338,8 @@ function cardKind(node) {
         data-card
         data-code="src/server.js:1632-1643"
         data-hash="f7b465853113"
-        data-x="640"
+        data-x="794"
         data-y="420"
-        data-w="560"
         data-to="store chrome"
       >
         <h3>Server serves the artifact</h3>
@@ -368,9 +363,8 @@ function cardKind(node) {
         data-card
         data-code="src/session-store.js:669-697"
         data-hash="9fdb828c4ee2"
-        data-x="1280"
+        data-x="1740"
         data-y="420"
-        data-w="600"
       >
         <h3>Session store hands feedback to the poll</h3>
         <p>One lock, one state file; a take drains every queued prompt.</p>
@@ -410,9 +404,8 @@ function cardKind(node) {
         data-card
         data-code="src/chrome-client.js:3841-3850"
         data-hash="c683af4d3f18"
-        data-x="640"
-        data-y="1060"
-        data-w="560"
+        data-x="794"
+        data-y="1222"
         data-to="artifact"
       >
         <h3>Chrome page trusts frames by descent</h3>
@@ -434,9 +427,8 @@ function cardKind(node) {
         data-card
         data-code="src/artifact-sdk.js:1121-1137"
         data-hash="f752b6164047"
-        data-x="1280"
-        data-y="1060"
-        data-w="600"
+        data-x="1572"
+        data-y="1222"
         data-to="whiteboard"
       >
         <h3>Artifact frame mounts this board</h3>
@@ -465,9 +457,8 @@ function cardKind(node) {
         data-card
         data-code="src/server.js:240-247"
         data-hash="67486b9761d6"
-        data-x="1960"
-        data-y="1060"
-        data-w="560"
+        data-x="2518"
+        data-y="1222"
       >
         <h3>Whiteboard frame gets a session-bound token</h3>
         <p>Signed over the session key: it opens a channel for one session only.</p>
