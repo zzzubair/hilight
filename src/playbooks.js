@@ -369,6 +369,57 @@ export const PLAYBOOKS = [
       "Use slides for persuasion or presentation, not for dense code review.",
     ],
   },
+  {
+    id: "board",
+    use_when:
+      "Lay out an answer spatially as a canvas of cards: how a system's parts connect, a guided tour of real code, or options side by side, where the reviewer pans, zooms, draws arrows, and comments",
+    choose: [
+      "Use a board when the answer is a map: parts that sit side by side and relate across the space, or real code ranges the reader should see next to the explanation. Use a page when the answer is a narrative read top to bottom.",
+      "Card kinds: an HTML card (any markup: text, a table, a small mockup), a code card pinned to a real file range, and a nested board card that opens one level deeper. Prefer 4-12 cards per level; push detail into a nested board instead of crowding one level.",
+      "Pin code instead of pasting it: a code card shows the live lines from disk and turns stale when they change, so the map cannot silently lie.",
+    ],
+    structure: [
+      `One file is the whole board. Hilight shows it as a canvas; opened without Hilight it is a plain page, so give it fallback CSS that lays cards out as a grid:
+\`\`\`html
+<style>
+  [data-hilight-board]{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:20px;padding:24px}
+  [data-card]{border:1px solid #ddd;border-radius:12px;padding:16px;background:#fff;min-width:0;overflow:auto}
+  [data-card="board"]{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+  [data-card] > :is(h2,h3){grid-column:1/-1;margin:0 0 8px}
+</style>
+<main data-hilight-board="Checkout architecture">
+  <section id="api" data-card data-x="0" data-y="0" data-w="380" data-h="240">
+    <h2>API gateway</h2><p>Every request enters here.</p>
+  </section>
+  <section id="charge" data-card data-code="src/payments/charge.ts:40-88" data-x="460" data-y="0" data-w="560" data-h="420">
+    <h3>Charge path</h3><p>Idempotency key is checked before the PSP call.</p>
+  </section>
+  <section id="workers" data-card="board" data-x="0" data-y="320" data-w="380" data-h="220">
+    <h2>Background workers</h2><p>Retries and webhooks.</p>
+    <section id="retry" data-card data-code="src/workers/retry.ts:1-30"><h3>Retry loop</h3></section>
+  </section>
+</main>
+\`\`\``,
+      "Every card is a [data-card] element with a stable id (comments anchor on it). The card's first heading becomes its title on the canvas. data-x, data-y, data-w, data-h place it in canvas pixels; cards without them flow into a grid, so add coordinates when position carries meaning (left-to-right flow, groups, layers).",
+      'A code card is data-code="path:start-end", with the path relative to the repository root. After writing or editing code cards, run `hilight board stamp <file>`: it pins each new card (data-hash plus a <pre data-snapshot> copy for the plain page). Keep the card text to one or two sentences about why these lines matter.',
+      'A nested board is data-card="board" holding its own [data-card] children; on the canvas it shows a preview and opens one level deeper.',
+    ],
+    design_rules: [
+      "Hilight draws the card frame, title, and code: style only what is inside HTML cards, and keep it calm and sparse. The board's <head> styles and scripts also load inside every HTML card.",
+      "Lay cards out so position means something: flow left to right in request order, group related cards, and leave space between groups for the reviewer's arrows and notes.",
+      "Pick ranges that fit a card: 10-60 lines that prove one point, never a whole file.",
+    ],
+    pitfalls: [
+      "Do not draw arrows or connectors into the file: the canvas belongs to the reviewer, and their arrows come back to you as feedback.",
+      "Do not paste code into an HTML card when it lives in the repository; pin it with a code card.",
+      "Do not leave cards stale after the code changes: re-read the lines, update what the card claims, then run `hilight board stamp <file> --repin`.",
+      "Do not split one board across several files; nest boards inside the one file.",
+    ],
+    lavish_notes: [
+      'Reviewer marks arrive as a tag "board" prompt that names cards by id and code by line; comments on a card arrive as ordinary threads whose target names the card and, for code cards, its range and pin status.',
+      "`hilight board check <file>` lists stale, moved, and unpinned code cards without writing.",
+    ],
+  },
 ];
 
 export function listPlaybooks() {

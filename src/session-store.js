@@ -30,6 +30,12 @@ import {
   unstampDelivery,
 } from "./chat-messages.js";
 import { normalizeMermaidNodeTarget } from "./mermaid-node.js";
+import {
+  BOARD_CANVAS_TARGET_TYPE,
+  BOARD_CARD_TARGET_TYPE,
+  normalizeBoardCanvasTarget,
+  normalizeBoardCardTarget,
+} from "./board-core.js";
 import { EXCALIDRAW_SCENE_TARGET_TYPE, normalizeExcalidrawSceneTarget } from "./whiteboard-core.js";
 
 export const LAYOUT_WARNINGS_TARGET_TYPE = "layout-warnings";
@@ -1223,6 +1229,8 @@ function normalizeTarget(target) {
   if (!target || typeof target !== "object" || Array.isArray(target)) return null;
   if (target.type === "mermaid-node") return normalizeMermaidNodeTarget(target);
   if (target.type === EXCALIDRAW_SCENE_TARGET_TYPE) return normalizeExcalidrawSceneTarget(target);
+  if (target.type === BOARD_CANVAS_TARGET_TYPE) return normalizeBoardCanvasTarget(target);
+  if (target.type === BOARD_CARD_TARGET_TYPE) return normalizeBoardCardTarget(target);
   if (target.type === LAYOUT_WARNINGS_TARGET_TYPE) return normalizeLayoutWarningsTarget(target);
   // text-range and any other/legacy target shapes pass through unchanged.
   return JSON.parse(JSON.stringify(target));

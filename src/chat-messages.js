@@ -400,6 +400,9 @@ function promptAnchor(prompt, kind) {
   if (kind === "message") return null;
   const target = prompt.target && typeof prompt.target === "object" ? prompt.target : null;
   const selector = bound(prompt.selector, SELECTOR_MAX);
+  if (kind === "whiteboard" && prompt.tag === "board") {
+    return { kind: "whiteboard", label: "board", excerpt: bound("Canvas marks", EXCERPT_MAX) };
+  }
   if (kind === "whiteboard") {
     const index = Number(target?.diagramIndex);
     const excerpt = Number.isInteger(index) && index >= 0 ? "Diagram " + (index + 1) : prompt.text;
@@ -427,6 +430,12 @@ function promptAnchor(prompt, kind) {
   if (type === "mermaid-node") {
     return withSelector(
       { kind: "node", label: "node", excerpt: bound(target.label || prompt.text, EXCERPT_MAX) },
+      selector,
+    );
+  }
+  if (type === "board-card") {
+    return withSelector(
+      { kind: "element", label: "card", excerpt: bound(target.title || prompt.text, EXCERPT_MAX) },
       selector,
     );
   }
@@ -459,7 +468,7 @@ export function chatEntryForPrompt(prompt, at) {
   const kind =
     tag === "message"
       ? "message"
-      : tag === "whiteboard"
+      : tag === "whiteboard" || tag === "board"
         ? "whiteboard"
         : tag === "layout-warnings"
           ? "layout-warnings"

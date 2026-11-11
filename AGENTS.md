@@ -135,6 +135,7 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - Self-paint stays a warning. Never block open and never auto-repair. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).
 - The layout audit fails open. An empty completed pass means repaired. A failed run publishes `complete: false` and no findings. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).
 - The layout audit is severe-only. Scroll dimensions alone are never proof, diagram surfaces are excluded, and a finding needs the same severe root in two samples. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).
+- Board code cards read only inside the code root after `realpath`, `GET /api/:key/board` never writes, and the board scene lives in the `BOARD_SCENE_INDEX` sidecar, never the file. [Boards](docs/invariants.md#boards-canvas-mode).
 
 ## Maintaining this file
 

@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How Hilight works</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1c1c1a;
+        --muted: #6f6e69;
+        --line: #dddcd6;
+        --paper: #ffffff;
+        --table: #efeeea;
+      }
+      body {
+        margin: 0;
+        background: var(--table);
+        color: var(--ink);
+        font:
+          14px/1.55 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+      }
+      /* Plain-page fallback: without Hilight the board reads as a grid of cards. */
+      [data-hilight-board] {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 20px;
+        padding: 28px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      [data-card] {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px 18px;
+        min-width: 0;
+        overflow: auto;
+      }
+      [data-card="board"] {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 12px;
+        background: transparent;
+      }
+      [data-card="board"] > :is(h2, p) {
+        grid-column: 1 / -1;
+        margin: 0;
+      }
+      [data-card] h2,
+      [data-card] h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+      [data-card] pre {
+        margin: 10px 0 0;
+        font:
+          12px/1.5 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        overflow: auto;
+      }
+      /* Shared by the plain page and the HTML cards on the canvas. */
+      .lede {
+        margin: 0 0 12px;
+        color: var(--muted);
+      }
+      .steps {
+        margin: 0;
+        padding-left: 18px;
+      }
+      .steps li {
+        margin: 3px 0;
+      }
+      .kbd {
+        font:
+          12px ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        border: 1px solid var(--line);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+        padding: 0 5px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 7px 8px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        font-weight: 600;
+        color: var(--muted);
+        font-size: 11.5px;
+        text-transform: none;
+      }
+      code {
+        font:
+          12px ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 4px;
+      }
+      .split div {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .split b {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <main data-hilight-board="How Hilight works">
+      <section id="start-here" data-card data-x="0" data-y="0" data-w="560" data-h="300">
+        <h2>Start here</h2>
+        <p class="lede">
+          Hilight is one CLI, one local server, and one browser page. An agent writes an HTML file; you point at it;
+          your words come back to the agent through a long poll.
+        </p>
+        <ol class="steps">
+          <li>Top lane: the Node side. Bottom lane: the browser side.</li>
+          <li>
+            Every code card below is read from this repo when the board opens, and flips to <b>Stale</b> if the lines
+            change.
+          </li>
+          <li>
+            Draw arrows, circle lines, drop notes, then <b>Queue marks</b>. Select a card and press <b>Comment</b> to
+            start a thread.
+          </li>
+          <li>Double-click <b>How this canvas works</b> to go one level deeper.</li>
+        </ol>
+      </section>
+
+      <section id="trust" data-card data-x="640" data-y="0" data-w="560" data-h="300">
+        <h2>Who may talk to whom</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Window</th>
+              <th>Origin</th>
+              <th>Trusted because</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Chrome page</td>
+              <td>Hilight</td>
+              <td>Same-origin guard on every write</td>
+            </tr>
+            <tr>
+              <td>Artifact frame</td>
+              <td>opaque (sandbox)</td>
+              <td>It is <code>frame.contentWindow</code></td>
+            </tr>
+            <tr>
+              <td>Whiteboard frame</td>
+              <td>opaque (sandbox)</td>
+              <td>Its parent is the artifact frame</td>
+            </tr>
+            <tr>
+              <td>Card documents</td>
+              <td>opaque (sandbox)</td>
+              <td>Nothing: they render, never report</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="canvas" data-card="board" data-x="1280" data-y="0" data-w="420" data-h="300">
+        <h2>How this canvas works</h2>
+        <p>One board file, two views: a plain page without Hilight, this canvas with it.</p>
+
+        <section id="two-views" data-card data-x="0" data-y="0" data-w="520" data-h="270" data-to="parse-board">
+          <h3>One file, two views</h3>
+          <div class="split">
+            <div><b>Opened directly</b>The cards are a grid of sections. Nothing is lost.</div>
+            <div><b>Opened with Hilight</b>The SDK hides the grid and mounts one sandboxed canvas over it.</div>
+          </div>
+          <p class="lede" style="margin-top: 12px">
+            Your arrows and notes live in Hilight's own state, never in the file. The agent gets them in words.
+          </p>
+        </section>
+
+        <section
+          id="parse-board"
+          data-card
+          data-code="src/board-source.js:157-176"
+          data-hash="5bd6b4bb3272"
+          data-x="620"
+          data-y="0"
+          data-w="600"
+          data-to="check-pin"
+        >
+          <h3>Reading the board from disk</h3>
+          <p>Every card is a [data-card] section; nested boards recurse.</p>
+          <pre data-snapshot><code>function directCards(container) {
+  const found = [];
+  const visit = (node) =&gt; {
+    for (const child of elementChildren(node)) {
+      if (isCard(child)) found.push(child);
+      else visit(child);
+    }
+  };
+  visit(container);
+  return found;
+}
+
+function cardKind(node) {
+  const declared = String(attr(node, CARD_ATTRIBUTE) || "")
+    .trim()
+    .toLowerCase();
+  if (declared === "board" || directCards(node).length &gt; 0) return "board";
+  if (hasAttr(node, "data-code")) return "code";
+  return "html";
+}</code></pre>
+        </section>
+
+        <section
+          id="check-pin"
+          data-card
+          data-code="src/board-source.js:464-494"
+          data-hash="ef60bc72f817"
+          data-x="620"
+          data-y="520"
+          data-w="600"
+        >
+          <h3>The pin check</h3>
+          <p>A changed range is stale, unless the same lines moved: then the card follows them.</p>
+          <pre data-snapshot><code>export function checkCodeCard(code, file) {
+  if (code.error) return { status: "invalid", error: code.error };
+  if (file.error) return { status: "missing", error: file.error };
+  const lines = file.lines || [];
+  const span = code.end - code.start + 1;
+  const pinnedSnapshot =
+    Array.isArray(code.snapshot) &amp;&amp; code.pinned &amp;&amp; codeRangeHash(code.snapshot) === code.pinned ? code.snapshot : null;
+  if (code.start &gt; lines.length) {
+    if (code.pinned &amp;&amp; pinnedSnapshot) {
+      const at = findBlock(lines, pinnedSnapshot, code.start - 1);
+      if (at &gt;= 0) return movedResult(lines, at, span);
+    }
+    return { status: "missing", error: `line ${code.start} is past the end of the file (${lines.length} lines)` };
+  }
+  const current = lines.slice(code.start - 1, code.end);
+  const live = codeRangeHash(current);
+  const total = lines.length;
+  if (!code.pinned) return { status: "unpinned", live, lines: current, total };
+  if (code.pinned === live) return { status: "fresh", live, lines: current, total };
+  if (pinnedSnapshot) {
+    const at = findBlock(lines, pinnedSnapshot, code.start - 1);
+    if (at &gt;= 0) return movedResult(lines, at, span);
+  }
+  return {
+    status: "stale",
+    live,
+    lines: current,
+    total,
+    ...(pinnedSnapshot ? { snapshot: pinnedSnapshot } : {}),
+  };
+}</code></pre>
+        </section>
+
+        <section
+          id="follow-cards"
+          data-card
+          data-code="src/artifact-sdk.js:1157-1162"
+          data-hash="c1d214363489"
+          data-x="0"
+          data-y="380"
+          data-w="520"
+          data-to="check-pin"
+        >
+          <h3>Comments follow the cards</h3>
+          <p>Thread anchors ask the canvas where a hidden card is on screen.</p>
+          <pre data-snapshot><code>  function elementRect(el) {
+    const card = boardCardOf(el);
+    if (!card) return el.getBoundingClientRect();
+    const rect = board?.rects.get(boardCardId(card));
+    return rect ? new DOMRect(rect[0], rect[1], rect[2], rect[3]) : new DOMRect(0, 0, 0, 0);
+  }</code></pre>
+        </section>
+      </section>
+
+      <section
+        id="cli"
+        data-card
+        data-code="src/cli.js:2495-2512"
+        data-hash="5bc127722e9b"
+        data-x="0"
+        data-y="420"
+        data-w="560"
+        data-to="server"
+      >
+        <h3>CLI starts a detached server</h3>
+        <p><code>hilight file.html</code> spawns the server once; every later command reuses it.</p>
+        <pre data-snapshot><code>async function startServer(port, { alsoListen = [] } = {}) {
+  await ensureStateDir();
+  const entry = resolveServerEntry();
+  let logFd = null;
+  try {
+    logFd = openSync(serverLogFile(), "a");
+  } catch {
+    // If logging cannot be initialized, keep the server behavior unchanged.
+  }
+  try {
+    const args = [entry, "server", "--port", String(port)];
+    for (const host of alsoListen) args.push("--also-listen", host);
+    const child = spawn(process.execPath, args, createServerSpawnOptions(logFd));
+    child.unref();
+  } finally {
+    if (logFd !== null) closeSync(logFd);
+  }
+}</code></pre>
+      </section>
+
+      <section
+        id="server"
+        data-card
+        data-code="src/server.js:1632-1643"
+        data-hash="f7b465853113"
+        data-x="640"
+        data-y="420"
+        data-w="560"
+        data-to="store chrome"
+      >
+        <h3>Server serves the artifact</h3>
+        <p>The file on disk plus exactly one injected SDK script tag.</p>
+        <pre data-snapshot><code>      const html = await readFile(beforeRead.session.file, "utf8");
+      const verified = await store.verifyArtifactLoad(key, token, revision);
+      if (!verified?.valid) {
+        res
+          .status(409)
+          .type("html")
+          .send(
+            "&lt;!doctype html&gt;&lt;title&gt;Artifact load expired&lt;/title&gt;&lt;p&gt;This artifact load is no longer current. Reload Hilight to continue.&lt;/p&gt;",
+          );
+        return;
+      }
+      res.type("html").send(injectLavishSdk(html, key, verified.artifact_revision, verified.artifact_load_token));</code></pre>
+      </section>
+
+      <section
+        id="store"
+        data-card
+        data-code="src/session-store.js:669-697"
+        data-hash="9fdb828c4ee2"
+        data-x="1280"
+        data-y="420"
+        data-w="600"
+      >
+        <h3>Session store hands feedback to the poll</h3>
+        <p>One lock, one state file; a take drains every queued prompt.</p>
+        <pre data-snapshot><code>  async takeFeedback(key) {
+    return this.runExclusive(async () =&gt; {
+      const state = await this.readState();
+      const session = state.sessions[key];
+      if (!session) {
+        return { status: "missing" };
+      }
+      // Prompts queued before the session ended (a browser send-and-end) must still reach the
+      // agent, so deliver them before reporting the ended state; the next poll then sees ended.
+      const prompts = session.prompts || [];
+      // Layout warnings stay passive until the user queues them. Only fatal artifact
+      // failures can reach the agent without explicit user action.
+      const artifactFailures = Array.isArray(session.artifact_failures) ? session.artifact_failures : [];
+      const alreadyEnded = session.status === "ended";
+      if (prompts.length === 0 &amp;&amp; artifactFailures.length === 0) {
+        return alreadyEnded ? { status: "ended", ended_by: session.ended_by } : { status: "waiting" };
+      }
+      // Seen (docs/delivery-acks.md): this take drains every pending prompt and `queuePrompts`
+      // shares this lock, so the user entries with no stamp are exactly this batch. The sequence
+      // rides on the result so a closed-poll restore can undo only this take's stamps.
+      const deliverySeq = normalizeRevision(session.delivery_seq) + 1;
+      const result = {
+        status: "feedback",
+        dom_snapshot: session.dom_snapshot || "",
+        prompts,
+        ...(artifactFailures.length &gt; 0 ? { artifact_failures: artifactFailures } : {}),
+        ...(alreadyEnded ? { session_ended: true, ended_by: session.ended_by } : {}),
+        ...(prompts.length &gt; 0 ? { delivery_seq: deliverySeq } : {}),
+      };</code></pre>
+      </section>
+
+      <section
+        id="chrome"
+        data-card
+        data-code="src/chrome-client.js:3841-3850"
+        data-hash="c683af4d3f18"
+        data-x="640"
+        data-y="1060"
+        data-w="560"
+        data-to="artifact"
+      >
+        <h3>Chrome page trusts frames by descent</h3>
+        <p>A whiteboard message counts only if its sender's parent is the artifact frame.</p>
+        <pre data-snapshot><code>function isArtifactChildWindow(source) {
+  if (!source) return false;
+  try {
+    // Reading `parent` on a cross-origin WindowProxy is permitted; the frame's
+    // sandbox makes everything else about it opaque.
+    return source.parent === frame.contentWindow;
+  } catch {
+    return false;
+  }
+}</code></pre>
+      </section>
+
+      <section
+        id="artifact"
+        data-card
+        data-code="src/artifact-sdk.js:1121-1137"
+        data-hash="f752b6164047"
+        data-x="1280"
+        data-y="1060"
+        data-w="600"
+        data-to="whiteboard"
+      >
+        <h3>Artifact frame mounts this board</h3>
+        <p>The SDK swaps the grid for the canvas at view time only.</p>
+        <pre data-snapshot><code>  function mountBoard() {
+    if (board) return;
+    const root = document.querySelector("[data-hilight-board]");
+    if (!root) return;
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("data-lavish-ui", "board");
+    iframe.setAttribute("title", "Board canvas");
+    iframe.setAttribute("sandbox", "allow-scripts allow-popups");
+    iframe.src =
+      "/whiteboard-frame?" + new URLSearchParams({ diagramIndex: "999", key: String(sessionKey || ""), board: "1" });
+    iframe.style.cssText =
+      "position:fixed;inset:0;width:100%;height:100%;margin:0;border:0;z-index:2147483646;background:#efeeea;color-scheme:normal";
+    /** @type {HTMLElement} */ (root).style.display = "none";
+    document.documentElement.style.overflow = "hidden";
+    (document.body || document.documentElement).appendChild(iframe);
+    board = { root, iframe, ids: boardCardIds(root), rects: new Map(), lastThreads: "", live: false };
+  }</code></pre>
+      </section>
+
+      <section
+        id="whiteboard"
+        data-card
+        data-code="src/server.js:240-247"
+        data-hash="67486b9761d6"
+        data-x="1960"
+        data-y="1060"
+        data-w="560"
+      >
+        <h3>Whiteboard frame gets a session-bound token</h3>
+        <p>Signed over the session key: it opens a channel for one session only.</p>
+        <pre data-snapshot><code>export function createWhiteboardChannelToken(secret, sessionKey, now = Date.now()) {
+  const nonce = crypto.randomBytes(24).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(whiteboardChannelPayload(now, nonce, String(sessionKey || "")))
+    .digest("base64url");
+  return `${now}.${nonce}.${signature}`;
+}</code></pre>
+      </section>
+    </main>
+  </body>
+</html>

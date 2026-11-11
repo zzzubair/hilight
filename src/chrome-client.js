@@ -1,4 +1,4 @@
-/* global document, location, window */
+/* global document, getComputedStyle, location, window */
 
 const sessionDataElement = document.getElementById("lavish-session");
 const sessionData = JSON.parse(sessionDataElement?.textContent || "{}");
@@ -36,7 +36,7 @@ const THREAD_COLLAPSE_AFTER = 2;
 // A compact card is one header line. chrome.css pins `.comment-thread.is-compact` to this height,
 // so placement never has to measure one.
 const THREAD_COMPACT_HEIGHT = 34;
-const NON_THREAD_TAGS = new Set(["message", "whiteboard", "layout-warnings"]);
+const NON_THREAD_TAGS = new Set(["message", "whiteboard", "board", "layout-warnings"]);
 const threadCardCache = new Map();
 // Measured resting heights by thread id. Placement runs on every artifact scroll frame, so it
 // reads only these and the open card; a rebuilt card or a resize clears its entry.
@@ -547,6 +547,9 @@ function promptAnchor(prompt) {
   const target = prompt?.target && typeof prompt.target === "object" ? prompt.target : null;
   const selector = boundAnchorText(prompt?.selector, ANCHOR_SELECTOR_MAX);
   const withSelector = (anchor) => (selector ? { ...anchor, selector } : anchor);
+  if (tag === "board") {
+    return { kind: "whiteboard", label: "board", excerpt: boundAnchorText("Canvas marks", ANCHOR_EXCERPT_MAX) };
+  }
   if (tag === "whiteboard") {
     const index = Number(target?.diagramIndex);
     const excerpt = Number.isInteger(index) && index >= 0 ? "Diagram " + (index + 1) : prompt.text;
@@ -578,6 +581,13 @@ function promptAnchor(prompt) {
       kind: "node",
       label: "node",
       excerpt: boundAnchorText(target.label || prompt.text, ANCHOR_EXCERPT_MAX),
+    });
+  }
+  if (type === "board-card") {
+    return withSelector({
+      kind: "element",
+      label: "card",
+      excerpt: boundAnchorText(target.title || prompt.text, ANCHOR_EXCERPT_MAX),
     });
   }
   const elementTag = tag.trim();
@@ -3373,7 +3383,68 @@ function whiteboardRecord(index) {
   return record;
 }
 
+// Board canvas (src/board-frame.js). The artifact SDK mounts one whiteboard
+// frame over a board file under this reserved diagram index (BOARD_SCENE_INDEX
+// in src/board-core.js; this file is served raw and cannot import it). Its
+// scene persists in the same sidecar store as Mermaid whiteboards.
+const BOARD_SCENE_INDEX = 999;
+const BOARD_REFRESH_MS = 15000;
+let boardRefreshTimer = 0;
+let lastBoardJson = "";
+
+async function fetchBoard() {
+  const response = await fetch("/api/" + key + "/board");
+  if (!response.ok) throw new Error("could not read the board from the artifact file");
+  const data = await response.json();
+  return data.board;
+}
+
+async function handleBoardReady(index, mode, isCurrent) {
+  try {
+    const [boardData, savedResponse] = await Promise.all([fetchBoard(), fetch("/api/" + key + "/whiteboard/" + index)]);
+    const saved = savedResponse.ok ? (await savedResponse.json()).whiteboard : null;
+    if (!isCurrent()) return false;
+    lastBoardJson = JSON.stringify(boardData);
+    postToWhiteboard(index, mode, {
+      type: "lavish-whiteboard:init",
+      mode,
+      diagramIndex: index,
+      diagramId: "",
+      board: boardData,
+      saved,
+      theme: whiteboardTheme(),
+    });
+    startBoardRefresh();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Code cards are re-read from disk while the board is open, so a pinned range
+// that changes under the reviewer flips to stale without a reload.
+async function refreshBoard() {
+  const channel = inlineWhiteboardChannels.get(BOARD_SCENE_INDEX);
+  if (!channel?.initialized || document.visibilityState !== "visible") return;
+  try {
+    const boardData = await fetchBoard();
+    const json = JSON.stringify(boardData);
+    if (json === lastBoardJson || inlineWhiteboardChannels.get(BOARD_SCENE_INDEX) !== channel) return;
+    lastBoardJson = json;
+    postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:update", board: boardData });
+  } catch {
+    // Best effort; the next tick or reload re-reads it.
+  }
+}
+
+function startBoardRefresh() {
+  if (boardRefreshTimer) return;
+  boardRefreshTimer = window.setInterval(refreshBoard, BOARD_REFRESH_MS);
+  window.addEventListener("focus", refreshBoard);
+}
+
 async function handleWhiteboardReady(index, mode, isCurrent) {
+  if (index === BOARD_SCENE_INDEX && mode === "inline") return handleBoardReady(index, mode, isCurrent);
   try {
     const librariesRequest = fetchWhiteboardLibraries();
     const { sources, librariesVersion } = await fetchMermaidSourcesData();
@@ -3631,6 +3702,40 @@ async function queueWhiteboardFeedback(index, message, mode) {
     const files = await response.json();
     const note = String(message.note || "").slice(0, 4000);
     const summary = whiteboardSummaryText(message.summaryLines);
+    if (index === BOARD_SCENE_INDEX && message.board) {
+      const boardText =
+        (note ? note + "\n\n" : "") +
+        "Marks on the board canvas:\n" +
+        (summary ? "- " + summary.split("\n").join("\n- ") : "(only the note above)") +
+        (files.preview_path ? "\n\nPNG preview of the current board level: " + String(files.preview_path) : "");
+      if (
+        !enqueuePrompt(
+          {
+            uid: "",
+            prompt: boardText,
+            selector: "",
+            tag: "board",
+            text: "Board: canvas marks",
+            target: {
+              type: "board-canvas",
+              revision: String(message.sourceHash || ""),
+              scenePath: String(files.scene_path || ""),
+              previewPath: String(files.preview_path || ""),
+              stats: message.stats && typeof message.stats === "object" ? message.stats : {},
+            },
+            // Re-queueing before sending replaces the earlier unsent summary.
+            [internalQueueKeyField]: "board:canvas",
+          },
+          preparation,
+        )
+      )
+        throw new Error("failed to retain board feedback");
+      pulseSheetDock();
+      postToWhiteboard(index, mode, { type: "lavish-whiteboard:queueResult", ok: true });
+      clearPreparationFailure("whiteboard");
+      succeeded = true;
+      return;
+    }
     const promptText =
       (note ? note + "\n\n" : "") +
       "Whiteboard edits to diagram " +

@@ -39,6 +39,7 @@ import {
 import * as artifactRevisions from "./artifact-revisions.js";
 import * as mermaidNode from "./mermaid-node.js";
 import * as tableCellHelpers from "./table-cell.js";
+import { readBoard } from "./board-source.js";
 import { extractMermaidSources, whiteboardSourceHash } from "./mermaid-source.js";
 import { createExcalidrawLibraryCache, excalidrawLibrariesDir } from "./whiteboard-library-store.js";
 import { parseLibraryIconDirectives } from "./whiteboard-libraries.js";
@@ -1808,6 +1809,36 @@ export async function serve({
       // library file that changed between the two requests means the frame's
       // libraries do not match these hashes.
       res.json(snapshot ? { sources, libraries_version: snapshot.version } : { sources });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The board model for canvas mode: the cards parsed from the board file on
+  // disk plus the live code of every code card, read now from the repository
+  // that holds the board (never outside it) and checked against the card's pin.
+  // Only the ranges the board file names are ever read, and a present foreign
+  // Origin/Referer is refused like the other read routes that carry file data.
+  app.get("/api/:key/board", async (req, res, next) => {
+    try {
+      if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ error: "cross-origin board request rejected" });
+        return;
+      }
+      const session = await store.findByKey(req.params.key);
+      if (!session) {
+        res.status(404).json({ error: "session not found" });
+        return;
+      }
+      if (refuseNonHtmlArtifact(session, res)) return;
+      const html = await readFile(session.file, "utf8").catch(() => null);
+      const board = html === null ? null : await readBoard(session.file, html);
+      if (!board) {
+        res.status(404).json({ error: "this artifact is not a board" });
+        return;
+      }
+      res.setHeader("cache-control", "no-store");
+      res.json({ board });
     } catch (error) {
       next(error);
     }

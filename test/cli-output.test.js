@@ -20,6 +20,7 @@ import {
   computeCopilotCliHookUpdate,
   createCopilotCliAmbientContextScript,
   createCopilotCliSessionStartHook,
+  createBoardOutput,
   createDesignOutput,
   createExportOutput,
   createHomeOutput,
@@ -349,7 +350,7 @@ test("top-level help renders static home output without dynamic sessions", async
     );
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /playbooks\[8\]/);
+    assert.match(result.stdout, /playbooks\[9\]/);
     assert.match(result.stdout, /hilight playbook <playbook_id>/);
     assert.match(result.stdout, /reference other filesystem assets/);
     assert.match(result.stdout, /same directory as the HTML file/);
@@ -371,7 +372,7 @@ test("design output prints copy-pasteable CDN URLs so agents can opt in to Daisy
   const output = createDesignOutput();
 
   assert.match(output.playbook_router.instruction, /MUST open each matching playbook before writing HTML/);
-  assert.equal(output.playbook_router.playbooks.length, 8);
+  assert.equal(output.playbook_router.playbooks.length, 9);
   assert.equal(
     output.playbook_router.playbooks.find((playbook) => playbook.id === "diagram")?.use_when,
     "Explain relationships, flows, state, architecture, and concepts with illustrations",
@@ -442,10 +443,10 @@ test("design output recommends luxury as the default theme and warns against @ap
 test("playbook index output lists known playbooks with concise descriptions", () => {
   const output = createPlaybookOutput([]);
 
-  assert.equal(output.playbooks.length, 8);
+  assert.equal(output.playbooks.length, 9);
   assert.deepEqual(
     output.playbooks.map((playbook) => playbook.id),
-    ["diagram", "table", "comparison", "plan", "code", "input", "explanation", "slides"],
+    ["diagram", "table", "comparison", "plan", "code", "input", "explanation", "slides", "board"],
   );
   assert.equal(
     output.playbooks.find((playbook) => playbook.id === "plan")?.use_when,
@@ -3771,4 +3772,33 @@ test("reply output lists the threads a sectioned reply answered", () => {
     threads: ["c2", "c1"],
   });
   assert.deepEqual(createReplyOutput("/tmp/r.html", "Plain").reply, { file: "/tmp/r.html", status: "sent" });
+});
+
+test("createBoardOutput lists each code card and says how to re-pin the ones that drifted", () => {
+  const result = {
+    root: "/repo",
+    changed: false,
+    cards: [
+      { card: "a", code: "src/a.js:1-4", state: "fresh", status: "pinned" },
+      { card: "b", code: "src/b.js:9-12", state: "stale", status: "stale" },
+      { card: "c", code: "src/c.js:3-5", state: "moved", status: "moved", moved_to: "src/c.js:7-9" },
+      { card: "d", code: "src/d.js:1-2", state: "unpinned", status: "pinned" },
+    ],
+  };
+  const check = createBoardOutput("check", "board.html", result);
+  assert.deepEqual(
+    check.code_cards.map((card) => [card.card, card.status, card.note]),
+    [
+      ["a", "fresh", ""],
+      ["b", "stale", ""],
+      ["c", "moved", "moved to src/c.js:7-9"],
+      ["d", "unpinned", ""],
+    ],
+  );
+  assert.equal(check.board.changed, undefined);
+  assert.match(check.help[0], /hilight board stamp board.html` to pin the 1 unpinned/);
+  assert.match(check.help[1], /2 code card\(s\) no longer match.*--repin/);
+  const stamp = createBoardOutput("stamp", "board.html", { ...result, cards: [result.cards[0]] });
+  assert.deepEqual(stamp.board, { file: "board.html", root: "/repo", changed: false });
+  assert.equal(stamp.help, undefined);
 });

@@ -62,6 +62,7 @@ import { findPlaybook, listPlaybooks, playbookIds, PLAYBOOK_ROUTER_HELP } from "
 import { SAME_PAGE_RULE } from "./review-guidance.js";
 import { HILIGHT_TARBALL_URL } from "./skill.js";
 import { analyzeSelfPaint, SELF_PAINT_WARNING } from "./self-paint.js";
+import { stampBoardFile } from "./board-source.js";
 import { resolveDesignAssetPath, serve } from "./server.js";
 import { isHtmlPath } from "./artifact-path.js";
 import { canonicalFile, sessionKey, SessionStore } from "./session-store.js";
@@ -84,6 +85,7 @@ const COMMANDS = new Set([
   "export",
   "share",
   "libraries",
+  "board",
 ]);
 // SDK-reserved built-ins (e.g. `update`) must reach runAxiCli untouched; otherwise
 // the bare-arg normalization below would rewrite them into the hidden `open` command.
@@ -241,6 +243,7 @@ export async function run(argv) {
         export: exportCommand,
         share: shareCommand,
         libraries: librariesCommand,
+        board: boardCommand,
         update: updateCommand,
       },
       getCommandHelp: (command) => getCommandHelp(command, { agent }),
@@ -319,6 +322,7 @@ export function createHomeOutput({ bin, sessions, includeSessions = true, agent 
       `Run \`hilight poll <html-file>\` to wait for user feedback. It long-polls and stays silent until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, so leave it running - never kill it. Detected layout issues never return this poll: the browser files them in the user's Layout issues inbox in the Hilight top bar, and they arrive as an ordinary tag "layout-warnings" prompt only when the user selects them and queues the fixes. Never edit the artifact to chase a layout issue the user has not queued. The only exception is a fatal artifact_failures response, which means the review surface itself could not be used. ${pollExecutionGuidance({ agent })} ${POLL_SEND_AND_END_RULE}`,
       'Run `hilight reply <html-file> --agent-reply "<message>"` to show a concise reply and exit once Hilight accepts it, when you are handing a result back and are not about to long-poll. The board stops showing Working only after this command exits 0. Use `hilight poll <html-file> --agent-reply "<message>"` when that reply should be followed by another wait for feedback. A longer reply uses `--agent-reply-file <path>` (`-` reads stdin) on either command. Run `hilight reply --help` for the receipt contract',
       'Mermaid is the whiteboard opt-in, not the diagram default: only when the user asks for an editable whiteboard, author that diagram as Mermaid in a `.mermaid` container. Rendered Mermaid diagrams there become embedded, editable Excalidraw whiteboards in the browser (click a diagram to unlock editing; a Fullscreen action opens it over the whole viewport) - flowchart, sequence, class, ER, and state diagrams convert to editable shapes; other types embed as an image to draw on. Scenes autosave locally; an unmodified autosave silently re-converts when a reload changes the Mermaid source. If the reviewer edited the scene, they choose to re-convert and discard saved edits or keep editing the saved scene. Standalone and exported copies still render plain Mermaid. Queue feedback adds a draft to the page comment thread; when the user sends it, poll returns a tag "whiteboard" prompt carrying a bounded edit summary plus local scenePath (.excalidraw JSON) and previewPath (PNG) files - read the summary first, open the files only when needed, then apply the edits by updating the Mermaid source in the artifact (never try to write the scene back)',
+      "When the answer is a map rather than a page - how a system's parts connect, a tour of real code, options laid side by side - author a board: one HTML file of cards that Hilight shows as a pan-and-zoom canvas, with code cards pinned to real line ranges that turn stale when the code changes. Run `hilight playbook board` first",
       "Run `hilight end <html-file>` to end a session as the agent - ending it this way still allows a plain reopen later. When the user ends it from the browser instead, a later `hilight <html-file>` refuses to reopen it without `--reopen`",
       "Run `hilight export <html-file> [--out <path>]` to write a portable copy of the artifact - one HTML file with its LOCAL assets inlined - so it opens with no Hilight server and no sibling files. Remote CDN/font references are left as links, so it needs network to render those. Users can also export from the browser chrome's overflow menu",
       "Run `hilight share <html-file> [--private | --password <pw>]` to publish the artifact on ht-ml.app (https://ht-ml.app), a third-party hosting service not part of Hilight, and get back a visitable URL. Shares are PUBLIC by default, so anyone with the link can open them. Pass --private to publish a PRIVATE page behind a password Hilight generates and returns - hand the user that password with the URL and say it is a shared secret anyone they give it to can use; --password <pw> uses one you were already given instead. Local assets are inlined; remote refs load over the network. It also returns a secret update_key that can republish or lock the same URL later - run `hilight share --help` before using it. Users can also publish from the browser chrome's overflow menu",
@@ -650,6 +654,9 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
   const whiteboardNote = prompts.some((prompt) => prompt && prompt.tag === "whiteboard")
     ? `This feedback includes whiteboard edits (tag "whiteboard"): read the edit summary in the prompt text first, and only when it is not enough, open the target's scenePath (.excalidraw scene JSON) or previewPath (PNG) local files for detail. The artifact's Mermaid source stays authoritative - apply the edits by updating the Mermaid text in ${file} (Hilight live-reloads it); never try to write the .excalidraw scene back. `
     : "";
+  const boardNote = prompts.some((prompt) => prompt && prompt.tag === "board")
+    ? `This feedback includes the reviewer's marks on the board canvas (tag "board"): the prompt text lists every mark in words - arrows between cards, notes, circled cards or code lines, moved or removed cards - naming each card by its id. Apply them by editing those cards in ${file}; the marks themselves stay on Hilight's canvas and never go into the file. Open the target's previewPath PNG only when the words are not enough. `
+    : "";
   const layoutNote = prompts.some((prompt) => prompt && prompt.tag === "layout-warnings")
     ? `This feedback includes layout issues the user selected from the Hilight Layout issues inbox (tag "layout-warnings"): the target lists the exact warning ids and targets. Apply every listed fix in one pass before saving so the user's review refreshes once. Queueing is a repair request, not a resolution - Hilight only marks a warning resolved after a newer artifact load and a complete check at the same viewport no longer detects it. `
     : "";
@@ -668,12 +675,12 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
         count > 0
           ? ""
           : ` Only run \`hilight ${file} --reopen\` if the user explicitly asks for further review or something genuinely important needs their visual attention.`;
-      return `${failureNote}${layoutNote}${whiteboardNote}${attachmentNote}This was the last feedback before the user ended the session. Stop polling ${file} and do not reopen it - deliver any remaining updates directly in this conversation instead.${reopenNote}`;
+      return `${failureNote}${layoutNote}${whiteboardNote}${boardNote}${attachmentNote}This was the last feedback before the user ended the session. Stop polling ${file} and do not reopen it - deliver any remaining updates directly in this conversation instead.${reopenNote}`;
     }
-    return `${failureNote}${layoutNote}${whiteboardNote}${attachmentNote}This was the last feedback before the Hilight session ended. Stop polling ${file}. Deliver any remaining updates directly in this conversation, or run \`hilight ${file}\` to open a fresh session if the user needs further visual review.`;
+    return `${failureNote}${layoutNote}${whiteboardNote}${boardNote}${attachmentNote}This was the last feedback before the Hilight session ended. Stop polling ${file}. Deliver any remaining updates directly in this conversation, or run \`hilight ${file}\` to open a fresh session if the user needs further visual review.`;
   }
   const prefix = count > 0 ? artifactFailuresPrefix(file, artifactFailures) : feedbackPrefix(file, prompts);
-  return `${prefix}${layoutNote}${whiteboardNote}${attachmentNote}Do not respond to the user just yet. If you are continuing to wait for feedback, run \`hilight poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run \`hilight reply ${file} --agent-reply "<message for the user>"\` to post it and receive an acceptance receipt. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_NEXT_POINTER} The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. ${pollExecutionGuidance({ agent })}`;
+  return `${prefix}${layoutNote}${whiteboardNote}${boardNote}${attachmentNote}Do not respond to the user just yet. If you are continuing to wait for feedback, run \`hilight poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run \`hilight reply ${file} --agent-reply "<message for the user>"\` to post it and receive an acceptance receipt. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_NEXT_POINTER} The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. ${pollExecutionGuidance({ agent })}`;
 }
 
 const QUESTION_WORD_RE =
@@ -697,7 +704,7 @@ export function isQuestionOnlyFeedback(prompts) {
   const list = Array.isArray(prompts) ? prompts.filter((prompt) => prompt && typeof prompt === "object") : [];
   if (list.length === 0) return false;
   return list.every((prompt) => {
-    if (prompt.tag === "whiteboard" || prompt.tag === "layout-warnings") return false;
+    if (prompt.tag === "whiteboard" || prompt.tag === "board" || prompt.tag === "layout-warnings") return false;
     const sentences = String(prompt.prompt || "")
       .split(/(?<=[.!?])\s+|\n+/)
       .map((sentence) => sentence.trim())
@@ -1438,6 +1445,69 @@ export function createUpdateOutput(args, { install = spawnPluginClientSync } = {
       "Run `hilight --version` to confirm the new version",
       "The next `hilight <html-file>` replaces a running server from the previous version",
     ],
+  };
+}
+
+const BOARD_ACTIONS = ["stamp", "check"];
+
+async function boardCommand(args) {
+  const action = args[0];
+  const file = args.slice(1).find((arg) => !arg.startsWith("--"));
+  if (!BOARD_ACTIONS.includes(action) || !file) {
+    throw new AxiError("Usage: hilight board stamp|check <html-file> [--repin]", "VALIDATION_ERROR", [
+      "Run `hilight board stamp <html-file>` to pin every code card to the lines it shows now",
+      "Run `hilight playbook board` for the board format",
+    ]);
+  }
+  const resolved = path.resolve(file);
+  let result;
+  try {
+    result = await stampBoardFile(resolved, { repin: args.includes("--repin"), write: action === "stamp" });
+  } catch (error) {
+    if (error && /** @type {any} */ (error).code === "ENOENT") {
+      throw new AxiError(`File not found: ${file}`, "VALIDATION_ERROR");
+    }
+    throw error;
+  }
+  if (!result) {
+    throw new AxiError(`${file} is not a board: it has no [data-hilight-board] element`, "VALIDATION_ERROR", [
+      "Run `hilight playbook board` for the board format",
+    ]);
+  }
+  return createBoardOutput(action, file, result);
+}
+
+/**
+ * @param {string} action
+ * @param {string} file
+ * @param {{ root: string, changed: boolean, cards: any[] }} result
+ */
+export function createBoardOutput(action, file, result) {
+  const cards = result.cards.map((card) => ({
+    card: card.card,
+    code: card.code,
+    status: action === "check" ? card.state : card.status,
+    note: card.moved_to ? `moved to ${card.moved_to}` : card.error || "",
+  }));
+  const counts = (key) => cards.filter((card) => card.status === key).length;
+  const stale = counts("stale");
+  const moved = counts("moved");
+  const unpinned = action === "check" ? counts("unpinned") : 0;
+  const help = [];
+  if (unpinned) help.push(`Run \`hilight board stamp ${file}\` to pin the ${unpinned} unpinned code card(s)`);
+  if (stale || moved) {
+    help.push(
+      `${stale + moved} code card(s) no longer match their pin. Re-read those lines and update what the cards say, then run \`hilight board stamp ${file} --repin\` to pin the current code (moved cards follow their lines)`,
+    );
+  }
+  return {
+    board: {
+      file,
+      root: collapseHomeDirectory(result.root, os.homedir()),
+      ...(action === "stamp" ? { changed: result.changed } : {}),
+    },
+    code_cards: cards,
+    ...(help.length ? { help } : {}),
   };
 }
 
@@ -2814,7 +2884,7 @@ export function getCommandHelp(command, { agent = "generic" } = {}) {
 }
 
 function createTopLevelHelp({ agent = "generic" } = {}) {
-  return `hilight - Hilight AXI\n\nUsage:\n  hilight\n  hilight <html-file> [--no-open] [--no-gate] [--reopen]\n  hilight poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n  hilight reply <html-file> (--agent-reply "..." | --agent-reply-file <path>)\n  hilight end <html-file>\n  hilight export <html-file> [--out <path>]\n  hilight share <html-file> [--private | --password <pw>] [--token <t>]\n  hilight share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  hilight share --unpublish --site <site_id> --update-key <key>\n  hilight stop\n  hilight playbook [playbook_id]\n  hilight design\n  hilight libraries [--search <text>] [--library <id>]\n  hilight setup hooks [--replace-lavish]\n  hilight setup plugin\n  hilight update [--check]\n\n${DESIGN_SYSTEM_HINT}\n\n${SAME_PAGE_RULE} ${THREAD_REPLY_RULE}\n\nNote: poll long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, staying silent while it waits - never kill it. Layout issues the browser detects are passive: they collect in the user's Layout issues inbox in the Hilight top bar and reach the agent only when the user selects them and queues the fixes, as an ordinary tag "layout-warnings" prompt. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. ${pollExecutionGuidance({ agent })} ${POLL_SEND_AND_END_RULE} Use \`hilight reply\` when handing a result back without waiting for more feedback: it exits 0 only after the server accepts the reply, so the board stops showing Working. \`poll --agent-reply\` posts a reply and then keeps waiting.\n\n`;
+  return `hilight - Hilight AXI\n\nUsage:\n  hilight\n  hilight <html-file> [--no-open] [--no-gate] [--reopen]\n  hilight poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n  hilight reply <html-file> (--agent-reply "..." | --agent-reply-file <path>)\n  hilight end <html-file>\n  hilight export <html-file> [--out <path>]\n  hilight share <html-file> [--private | --password <pw>] [--token <t>]\n  hilight share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  hilight share --unpublish --site <site_id> --update-key <key>\n  hilight stop\n  hilight playbook [playbook_id]\n  hilight design\n  hilight libraries [--search <text>] [--library <id>]\n  hilight board stamp|check <html-file> [--repin]\n  hilight setup hooks [--replace-lavish]\n  hilight setup plugin\n  hilight update [--check]\n\n${DESIGN_SYSTEM_HINT}\n\n${SAME_PAGE_RULE} ${THREAD_REPLY_RULE}\n\nNote: poll long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, staying silent while it waits - never kill it. Layout issues the browser detects are passive: they collect in the user's Layout issues inbox in the Hilight top bar and reach the agent only when the user selects them and queues the fixes, as an ordinary tag "layout-warnings" prompt. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. ${pollExecutionGuidance({ agent })} ${POLL_SEND_AND_END_RULE} Use \`hilight reply\` when handing a result back without waiting for more feedback: it exits 0 only after the server accepts the reply, so the board stops showing Working. \`poll --agent-reply\` posts a reply and then keeps waiting.\n\n`;
 }
 
 function createCommandHelp({ agent = "generic" } = {}) {
@@ -2827,7 +2897,8 @@ function createCommandHelp({ agent = "generic" } = {}) {
     share: `Usage:\n  hilight share <html-file> [--private | --password <pw>] [--token <t>]\n  hilight share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  hilight share --unpublish --site <site_id> --update-key <key>\n\nPublish the artifact on ht-ml.app (https://ht-ml.app), a third-party hosting service not part of Hilight, and print a visitable URL. Shares are PUBLIC by default: anyone with the link can open the page, and it may be indexed or scraped. Pass --private to publish a PRIVATE page behind a generated password, returned once in the output - give it to the user with the URL and tell them it is a shared secret. Pass --password <pw> instead when the user chose the password; it is never echoed back. Builds the same local-inlined HTML as 'export' (local assets inlined; remote CDN/font URLs left as links and are not blocked by CSP on ht-ml.app, but still load over the viewer's network), then POSTs it to ht-ml.app's /v1 API. Creating a site needs no account or API key. The response includes the url plus a secret update_key (shown once) for changing the page later.\n\n--site <site_id> with --update-key <key> republishes an existing page in place: same URL, new HTML. On a republish the password is left alone unless you pass --private (rotate to a new generated one) or --password <pw> (set one). There is no way to make a private page public again: ht-ml.app accepts a request to clear a password and silently ignores it, so Hilight does not offer one rather than reporting a page as public while it is still gated. Locking a page that was PUBLIC is also not instant at ht-ml.app's CDN: it was observed still answering uncredentialed requests for minutes after the password was set, so do not tell the user a newly gated page is unreachable right away (a page that was already private has no such cached copy).\n\n--unpublish takes the same credentials and no file. ht-ml.app has NO delete endpoint, so this replaces the page with a short placeholder and locks it behind a random password that is immediately discarded; the URL still resolves and the host still holds what was published. Say that to the user rather than calling it deleted. The update_key still works, so republishing with --private brings the page back behind a new password.\n\nA value flag given an empty or whitespace-only value is REFUSED rather than acted on: an unquoted shell variable that is unset makes \`--password $PW\` an empty password, which the host treats as none and would publish a PUBLIC page while you believed it was gated. Quote the value, or pass --private to have Hilight generate one.\n\nSet HILIGHT_HTML_APP_TOKEN (or pass --token) to attach an optional bearer token when CREATING a page; it is never required. A republish (--site/--update-key) or --unpublish rejects --token, because the update_key is what the Authorization header carries there. The annotation SDK is never included.\n`,
     update: `Usage: hilight update [--check]\n\nReinstall Hilight from the latest GitHub release (npm install -g ${HILIGHT_TARBALL_URL}). --check prints the current version and the install command without running it. The next \`hilight <html-file>\` replaces a server still running the previous version.\n`,
     stop: `Usage: hilight stop [--port <port>]\n\nShut down the background Hilight server. The server also stops itself when no browser or poll has been connected for a while (HILIGHT_IDLE_TIMEOUT_MS, default 30m) and immediately when the last session ends with nothing connected.\n`,
-    playbook: `Usage: hilight playbook [playbook_id]\n\nList focused artifact guidance playbooks, or show one playbook by ID. Known IDs: diagram, table, comparison, plan, code, input, explanation, slides.\n\n${PLAYBOOK_ROUTER_HELP}\n\nExamples:\n  hilight playbook\n  hilight playbook diagram\n  hilight playbook input\n`,
+    playbook: `Usage: hilight playbook [playbook_id]\n\nList focused artifact guidance playbooks, or show one playbook by ID. Known IDs: ${playbookIds().join(", ")}.\n\n${PLAYBOOK_ROUTER_HELP}\n\nExamples:\n  hilight playbook\n  hilight playbook diagram\n  hilight playbook input\n`,
+    board: `Usage: hilight board stamp <html-file> [--repin]\n       hilight board check <html-file>\n\nCode cards on a board (\`hilight playbook board\`) pin a line range of a real file. stamp writes each unpinned card's pin into the board file: a data-hash of the lines plus a <pre data-snapshot> copy, so the plain page shows the code and a changed range can show what changed. Pinned cards are left alone, so stamping never hides staleness; --repin accepts the current lines for every card that drifted, and a card whose lines only moved follows them to the new range. check reports each card's state (fresh, unpinned, moved, stale, missing, invalid) without writing. Paths resolve from the root of the git repository that holds the board, and nothing outside it is read.\n`,
     libraries: `Usage: hilight libraries [--search <text>] [--library <id>]\n\nList the Excalidraw libraries (.excalidrawlib files) the user copied into ~/.hilight/excalidraw-libraries (~/.lavish-axi/excalidraw-libraries on a machine that still uses the pre-rename state directory), or HILIGHT_STATE_DIR/excalidraw-libraries when set. Their items appear in every whiteboard's library panel. --search lists item refs whose ref contains every search word; --library lists one library's item refs. Hilight only reads this directory and never downloads libraries.\n\nExamples:\n  hilight libraries\n  hilight libraries --search lambda\n  hilight libraries --library aws-architecture-icons\n`,
     design: `Usage: hilight design\n\nShow a copy-pasteable CDN snippet for Tailwind CSS browser runtime v4 + DaisyUI v5 + themes, the whiteboard (Mermaid) opt-in snippet, a content-to-playbook router, an optional layout safety CSS snippet, plus technical reference for DaisyUI components. ${PLAYBOOK_ROUTER_HELP} Hilight artifacts stay portable HTML. This CDN snippet is the design fallback, not the default: inspect the subject project before falling back, and paste the layout safety CSS only when useful for dense nested grid/flex layouts, badges, wide fonts, or local media. ${DESIGN_PRIORITY_RULE}\n`,
     setup: `Usage: hilight setup hooks [--replace-lavish]\n       hilight setup plugin\n\nhooks: install or repair agent SessionStart hooks for hilight ambient context in Claude Code, Codex, OpenCode, and GitHub Copilot CLI. Restart your agent session afterward to receive the context. Hooks left by the old lavish-axi name are reported; pass --replace-lavish to remove them so agents do not get both. This is the primary integration - it carries live session state.\n\nplugin: register the installed hilight package as an Agent Plugin (agent-plugins.org) in VS Code, Cursor, and GitHub Copilot CLI. The installed package directory is itself the plugin root, so nothing is downloaded and no marketplace is involved. Reload each client afterward. Codex users should use \`setup hooks\` instead.\n\nBoth actions are explicit opt-in, idempotent, and repair a stale path after a reinstall.\n`,

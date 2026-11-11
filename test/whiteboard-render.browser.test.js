@@ -209,3 +209,26 @@ test("library icon nodes keep their arrows attached and panel inserts stay named
   assert.equal(result.dropped, 2);
   assert.match(result.summary, /^Added library item fixture\/Gear near \(/);
 });
+
+test(
+  "a board renders live code cards, refreshes their status, and opens nested levels",
+  { timeout: 90_000 },
+  async (t) => {
+    const result = await runBrowserFixture(t, "board-canvas");
+    if (!result) return;
+    assert.deepEqual(
+      result.root.map((card) => card.id),
+      ["intro", "fresh", "stale", "inside"],
+    );
+    assert.match(result.root.find((card) => card.id === "fresh").className, /is-fresh/);
+    assert.match(result.root.find((card) => card.id === "stale").className, /is-stale/);
+    assert.equal(result.changedLines, 1);
+    assert.match(result.health, /1 of 2 code cards changed since pinned/);
+    assert.equal(result.savedCards, 5);
+    assert.equal(result.savedLinks, 5, "saved cards keep their link so a reload admits them again");
+    assert.equal(result.connectorsSaved, 0, "connectors come from the file, never from the saved scene");
+    assert.match(result.healthAfter, /all match the code/);
+    assert.deepEqual(result.nested, ["deep"]);
+    assert.match(result.crumbs, /Math\s*\/\s*Inside/);
+  },
+);

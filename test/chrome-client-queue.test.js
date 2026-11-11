@@ -7677,6 +7677,20 @@ test("the chrome's queued anchor agrees with the server's transcript anchor for 
       text: "2 layout issues",
       target: { type: "layout-warnings", warnings: [{ id: "a" }, { id: "b" }] },
     },
+    {
+      prompt: "note",
+      selector: "",
+      tag: "board",
+      text: "Board: canvas marks",
+      target: { type: "board-canvas", scenePath: "/s", stats: {} },
+    },
+    {
+      prompt: "note",
+      selector: "section#srv",
+      tag: "section",
+      text: "Server code",
+      target: { type: "board-card", card: "srv", kind: "code", title: "Artifact route", code: "src/server.js:1-2" },
+    },
     { prompt: "note", selector: "", tag: "message", text: "Freeform message" },
   ];
   const unescape = (value) =>

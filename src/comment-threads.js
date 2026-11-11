@@ -9,7 +9,7 @@ const REVISION_ID_RE = /^\S{1,128}$/;
 // heading line makes it an ordinary Markdown heading, so `## c4 model` stays in chat.
 const SECTION_RE = /^##[ \t]+(c[1-9]\d{0,8})(?:[ \t]+reveal=(\S+))?[ \t]*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
-const NON_THREAD_TAGS = new Set(["message", "whiteboard", "layout-warnings"]);
+const NON_THREAD_TAGS = new Set(["message", "whiteboard", "board", "layout-warnings"]);
 
 function badRequest(message) {
   return Object.assign(new Error(message), { status: 400, code: "VALIDATION_ERROR" });

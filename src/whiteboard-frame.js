@@ -47,6 +47,7 @@ import {
   WHITEBOARD_TEXT_METRICS_VERSION,
 } from "./whiteboard-core.js";
 import { findLibraryItem, parseLibraryIconDirectives, toExcalidrawLibraryItems } from "./whiteboard-libraries.js";
+import { startBoard } from "./board-frame.js";
 
 const SAVE_DEBOUNCE_MS = 800;
 const MERMAID_FONT_SIZE = 16;
@@ -712,16 +713,34 @@ function main() {
   state.diagramIndex = Number.isInteger(diagramIndex) && diagramIndex >= 0 && diagramIndex <= 999 ? diagramIndex : 0;
   state.diagramId = String(frameUrl.searchParams.get("diagramId") || "");
   let initialized = false;
+  /** @type {{ onTopMessage: (message: any) => void, onParentMessage: (message: any) => void } | null} */
+  let board = null;
   window.addEventListener("message", (event) => {
+    // A board frame also takes view-only commands (reveal a card, thread
+    // counts) from the artifact SDK that mounted it. Nothing from the parent
+    // can save, queue, or reach the server.
+    if (board && event.source === window.parent && window.parent !== window.top) {
+      const msg = event.data || {};
+      if (typeof msg.type === "string" && msg.type.startsWith("hilight-board:")) board.onParentMessage(msg);
+      return;
+    }
     if (event.source !== window.top) return;
     const msg = event.data || {};
     if (msg.type === "lavish-whiteboard:init" && !initialized && typeof msg.channelId === "string" && msg.channelId) {
       initialized = true;
       state.channelId = msg.channelId;
+      if (msg.board && typeof msg.board === "object" && Array.isArray(msg.board.cards)) {
+        board = startBoard(msg, { post });
+        return;
+      }
       buildShell(msg.theme === "dark" ? "dark" : "light", msg.mode === "inline" ? "inline" : "overlay");
       handleInit(msg);
     }
     if (!initialized || msg.channelId !== state.channelId) return;
+    if (board) {
+      board.onTopMessage(msg);
+      return;
+    }
     if (msg.type === "lavish-whiteboard:sourceChanged") handleSourceChanged(msg);
     if (msg.type === "lavish-whiteboard:prepareTeardown") prepareTeardown(msg);
     if (msg.type === "lavish-whiteboard:flush") flushSaveNow(msg);
