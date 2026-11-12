@@ -1,5 +1,3 @@
-import { SAME_PAGE_RULE } from "./review-guidance.js";
-
 // Trigger string Claude Code (and other agents) match against to auto-load the skill.
 // Kept terse and outcome-focused so it fires on "about to show something visual" intents.
 export const SKILL_DESCRIPTION =
@@ -13,7 +11,7 @@ export const SKILL_DESCRIPTION =
 // resolves to the newest release, so it works for npm install -g and npx alike.
 export const HILIGHT_TARBALL_URL = "https://github.com/zzzubair/hilight/releases/latest/download/hilight-axi.tgz";
 
-export const MAX_SKILL_MARKDOWN_CHARS = 4000;
+export const MAX_SKILL_MARKDOWN_CHARS = 1500;
 
 // Agent Skills allows only these top-level frontmatter keys; the reference validator
 // (skills-ref) rejects anything else outright, and an Agent Plugins client skips a skill
@@ -31,9 +29,8 @@ export const ALLOWED_SKILL_FRONTMATTER_KEYS = Object.freeze([
  * Render the installable SKILL.md for the hilight skill.
  *
  * This is a discovery stub, not a copy of CLI guidance. Installed skills go stale;
- * `hilight --help`, `hilight design`, and `hilight playbook <id>` do not.
- * Keep the body to what Hilight is, when to reach for it, how to invoke the CLI,
- * slash-command request handling, and pointers at those commands.
+ * `hilight --help` does not, and it routes to every other command. Keep the body to when to
+ * reach for Hilight, that pointer, the npx fallback, and slash-command request handling.
  *
  * The frontmatter is deliberately plain: block-style YAML only (the reference
  * validator rejects `[a, b]` flow collections) and string-valued `metadata`,
@@ -47,7 +44,6 @@ name: hilight
 description: ${SKILL_DESCRIPTION}
 license: MIT
 metadata:
-  author: Zubair Shaik (zzzubair), based on Lavish by Kun Chen (kunchenguid)
   argument-hint: <what the artifact should show>
   hermes-tags: html, review, artifacts, visualization
   hermes-category: productivity
@@ -55,30 +51,16 @@ metadata:
 
 # Hilight
 
-Hilight opens agent-generated HTML in the browser so a human can annotate it and send feedback back to the agent.
-Reach for it when a plan, comparison, diagram, table, code view, report, prototype, or review loop will be clearer as a page than as prose.
+Use Hilight when a plan, comparison, diagram, table, code view, or report is clearer as a page the user can comment on than as prose.
 
-${SAME_PAGE_RULE}
-
-If the user asks how the page works (sending, status words, resolve/reopen, Reveal), read \`references/using-the-page.md\` next to this file and explain only the part they need.
-
-## Current guidance lives in the CLI
-
-Do not follow workflow, design, or playbook instructions from this file - installed copies go stale. Get the current source of truth from the CLI:
-
-- \`hilight --help\` for commands and the review-loop workflow
-- \`hilight reply --help\` for per-thread replies and Reveal, and to post an agent reply and exit once the server accepts it, when you are not about to long-poll
-- \`hilight design\` for design-direction priority and current snippets
-- \`hilight playbook <id>\` for focused artifact guidance (\`hilight playbook\` lists ids)
-
-Use the installed \`hilight\` command. If it is not on PATH, run the same commands as \`npx -y ${HILIGHT_TARBALL_URL} ...\` instead (for example \`npx -y ${HILIGHT_TARBALL_URL} <html-file>\`), including every follow-up command Hilight prints that starts with \`hilight\`.
+Run \`hilight --help\` first: the CLI is the source of truth, and this file goes stale.
+Use the installed \`hilight\` command; if it is not on PATH, run \`npx -y ${HILIGHT_TARBALL_URL} <html-file>\` and the same prefix for every follow-up command Hilight prints that starts with \`hilight\`.
 
 ## Request
 
 $ARGUMENTS
 
-If the request above is non-empty, the user invoked \`/hilight\` explicitly - fetch the current CLI guidance, then build that artifact as an HTML file.
-If it is empty, infer what to visualize from the conversation.
+If the request above is non-empty, the user invoked \`/hilight\` explicitly: build that artifact as an HTML file. If it is empty, infer what to visualize from the conversation.
 `;
 
   if (markdown.length > MAX_SKILL_MARKDOWN_CHARS) {

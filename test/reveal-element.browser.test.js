@@ -168,9 +168,18 @@ test(
         return JSON.stringify(response.status);
       }`);
       assert.equal(sent, 200);
+      // The agent takes the comment first: a reply sent while a comment is still undelivered is
+      // held (status: held), not posted.
+      const taken = run(process.execPath, ["bin/hilight.js", "poll", artifact, "--timeout-ms", "3000"], lavishEnv);
+      assert.match(taken, /What changed\?/, taken);
       const replyFile = path.join(temp, "reply.md");
       await writeFile(replyFile, "## c1 reveal=r1\nBoth sections changed.\n");
-      run(process.execPath, ["bin/hilight.js", "reply", artifact, "--agent-reply-file", replyFile], lavishEnv);
+      const posted = run(
+        process.execPath,
+        ["bin/hilight.js", "reply", artifact, "--agent-reply-file", replyFile],
+        lavishEnv,
+      );
+      assert.match(posted, /status: sent/, posted);
       evaluate(`async () => {
         const deadline = Date.now() + 10000;
         while (!document.querySelector('#marginThreadCanvas .thread-reveal:not([disabled])')) {

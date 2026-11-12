@@ -1,4 +1,4 @@
-/* global CSS, Element, MutationObserver, ResizeObserver, document, getComputedStyle, parent, window */
+/* global CSS, DOMRect, Element, MutationObserver, ResizeObserver, document, getComputedStyle, parent, window */
 
 import { readArtifactRevisions } from "./artifact-revisions.js";
 import * as mermaidHelpers from "./mermaid-node.js";
@@ -1084,10 +1084,165 @@ export function createArtifactSdk(
       if (target) target.iframe.src = whiteboardFrameSrc(target);
     }
     if (msg.type === "lavish:requestLayoutDiagnostics") scheduleLayoutAudit(true);
+    if (msg.type === "lavish:artifactShown") {
+      artifactShown = true;
+      postToBoard({ type: "hilight-board:shown" });
+    }
+  });
+
+  // Board canvas. A board file (`[data-hilight-board]` holding `[data-card]`
+  // sections) is shown, at view time only, as an Excalidraw canvas: the SDK
+  // hides the board element and covers the page with one sandboxed whiteboard
+  // frame (diagramIndex 999, BOARD_SCENE_INDEX in src/board-core.js) that the
+  // chrome authenticates and feeds like any inline whiteboard. The file is
+  // untouched and still reads as a plain page without Hilight.
+  //
+  // Cards stay real elements of this document, so comments anchor on them
+  // with ordinary selectors. The frame reports where each card is on screen,
+  // and those rects stand in for the hidden elements' own boxes in thread
+  // layout and the annotation card.
+  /** @type {{ root: Element, iframe: HTMLIFrameElement, ids: Map<Element, string>, rects: Map<string, number[]>, lastThreads: string, live: boolean } | null} */
+  let board = null;
+  // Set once the chrome has taken its layout gate off this document. The board frame may start
+  // listening after that message, so its first geometry gets it again.
+  let artifactShown = false;
+  /** @type {Set<() => void>} */
+  const boardLiveWaiters = new Set();
+
+  function waitForBoardLive(maxMs) {
+    if (!board || board.live) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        window.clearTimeout(timer);
+        boardLiveWaiters.delete(done);
+        resolve(undefined);
+      };
+      const timer = window.setTimeout(done, maxMs);
+      boardLiveWaiters.add(done);
+    });
+  }
+
+  // Mirrors parseBoardHtml's card and id rules (src/board-source.js): a card
+  // is any <section> or [data-card] inside the board; its id is the id
+  // attribute, else card-<n> in document order for a missing or repeated id.
+  function boardCardIds(root) {
+    const ids = new Map();
+    const used = new Set();
+    let generated = 0;
+    for (const node of root.querySelectorAll("section, [data-card]")) {
+      let id = (node.getAttribute("id") || "").trim();
+      if (!id || used.has(id)) {
+        do id = "card-" + ++generated;
+        while (used.has(id));
+      }
+      used.add(id);
+      ids.set(node, id);
+    }
+    return ids;
+  }
+
+  function mountBoard() {
+    if (board) return;
+    const root = document.querySelector("[data-hilight-board]");
+    if (!root) return;
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("data-lavish-ui", "board");
+    iframe.setAttribute("title", "Board canvas");
+    iframe.setAttribute("sandbox", "allow-scripts allow-popups");
+    iframe.src =
+      "/whiteboard-frame?" + new URLSearchParams({ diagramIndex: "999", key: String(sessionKey || ""), board: "1" });
+    iframe.style.cssText =
+      "position:fixed;inset:0;width:100%;height:100%;margin:0;border:0;z-index:2147483646;background:#efeeea;color-scheme:normal";
+    /** @type {HTMLElement} */ (root).style.display = "none";
+    document.documentElement.style.overflow = "hidden";
+    // A sideways trackpad swipe over the canvas never becomes browser back or forward.
+    document.documentElement.style.overscrollBehavior = "none";
+    (document.body || document.documentElement).appendChild(iframe);
+    board = { root, iframe, ids: boardCardIds(root), rects: new Map(), lastThreads: "", live: false };
+  }
+
+  function boardCardOf(el) {
+    if (!board || !(el instanceof Element) || !board.root.contains(el)) return null;
+    const card = el.closest("section, [data-card]");
+    return card && card !== board.root && board.root.contains(card) ? card : null;
+  }
+
+  function boardCardId(card) {
+    if (!board) return "";
+    if (!board.ids.has(card)) board.ids = boardCardIds(board.root);
+    return board.ids.get(card) || "";
+  }
+
+  function boardCardById(id) {
+    if (!board) return null;
+    for (const [node, value] of board.ids) if (value === id && node.isConnected) return node;
+    return null;
+  }
+
+  // The on-screen box of an element, with board cards answered by the canvas.
+  function elementRect(el) {
+    const card = boardCardOf(el);
+    if (!card) return el.getBoundingClientRect();
+    const rect = board?.rects.get(boardCardId(card));
+    return rect ? new DOMRect(rect[0], rect[1], rect[2], rect[3]) : new DOMRect(0, 0, 0, 0);
+  }
+
+  function postToBoard(message) {
+    board?.iframe.contentWindow?.postMessage(message, "*");
+  }
+
+  function openBoardComment(msg) {
+    const id = String(msg.card || "");
+    const node = boardCardById(id);
+    if (!node) return;
+    const c = context(node);
+    const title = String(msg.title || "").slice(0, 160);
+    if (title) c.text = title;
+    c.target = {
+      type: "board-card",
+      card: id,
+      kind: String(msg.kind || "html"),
+      title,
+      ...(msg.code ? { code: String(msg.code), status: String(msg.status || "") } : {}),
+    };
+    showAnnotationCard(node, { context: c, rect: elementRect(node) });
+  }
+
+  function focusBoardThread(cardId) {
+    if (!cardId) return;
+    const position = threadPositions.find(
+      (entry) => entry.element && boardCardId(boardCardOf(entry.element)) === cardId && entry.rects.length,
+    );
+    if (position) postArtifactMessage("lavish:focusThread", { id: position.id });
+  }
+
+  window.addEventListener("message", (event) => {
+    if (!board || event.source !== board.iframe.contentWindow) return;
+    const msg = event.data || {};
+    if (msg.type === "hilight-board:geometry") {
+      const cards = msg.cards && typeof msg.cards === "object" ? msg.cards : {};
+      board.rects = new Map(
+        Object.entries(cards).filter(
+          ([, rect]) => Array.isArray(rect) && rect.length === 4 && rect.every((value) => Number.isFinite(value)),
+        ),
+      );
+      // The first geometry means the canvas is listening: resend the thread counts,
+      // which were deduped against messages it posted before it started.
+      if (!board.live) {
+        board.live = true;
+        board.lastThreads = "";
+        if (artifactShown) postToBoard({ type: "hilight-board:shown" });
+        for (const done of [...boardLiveWaiters]) done();
+      }
+      scheduleThreadLayout();
+    }
+    if (msg.type === "hilight-board:comment") openBoardComment(msg);
+    if (msg.type === "hilight-board:select") focusBoardThread(String(msg.card || ""));
   });
 
   function enhanceMermaid() {
     for (const svg of findMermaidSvgs()) {
+      if (board && board.root.contains(svg)) continue;
       embedWhiteboard(svg);
       if (mermaidViewports.has(svg)) continue;
       const viewport = createViewport(svg);
@@ -1297,6 +1452,7 @@ export function createArtifactSdk(
   }
 
   const layoutAuditSettleMs = 180;
+  const boardAuditWaitMs = 1200;
   const layoutAuditMaxWaitMs = 2000;
   const layoutAuditAnimationMaxWaitMs = 4000;
   const layoutAuditStableSampleMs = 120;
@@ -2036,6 +2192,16 @@ export function createArtifactSdk(
   }
 
   async function runLayoutAudit(runId) {
+    if (board) {
+      // A board's page is hidden under its canvas, and diagram surfaces are never audited, so
+      // there is nothing to check: release the gate once the canvas has drawn its cards. The
+      // ordinary pass below would also be slow here, because the gate's opacity 0 makes the
+      // browser throttle this hidden frame to about one animation frame a second.
+      await waitForBoardLive(boardAuditWaitMs);
+      if (runId !== layoutAuditRun) return;
+      publishLayoutAudit([], true, document.readyState === "complete");
+      return;
+    }
     await waitForDocumentFontsReady();
     await waitForResizeObserverSettle();
     const animationsSettled = await waitForFiniteAnimationsSettle();
@@ -2062,11 +2228,18 @@ export function createArtifactSdk(
     if (publishRequested) layoutAuditPublishRequested = true;
     if (layoutAuditTimer) window.clearTimeout(layoutAuditTimer);
     const runId = ++layoutAuditRun;
-    layoutAuditTimer = window.setTimeout(() => {
+    const run = () =>
       runLayoutAudit(runId).catch(() => {
         if (runId === layoutAuditRun) publishLayoutAudit([], false);
       });
-    }, 50);
+    // A board's pass only waits for the canvas's first geometry, so it starts at once: in a window
+    // that is not painting, a timer would be held to the next whole second.
+    if (board) {
+      layoutAuditTimer = 0;
+      void Promise.resolve().then(run);
+      return;
+    }
+    layoutAuditTimer = window.setTimeout(run, 50);
   }
 
   function startLayoutAudit() {
@@ -2381,7 +2554,7 @@ export function createArtifactSdk(
       highlightElement(selected);
     }
 
-    const rect = options.range ? options.range.getBoundingClientRect() : anchor.getBoundingClientRect();
+    const rect = options.rect || (options.range ? options.range.getBoundingClientRect() : elementRect(anchor));
     const card = document.createElement("div");
     card.className = "lavish-annotation-card";
     const nodeLabel = c.tag === "mermaid-node" ? c.target?.label || c.text || "" : "";
@@ -2392,8 +2565,10 @@ export function createArtifactSdk(
     // nothing, so it falls back to the plain element heading rather than a dangling "cell: ".
     const isCellItself = isTableCell && (c.tag === "td" || c.tag === "th");
     const tableLabel = isTableCell ? [c.target?.rowLabel, c.target?.columnLabel].filter(Boolean).join(" → ") : "";
-    const heading =
-      c.tag === "text"
+    const boardCard = c.target?.type === "board-card";
+    const heading = boardCard
+      ? "Comment on " + escapeAnnotationText(c.target?.title || "this card")
+      : c.tag === "text"
         ? "Annotate text"
         : tableLabel
           ? isCellItself
@@ -2402,8 +2577,9 @@ export function createArtifactSdk(
           : c.tag === "mermaid-node"
             ? "Annotate node" + (nodeLabel ? ": " + escapeAnnotationText(nodeLabel) : "")
             : "Annotate &lt;" + c.tag + "&gt;";
-    const placeholder =
-      c.tag === "text"
+    const placeholder = boardCard
+      ? "Tell the agent what to change about this card..."
+      : c.tag === "text"
         ? "Tell the agent what to change about this text..."
         : isCellItself
           ? "Tell the agent what to change about this table cell..."
@@ -2645,11 +2821,7 @@ export function createArtifactSdk(
       const isText = anchor.target?.type === "text-range";
       const element = isText ? null : safeQuerySelector(anchor.selector);
       const range = isText ? threadRange(anchor) : null;
-      const rects = range
-        ? [...range.getClientRects()]
-        : element && !isLavishUi(element)
-          ? [element.getBoundingClientRect()]
-          : [];
+      const rects = range ? [...range.getClientRects()] : element && !isLavishUi(element) ? [elementRect(element)] : [];
       const visible = rects.filter((rect) => rect.width > 0 && rect.height > 0);
       positions.push({
         id: anchor.id,
@@ -2681,6 +2853,19 @@ export function createArtifactSdk(
       }
     }
     paintActiveThread();
+    if (board) {
+      /** @type {Record<string, number>} */
+      const counts = {};
+      for (const position of threadPositions) {
+        const id = position.element ? boardCardId(boardCardOf(position.element)) : "";
+        if (id) counts[id] = (counts[id] || 0) + 1;
+      }
+      const serializedCounts = JSON.stringify(counts);
+      if (serializedCounts !== board.lastThreads) {
+        board.lastThreads = serializedCounts;
+        postToBoard({ type: "hilight-board:threads", counts });
+      }
+    }
     const serialized = JSON.stringify(positions);
     if (serialized !== lastThreadGeometry) {
       lastThreadGeometry = serialized;
@@ -2838,6 +3023,11 @@ export function createArtifactSdk(
     clearRevealMarker();
     const target = selector === "html" ? document.documentElement : safeQuerySelector(selector);
     if (!(target instanceof Element)) return;
+    const boardCard = boardCardOf(target);
+    if (boardCard) {
+      postToBoard({ type: "hilight-board:reveal", card: boardCardId(boardCard) });
+      return;
+    }
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     target.scrollIntoView({ block: "center", inline: "center", behavior: reducedMotion ? "instant" : "smooth" });
     const root = ensureShadow();
@@ -3001,8 +3191,10 @@ export function createArtifactSdk(
 
   // Mermaid renders asynchronously (and can re-render on theme/resize), so we
   // enhance on load, again shortly after, and whenever the DOM adds new SVGs.
+  mountBoard();
   enhanceMermaid();
   if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mountBoard, { once: true });
     document.addEventListener("DOMContentLoaded", enhanceMermaid, { once: true });
   }
   const mermaidObserver = new MutationObserver(() => scheduleMermaidEnhance());

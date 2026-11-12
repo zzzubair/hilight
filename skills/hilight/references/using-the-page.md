@@ -10,4 +10,4 @@ Read this only when the user asks how the page works or seems stuck. Explain the
 - **Reveal change:** when the agent changed the page because of a comment, its reply has a **Reveal change** button that scrolls to and flashes the changed part.
 - **Resolve:** hides a finished thread. **Undo** appears for a few seconds. Later, the **N resolved** button in the top bar lists resolved threads; pick one to reopen it.
 - **Annotate switch** (top bar, or Ctrl+I / Cmd+I): off means clicks just read the page and follow links; on means clicks start comments.
-- **Agent status** in the top bar: **Listening** means the agent will get what you send; **Not listening** means ask the agent to start listening again (re-run `hilight poll`).
+- **Agent status** in the top bar: **Listening** means the agent will get what you send; **Not listening** means ask the agent to start listening again (re-run `hilight poll`); it says since when and why when Hilight knows (for example, the server restarted). **Activity** in the overflow menu lists what happened, with times: when the agent listened, what reached it, and when it replied.

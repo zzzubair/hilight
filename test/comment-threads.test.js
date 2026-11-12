@@ -132,6 +132,50 @@ test("a sections-only reply adds nothing to chat; a plain reply still goes to ch
   assert.equal(session.threads[0].messages.length, 2);
 });
 
+test("a plain reply to comments from one thread lands in that thread, not the page thread", async (t) => {
+  const { store, key, file } = await fixture(t);
+  await store.takeFeedback(key);
+  // Mixed batch (two threads and a page note): a plain reply cannot pick one, so it stays in chat.
+  await store.addAgentReply(key, "All three handled.");
+  let session = await store.findByKey(key);
+  assert.equal(session.chat.at(-1).text, "All three handled.");
+  assert.equal(session.threads[1].messages.length, 1);
+
+  // The reviewer comments on the card behind thread c2 again; the agent answers without `## c2`.
+  await store.queuePrompts(key, {
+    prompts: [{ prompt_id: "p4", thread_id: "c2", tag: "p", text: "Beta", prompt: "Still unclear" }],
+  });
+  await store.takeFeedback(key);
+  await store.addAgentReply(key, "Beta is the second paragraph.");
+  session = await store.findByKey(key);
+  assert.deepEqual(
+    session.threads[1].messages.map((message) => [message.role, message.text]),
+    [
+      ["user", "Why beta?"],
+      ["user", "Still unclear"],
+      ["agent", "Beta is the second paragraph."],
+    ],
+  );
+  assert.notEqual(session.chat.at(-1).text, "Beta is the second paragraph.", "nothing lands in the page thread");
+  assert.ok(session.chat.filter((entry) => entry.role === "user").every((entry) => entry.done_at));
+
+  // A new anchored comment opens a thread; a plain answer to just it goes there too.
+  await store.queuePrompts(key, {
+    prompts: [{ prompt_id: "p5", selector: "#a", tag: "p", text: "Alpha", prompt: "And this card?" }],
+  });
+  const { prompts } = await store.takeFeedback(key);
+  await store.addAgentReply(key, "It is the first paragraph.");
+  session = await store.findByKey(key);
+  const thread = session.threads.find((item) => item.id === prompts[0].thread_id);
+  assert.equal(thread.messages.at(-1).text, "It is the first paragraph.");
+
+  // With nothing delivered and unanswered, a plain reply is a page message.
+  await store.addAgentReply(key, "Anything else?");
+  session = await store.findByKey(key);
+  assert.equal(session.chat.at(-1).text, "Anything else?");
+  assert.ok(file);
+});
+
 test("an unknown thread section rejects the whole reply atomically", async (t) => {
   const { store, key } = await fixture(t);
   const before = await store.findByKey(key);

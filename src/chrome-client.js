@@ -1,4 +1,4 @@
-/* global document, location, window */
+/* global document, getComputedStyle, location, window */
 
 const sessionDataElement = document.getElementById("lavish-session");
 const sessionData = JSON.parse(sessionDataElement?.textContent || "{}");
@@ -36,7 +36,7 @@ const THREAD_COLLAPSE_AFTER = 2;
 // A compact card is one header line. chrome.css pins `.comment-thread.is-compact` to this height,
 // so placement never has to measure one.
 const THREAD_COMPACT_HEIGHT = 34;
-const NON_THREAD_TAGS = new Set(["message", "whiteboard", "layout-warnings"]);
+const NON_THREAD_TAGS = new Set(["message", "whiteboard", "board", "layout-warnings"]);
 const threadCardCache = new Map();
 // Measured resting heights by thread id. Placement runs on every artifact scroll frame, so it
 // reads only these and the open card; a rebuilt card or a resize clears its entry.
@@ -46,6 +46,29 @@ let pageBarHeight = 0;
 let lastThreadAnchors = "[]";
 let pageSignature = "";
 let resolvedDrawerOpen = false;
+// Since when and why nobody is listening, as the server last reported it (null when unknown).
+/** @type {{ since: string, why: string } | null} */
+let agentStopped = null;
+let activityDrawerOpen = false;
+let activityRequest = 0;
+// Canvas mode (see renderBoardHeader).
+const boardTitle = document.getElementById("boardTitle");
+const boardInfoWrap = document.getElementById("boardInfoWrap");
+const boardInfoButton = document.getElementById("boardInfoButton");
+const boardInfo = document.getElementById("boardInfo");
+const boardInfoText = document.getElementById("boardInfoText");
+const boardHealthSection = document.getElementById("boardHealth");
+const boardHealthText = document.getElementById("boardHealthText");
+const boardHealthShow = document.getElementById("boardHealthShow");
+const boardProblems = document.getElementById("boardProblems");
+const boardMarks = /** @type {HTMLFormElement | null} */ (document.getElementById("boardMarks"));
+const boardNote = /** @type {HTMLInputElement | null} */ (document.getElementById("boardNote"));
+const boardQueue = /** @type {HTMLButtonElement | null} */ (document.getElementById("boardQueue"));
+const BOARD_QUEUE_TIMEOUT_MS = 20000;
+/** @type {{ text: string, detail: string, warn: boolean, drifted: string, problems: string[] }} */
+let boardHealth = { text: "", detail: "", warn: false, drifted: "", problems: [] };
+let boardQueueTimer = 0;
+let threadCounts = { resolved: 0, offPage: 0 };
 let resolveToastTimer;
 let resolveToastThreadId = "";
 const RESOLVE_TOAST_MS = 6000;
@@ -148,6 +171,11 @@ const sheetScrim = /** @type {HTMLDivElement} */ (document.getElementById("sheet
 const pageThread = /** @type {HTMLElement} */ (document.getElementById("pageThread"));
 const pageMessages = /** @type {HTMLOListElement} */ (document.getElementById("pageMessages"));
 const pageThreadStatus = /** @type {HTMLSpanElement} */ (document.getElementById("pageThreadStatus"));
+const pageThreadTime = /** @type {HTMLTimeElement | null} */ (document.getElementById("pageThreadTime"));
+const activityOpenButton = /** @type {HTMLButtonElement | null} */ (document.getElementById("activityOpen"));
+const activityDrawer = /** @type {HTMLDivElement | null} */ (document.getElementById("activityDrawer"));
+const activityNow = /** @type {HTMLParagraphElement | null} */ (document.getElementById("activityNow"));
+const activityList = /** @type {HTMLOListElement | null} */ (document.getElementById("activityList"));
 const agentStatus = /** @type {HTMLSpanElement} */ (document.getElementById("agentStatus"));
 const resolvedWrap = /** @type {HTMLDivElement} */ (document.getElementById("resolvedWrap"));
 const resolvedButton = /** @type {HTMLButtonElement} */ (document.getElementById("resolvedButton"));
@@ -161,6 +189,11 @@ const attachImagesButton = /** @type {HTMLButtonElement} */ (document.getElement
 const sendButton = /** @type {HTMLButtonElement} */ (document.getElementById("send"));
 const sendAndEndButton = /** @type {HTMLButtonElement} */ (document.getElementById("sendAndEnd"));
 const annotationSwitch = /** @type {HTMLButtonElement} */ (document.getElementById("annotation"));
+const commentsToggle = /** @type {HTMLButtonElement | null} */ (document.getElementById("commentsToggle"));
+const commentsToggleCount = document.getElementById("commentsToggleCount");
+// Desktop only: the reviewer can fold the comments margin away so the artifact
+// (a board canvas especially) gets the full width. Remembered per session.
+const commentsCollapsedKey = "lavish-axi:comments-collapsed:" + key;
 const moreWrap = /** @type {HTMLDivElement} */ (document.getElementById("moreWrap"));
 const moreButton = /** @type {HTMLButtonElement} */ (document.getElementById("moreButton"));
 const moreMenu = /** @type {HTMLDivElement} */ (document.getElementById("moreMenu"));
@@ -236,6 +269,12 @@ const layoutGateMaxHoldMs =
   Number.isFinite(configuredLayoutGateMaxHoldMs) && configuredLayoutGateMaxHoldMs > 0
     ? Math.min(configuredLayoutGateMaxHoldMs, 60_000)
     : 12_000;
+// The plain checking gate gets a much shorter hold than a failure card (CHROME_LAYOUT_GATE_CHECK_MS).
+const configuredLayoutGateCheckMs = Number(sessionData.layoutGateCheckMs);
+const layoutGateCheckMs =
+  Number.isFinite(configuredLayoutGateCheckMs) && configuredLayoutGateCheckMs > 0
+    ? Math.min(configuredLayoutGateCheckMs, layoutGateMaxHoldMs)
+    : layoutGateMaxHoldMs;
 let chromeOutdatedReason = "";
 let chromeOutdatedGeneration = 0;
 let outdatedReloadInFlight = false;
@@ -547,6 +586,9 @@ function promptAnchor(prompt) {
   const target = prompt?.target && typeof prompt.target === "object" ? prompt.target : null;
   const selector = boundAnchorText(prompt?.selector, ANCHOR_SELECTOR_MAX);
   const withSelector = (anchor) => (selector ? { ...anchor, selector } : anchor);
+  if (tag === "board") {
+    return { kind: "whiteboard", label: "board", excerpt: boundAnchorText("Canvas marks", ANCHOR_EXCERPT_MAX) };
+  }
   if (tag === "whiteboard") {
     const index = Number(target?.diagramIndex);
     const excerpt = Number.isInteger(index) && index >= 0 ? "Diagram " + (index + 1) : prompt.text;
@@ -578,6 +620,13 @@ function promptAnchor(prompt) {
       kind: "node",
       label: "node",
       excerpt: boundAnchorText(target.label || prompt.text, ANCHOR_EXCERPT_MAX),
+    });
+  }
+  if (type === "board-card") {
+    return withSelector({
+      kind: "element",
+      label: "card",
+      excerpt: boundAnchorText(target.title || prompt.text, ANCHOR_EXCERPT_MAX),
     });
   }
   const elementTag = tag.trim();
@@ -637,6 +686,10 @@ function updateSendState() {
   frame.inert = ended || terminalReserved;
   const count = draftCount();
   sendButton.textContent = count ? "Send to agent (" + count + ")" : "Send to agent";
+  if (commentsToggleCount) {
+    commentsToggleCount.textContent = String(count);
+    commentsToggleCount.hidden = !(count && document.body.classList.contains("comments-collapsed"));
+  }
   sendButton.classList.toggle("has-drafts", count > 0);
   sendButton.disabled = ended || terminalReserved;
   sendAndEndButton.disabled = ended || Boolean(terminalSubmission?.inFlight);
@@ -993,8 +1046,12 @@ function setAgentPresence(state) {
 
 function renderAgentStatus() {
   const [text, title] = ended ? ["Ended", "This review session has ended."] : AGENT_STATUS[agentPresence];
-  agentStatus.textContent = text;
-  agentStatus.title = title;
+  const stopped = !ended && agentPresence === "waiting" ? agentStopped : null;
+  const short = stopped ? shortStopReason(stopped.why) : "";
+  agentStatus.textContent = stopped
+    ? `Not listening since ${clockTime(stopped.since)}${short ? ` · ${short}` : ""}`
+    : text;
+  agentStatus.title = stopped ? notListeningSentence(stopped) : title;
   agentStatus.dataset.state = ended ? "ended" : agentPresence;
 }
 
@@ -1017,6 +1074,33 @@ function chromeOutdatedCopy(reason) {
 
 // Say so where the user can dismiss it, and never reload on their behalf - a forced reload
 // interrupts whatever they were reading or writing.
+// "23:05", or "12 Nov 23:05" when it was not today. An unreadable time reads as nothing.
+function clockTime(iso) {
+  const date = new Date(String(iso || ""));
+  if (Number.isNaN(date.getTime())) return "";
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (date.toDateString() === new Date().toDateString()) return time;
+  return `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
+}
+
+// Two or three words for the status bar; the full reason is in its tooltip and in Activity.
+function shortStopReason(why) {
+  const text = String(why || "");
+  if (/hilight stop/.test(text)) return "server was stopped";
+  if (/server stopped/.test(text)) return "server restarted";
+  if (/poll disconnected/.test(text)) return "poll closed";
+  if (/took over/.test(text)) return "listener replaced";
+  if (/timed out/.test(text)) return "poll timed out";
+  if (/took your comments/.test(text)) return "took your comments";
+  if (/review page was closed/.test(text)) return "page closed";
+  return "";
+}
+
+function notListeningSentence(stopped) {
+  const at = clockTime(stopped.since);
+  return `Your agent stopped listening${at ? ` at ${at}` : ""}${stopped.why ? `: ${stopped.why}` : ""}. Comments you send will queue until it polls again.`;
+}
+
 function setChromeOutdated(visible, reason = chromeOutdatedReason) {
   chromeOutdatedReason = String(reason || "");
   chromeOutdatedGeneration += 1;
@@ -1140,8 +1224,11 @@ function readSheetOpen() {
   }
 }
 
+// A board keeps the desktop layout at every width (see isBoardPage in src/server.js).
+const boardPage = sessionData.boardPage === true;
+
 function isMobileSheet() {
-  return Boolean(sheetMedia && sheetMedia.matches);
+  return !boardPage && Boolean(sheetMedia && sheetMedia.matches);
 }
 
 function setSheetOpen(open) {
@@ -1187,7 +1274,8 @@ function sheetSummary() {
   if (agentPresence === "working") return { text: "Agent is working", accent: false, unread: false };
   if (agentPresence === "external") return { text: "External listener active", accent: false, unread: false };
   if (agentPresence === "listening") return { text: "Agent listening", accent: false, unread: false };
-  return { text: "Agent not listening", accent: false, unread: false };
+  const since = agentStopped ? clockTime(agentStopped.since) : "";
+  return { text: since ? `Agent not listening since ${since}` : "Agent not listening", accent: false, unread: false };
 }
 
 function renderSheetSummary() {
@@ -1214,6 +1302,7 @@ function isCommentsHidden() {
 
 function revealComments() {
   if (isMobileSheet()) setSheetOpen(true);
+  else unfoldComments();
 }
 
 function noteAgentReply(text) {
@@ -1488,6 +1577,7 @@ function enqueuePrompt(rawPrompt, /** @type {FeedbackPreparation | null} */ prep
   }
   persistQueuedPrompts();
   render();
+  unfoldComments();
   return true;
 }
 
@@ -2102,6 +2192,7 @@ function clearLayoutGateTimer() {
 }
 
 function setLayoutGateCard(state) {
+  if (layoutGateOverlay) layoutGateOverlay.dataset.state = state;
   if (!layoutGateTitle || !layoutGateCopy) return;
 
   if (state === "held") {
@@ -2135,6 +2226,7 @@ function setLayoutGateFailure(title, copy, actionLabel = "Reload", onAction, { s
   if (layoutGateFailureActive && layoutGateFailureSticky && !sticky) return;
   layoutGateFailureActive = true;
   layoutGateFailureSticky = sticky;
+  if (layoutGateOverlay) layoutGateOverlay.dataset.state = "failure";
   layoutGateCycle += 1;
   // Failure copy must not disable the visual gate's own recovery paths. Keep a fresh hold timer
   // over the card so a server replacement or any other failure cannot strand the artifact behind
@@ -2206,13 +2298,34 @@ function clearLayoutGateFailure() {
     layoutGateAction.onclick = () => forceRevealLayoutGate("manual");
   }
   if (layoutGateBypass) layoutGateBypass.hidden = true;
-  revealLayoutGate();
+  revealLayoutGate("recovered");
 }
 
-function revealLayoutGate() {
+// `reason` is why the gate lifted: "pass" (the layout pass finished), "timeout", "manual",
+// "recovered" or "ended". It is recorded as a performance mark so load time can be measured from
+// any browser (`performance.getEntriesByName("hilight:layout-gate-revealed")`).
+function revealLayoutGate(reason = "pass") {
+  if (layoutGateVisible) {
+    try {
+      performance.mark("hilight:layout-gate-revealed", { detail: reason });
+    } catch {
+      // Measuring is optional.
+    }
+  }
   clearLayoutGateTimer();
   layoutGateEscape?.reveal?.();
   setLayoutGateActive(false);
+  announceArtifactShown();
+}
+
+// The gate keeps the artifact at opacity 0 (and the browser throttles its frames) until the
+// layout pass, so the artifact cannot tell on its own when the reviewer first sees it. A board
+// waits for this before moving its camera to what is new. Once per load token.
+let artifactShownToken = "";
+function announceArtifactShown() {
+  if (layoutGateVisible || !artifactSpokeToken || artifactShownToken === artifactSpokeToken) return;
+  artifactShownToken = artifactSpokeToken;
+  postToFrame({ type: "lavish:artifactShown" });
 }
 
 function forceRevealLayoutGate(reason) {
@@ -2221,20 +2334,20 @@ function forceRevealLayoutGate(reason) {
     layoutGateManuallyBypassed = true;
     layoutGateEscape?.manualReveal?.();
   }
-  revealLayoutGate();
+  revealLayoutGate(reason);
 }
 
-function armLayoutGateTimer() {
+function armLayoutGateTimer(holdMs = layoutGateMaxHoldMs) {
   clearLayoutGateTimer();
   if (layoutGateEscape?.arm) {
-    layoutGateEscape.arm(layoutGateMaxHoldMs, () => forceRevealLayoutGate("timeout"));
+    layoutGateEscape.arm(holdMs, () => forceRevealLayoutGate("timeout"));
     return;
   }
   const cycle = layoutGateCycle;
   layoutGateTimer = setTimeout(() => {
     if (cycle !== layoutGateCycle || !layoutGateVisible || ended) return;
     forceRevealLayoutGate("timeout");
-  }, layoutGateMaxHoldMs);
+  }, holdMs);
   layoutGateTimer?.unref?.();
 }
 
@@ -2247,7 +2360,7 @@ function startLayoutGateCycle() {
   // A sticky failure owns the card copy, but never the reveal. Do not repaint it as a checking
   // card, and do arm a fresh timer for reloads that happen while the sticky card is present.
   if (!layoutGateFailureSticky) setLayoutGateCard("checking");
-  armLayoutGateTimer();
+  armLayoutGateTimer(layoutGateFailureSticky ? layoutGateMaxHoldMs : layoutGateCheckMs);
 }
 
 // The gate only waits for fonts and final geometry now. It never holds the artifact hostage
@@ -2255,7 +2368,7 @@ function startLayoutGateCycle() {
 // and hands the result to the passive inbox.
 function handleLayoutGatePass() {
   if (ended || !layoutGateVisible) return;
-  revealLayoutGate();
+  revealLayoutGate("pass");
 }
 
 function initializeLayoutGate() {
@@ -2810,7 +2923,7 @@ function markSessionEnded() {
   if (outdatedBanner) outdatedBanner.hidden = true;
   layoutGateManuallyBypassed = true;
   layoutGateFailureSticky = false;
-  revealLayoutGate();
+  revealLayoutGate("ended");
   layoutGateEscape?.end?.();
   postToFrame({ type: "lavish:setAnnotationMode", enabled: false });
   endedOverlay.hidden = false;
@@ -3314,6 +3427,8 @@ function postToWhiteboardOverlay(message) {
 function postToInlineWhiteboard(index, message) {
   const channel = inlineWhiteboardChannels.get(index);
   if (channel?.window) channel.window.postMessage({ ...message, channelId: channel.channelId }, "*");
+  // Every queue result for the board also settles the comments panel's Queue marks button.
+  if (index === BOARD_SCENE_INDEX && message.type === "lavish-whiteboard:queueResult") finishBoardQueue(message.ok);
 }
 
 function postToWhiteboard(index, placement, message) {
@@ -3373,7 +3488,197 @@ function whiteboardRecord(index) {
   return record;
 }
 
+// Board canvas (src/board-frame.js). The artifact SDK mounts one whiteboard
+// frame over a board file under this reserved diagram index (BOARD_SCENE_INDEX
+// in src/board-core.js; this file is served raw and cannot import it). Its
+// scene persists in the same sidecar store as Mermaid whiteboards.
+const BOARD_SCENE_INDEX = 999;
+const BOARD_REFRESH_MS = 15000;
+let boardRefreshTimer = 0;
+let lastBoardJson = "";
+
+async function fetchBoard() {
+  const response = await fetch("/api/" + key + "/board");
+  if (!response.ok) throw new Error("could not read the board from the artifact file");
+  const data = await response.json();
+  return data.board;
+}
+
+async function handleBoardReady(index, mode, isCurrent) {
+  try {
+    const [boardData, savedResponse] = await Promise.all([fetchBoard(), fetch("/api/" + key + "/whiteboard/" + index)]);
+    const saved = savedResponse.ok ? (await savedResponse.json()).whiteboard : null;
+    if (!isCurrent()) return false;
+    lastBoardJson = JSON.stringify(boardData);
+    postToWhiteboard(index, mode, {
+      type: "lavish-whiteboard:init",
+      mode,
+      diagramIndex: index,
+      diagramId: "",
+      board: boardData,
+      saved,
+      theme: whiteboardTheme(),
+    });
+    startBoardRefresh();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Code cards are re-read from disk while the board is open, so a pinned range
+// that changes under the reviewer flips to stale without a reload.
+async function refreshBoard() {
+  const channel = inlineWhiteboardChannels.get(BOARD_SCENE_INDEX);
+  if (!channel?.initialized || document.visibilityState !== "visible") return;
+  try {
+    const boardData = await fetchBoard();
+    const json = JSON.stringify(boardData);
+    if (json === lastBoardJson || inlineWhiteboardChannels.get(BOARD_SCENE_INDEX) !== channel) return;
+    lastBoardJson = json;
+    postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:update", board: boardData });
+  } catch {
+    // Best effort; the next tick or reload re-reads it.
+  }
+}
+
+// Canvas mode keeps one top bar. The board frame reports its title path,
+// summary and code-card health (hilight-board:header); the bar shows the title,
+// an info popover holds the summary, and the health joins the resolved and
+// off-page counts in one status pill. The note and Queue marks sit in the
+// comments panel beside Send; the frame exports the marks when asked.
+
+const shortText = (value, max) => String(value ?? "").slice(0, max);
+
+function renderBoardHeader(message) {
+  const path = (Array.isArray(message.path) ? message.path : [])
+    .slice(-12)
+    .map((level) => ({ id: shortText(level?.id, 200), title: shortText(level?.title, 200) || "Board" }));
+  if (boardTitle && path.length) {
+    const nodes = [];
+    path.forEach((level, index) => {
+      if (index > 0) {
+        const sep = document.createElement("span");
+        sep.className = "board-sep";
+        sep.textContent = "/";
+        nodes.push(sep);
+      }
+      const last = index === path.length - 1;
+      const crumb = document.createElement(last ? "span" : "button");
+      crumb.className = "board-crumb" + (last ? " is-current" : "");
+      crumb.textContent = level.title;
+      crumb.title = level.title;
+      if (!last) {
+        /** @type {HTMLButtonElement} */ (crumb).type = "button";
+        crumb.onclick = () =>
+          postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:openLevel", level: level.id });
+      }
+      nodes.push(crumb);
+    });
+    boardTitle.replaceChildren(...nodes);
+  }
+  const summary = shortText(message.summary, 2000).trim();
+  if (boardInfoText) boardInfoText.textContent = summary;
+  if (boardInfoWrap) boardInfoWrap.hidden = !summary;
+  if (!summary) setBoardInfoOpen(false);
+  const health = message.health && typeof message.health === "object" ? message.health : {};
+  boardHealth = {
+    text: shortText(health.text, 200),
+    detail: shortText(health.detail, 400),
+    warn: health.warn === true,
+    drifted: shortText(health.drifted, 200),
+    problems: (Array.isArray(health.problems) ? health.problems : []).slice(0, 20).map((item) => shortText(item, 300)),
+  };
+  renderStatusPill();
+}
+
+function setBoardInfoOpen(open) {
+  if (!boardInfo || !boardInfoButton) return;
+  boardInfo.hidden = !open;
+  boardInfoButton.setAttribute("aria-expanded", String(Boolean(open)));
+  if (open) closeMenus();
+}
+
+// The one status pill: code-card health, board problems, then resolved and off-page comments.
+function renderStatusPill() {
+  const { resolved, offPage } = threadCounts;
+  const problems = boardHealth.problems.length;
+  const parts = [
+    boardHealth.text,
+    problems ? `${problems} board problem${problems === 1 ? "" : "s"}` : "",
+    resolved ? resolved + " resolved" : "",
+    offPage ? offPage + " off-page" : "",
+  ].filter(Boolean);
+  resolvedWrap.hidden = !parts.length || ended;
+  resolvedCount.textContent = parts.join(" · ");
+  resolvedButton.classList.toggle("has-health", Boolean(boardHealth.text));
+  resolvedButton.classList.toggle("is-warn", boardHealth.warn || problems > 0);
+  if (boardHealthSection && boardHealthText && boardHealthShow && boardProblems) {
+    boardHealthSection.hidden = !boardHealth.detail && !problems;
+    boardHealthText.textContent = boardHealth.detail;
+    boardHealthText.hidden = !boardHealth.detail;
+    boardHealthShow.hidden = !boardHealth.drifted;
+    boardProblems.replaceChildren(
+      ...boardHealth.problems.map((text) => {
+        const item = document.createElement("li");
+        item.textContent = text;
+        return item;
+      }),
+    );
+    boardProblems.hidden = !problems;
+  }
+  if (resolvedWrap.hidden && resolvedDrawerOpen) setResolvedDrawerOpen(false);
+}
+
+function finishBoardQueue(ok) {
+  if (!boardQueue) return;
+  window.clearTimeout(boardQueueTimer);
+  boardQueue.disabled = false;
+  boardQueue.textContent = "Queue marks";
+  if (ok && boardNote) boardNote.value = "";
+}
+
+if (boardInfoButton) {
+  boardInfoButton.onclick = () => setBoardInfoOpen(Boolean(boardInfo?.hidden));
+  document.addEventListener("mousedown", (event) => {
+    if (boardInfo && !boardInfo.hidden && !boardInfoWrap?.contains(/** @type {Node} */ (event.target))) {
+      setBoardInfoOpen(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && boardInfo && !boardInfo.hidden) {
+      setBoardInfoOpen(false);
+      boardInfoButton.focus();
+    }
+  });
+}
+if (boardHealthShow) {
+  boardHealthShow.onclick = () => {
+    if (!boardHealth.drifted) return;
+    closeResolvedDrawer();
+    postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:revealCard", card: boardHealth.drifted });
+  };
+}
+if (boardMarks && boardQueue && boardNote) {
+  boardMarks.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (boardQueue.disabled || !inlineWhiteboardChannels.get(BOARD_SCENE_INDEX)?.initialized) return;
+    boardQueue.disabled = true;
+    boardQueue.textContent = "Queueing…";
+    // A board that never answers must not leave the button stuck.
+    boardQueueTimer = window.setTimeout(() => finishBoardQueue(false), BOARD_QUEUE_TIMEOUT_MS);
+    postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:queueMarks", note: boardNote.value });
+  });
+}
+
+function startBoardRefresh() {
+  if (boardRefreshTimer) return;
+  boardRefreshTimer = window.setInterval(refreshBoard, BOARD_REFRESH_MS);
+  window.addEventListener("focus", refreshBoard);
+}
+
 async function handleWhiteboardReady(index, mode, isCurrent) {
+  if (index === BOARD_SCENE_INDEX && mode === "inline") return handleBoardReady(index, mode, isCurrent);
   try {
     const librariesRequest = fetchWhiteboardLibraries();
     const { sources, librariesVersion } = await fetchMermaidSourcesData();
@@ -3631,6 +3936,40 @@ async function queueWhiteboardFeedback(index, message, mode) {
     const files = await response.json();
     const note = String(message.note || "").slice(0, 4000);
     const summary = whiteboardSummaryText(message.summaryLines);
+    if (index === BOARD_SCENE_INDEX && message.board) {
+      const boardText =
+        (note ? note + "\n\n" : "") +
+        "Marks on the board canvas:\n" +
+        (summary ? "- " + summary.split("\n").join("\n- ") : "(only the note above)") +
+        (files.preview_path ? "\n\nPNG preview of the current board level: " + String(files.preview_path) : "");
+      if (
+        !enqueuePrompt(
+          {
+            uid: "",
+            prompt: boardText,
+            selector: "",
+            tag: "board",
+            text: "Board: canvas marks",
+            target: {
+              type: "board-canvas",
+              revision: String(message.sourceHash || ""),
+              scenePath: String(files.scene_path || ""),
+              previewPath: String(files.preview_path || ""),
+              stats: message.stats && typeof message.stats === "object" ? message.stats : {},
+            },
+            // Re-queueing before sending replaces the earlier unsent summary.
+            [internalQueueKeyField]: "board:canvas",
+          },
+          preparation,
+        )
+      )
+        throw new Error("failed to retain board feedback");
+      pulseSheetDock();
+      postToWhiteboard(index, mode, { type: "lavish-whiteboard:queueResult", ok: true });
+      clearPreparationFailure("whiteboard");
+      succeeded = true;
+      return;
+    }
     const promptText =
       (note ? note + "\n\n" : "") +
       "Whiteboard edits to diagram " +
@@ -3723,6 +4062,10 @@ function handleAuthenticatedWhiteboardMessage(index, message, mode) {
   if (message.type === "lavish-whiteboard:teardownReady") finishWhiteboardTeardown(index, message, mode);
   if (message.type === "lavish-whiteboard:teardownFailed") failWhiteboardTeardown(index, message, mode);
   if (message.type === "lavish-whiteboard:flushComplete") finishWhiteboardFlush(index, message, mode);
+  if (index === BOARD_SCENE_INDEX && mode === "inline") {
+    if (message.type === "hilight-board:header") renderBoardHeader(message);
+    if (message.type === "hilight-board:queueSkipped") finishBoardQueue(false);
+  }
 }
 
 // Inline whiteboard frames are created by the SDK inside the artifact document,
@@ -3996,6 +4339,7 @@ window.addEventListener("message", (event) => {
   const messageSequence = ++artifactMessageSequence;
   artifactSpokeToken = messageToken;
   clearTimeout(artifactSilenceTimer);
+  announceArtifactShown();
   if (msg.type === "lavish:layoutDiagnostics") {
     const diagnosticSequence = ++layoutDiagnosticSequence;
     const complete = msg.complete !== false;
@@ -4230,12 +4574,33 @@ function toggleAnnotationMode() {
 }
 
 annotationSwitch.onclick = toggleAnnotationMode;
+if (commentsToggle) commentsToggle.onclick = () => setCommentsCollapsed(!commentsCollapsed());
+// A board in a narrow window (a half-screen laptop, a preview pane) folds the comments margin so
+// the canvas gets the width, at load and when the window is resized, until the reviewer opens or
+// folds it themselves for this session.
+const BOARD_FOLD_COMMENTS_BELOW_PX = 1000;
+function storedCommentsChoice() {
+  try {
+    return localStorage.getItem(commentsCollapsedKey);
+  } catch {
+    return null;
+  }
+}
+function applyBoardCommentsWidthRule() {
+  if (!boardPage || isMobileSheet() || storedCommentsChoice() !== null) return;
+  const narrow = window.innerWidth < BOARD_FOLD_COMMENTS_BELOW_PX;
+  if (narrow !== commentsCollapsed()) setCommentsCollapsed(narrow, false);
+}
+if (storedCommentsChoice() === "1" && !isMobileSheet()) setCommentsCollapsed(true, false);
+applyBoardCommentsWidthRule();
+if (boardPage) window.addEventListener("resize", applyBoardCommentsWidthRule);
 
 sendButton.onclick = () => sendQueued(false);
 sendAndEndButton.onclick = () => sendQueued(true);
 moreButton.onclick = () => {
   closeWarningsDrawer();
   closeResolvedDrawer();
+  closeActivityDrawer();
   toggleMenu(moreButton, moreMenu);
 };
 warningsButton.onclick = () => {
@@ -4244,8 +4609,16 @@ warningsButton.onclick = () => {
 };
 resolvedButton.onclick = () => {
   closeWarningsDrawer();
+  closeActivityDrawer();
   setResolvedDrawerOpen(resolvedDrawer.hidden);
 };
+if (activityOpenButton) {
+  activityOpenButton.onclick = () => {
+    closeWarningsDrawer();
+    closeResolvedDrawer();
+    setActivityDrawerOpen(true);
+  };
+}
 resolveUndoButton.onclick = undoResolve;
 attachImagesButton.onclick = () => {
   closeMenus();
@@ -4398,6 +4771,7 @@ document.addEventListener("mousedown", (event) => {
   if (!moreMenu.hidden && !moreWrap.contains(target)) setMenuOpen(moreButton, moreMenu, false);
   if (warningsDrawerOpen && !warningsWrap.contains(target)) closeWarningsDrawer();
   if (resolvedDrawerOpen && !resolvedWrap.contains(target)) closeResolvedDrawer();
+  if (activityDrawerOpen && activityDrawer && !activityDrawer.contains(target)) closeActivityDrawer();
 });
 // A non-modal popover closes when focus leaves it, so keyboard users are never stranded inside a
 // panel they cannot see the end of.
@@ -4416,6 +4790,8 @@ document.addEventListener("keydown", (event) => {
       closeWhiteboard();
     } else if (!shareDialog.hidden) {
       closeShareDialog();
+    } else if (activityDrawerOpen) {
+      closeActivityDrawer({ restoreFocus: true });
     } else if (resolvedDrawerOpen) {
       closeResolvedDrawer({ restoreFocus: true });
     } else if (warningsDrawerOpen) {
@@ -4591,7 +4967,40 @@ function pendingThreadPrompt(id) {
 
 // Open = the card shows every message and its reply box. One card is open at a time, as in a
 // shared document. A comment that was never sent opens straight into editing its words.
+function commentsCollapsed() {
+  return document.body.classList.contains("comments-collapsed");
+}
+
+/** @param {boolean} collapsed */
+function setCommentsCollapsed(collapsed, remember = true) {
+  document.body.classList.toggle("comments-collapsed", collapsed);
+  const comments = document.getElementById("comments");
+  if (comments) comments.inert = collapsed && !isMobileSheet();
+  if (commentsToggle) {
+    const label = collapsed ? "Show comments" : "Hide comments";
+    commentsToggle.setAttribute("aria-expanded", String(!collapsed));
+    commentsToggle.setAttribute("aria-label", label);
+    commentsToggle.title = label;
+  }
+  try {
+    // "0" records an explicit open, so a narrow board window does not fold it again.
+    if (remember) localStorage.setItem(commentsCollapsedKey, collapsed ? "1" : "0");
+  } catch {
+    // The choice still applies to this page without storage.
+  }
+  updateSendState();
+  if (!collapsed) window.requestAnimationFrame(positionThreads);
+}
+
+// Folded comments open again whenever something needs them (a new comment, a
+// thread the reviewer opens), so Send to agent is never out of reach. Desktop
+// only: the phone sheet keeps its own open and closed rules.
+function unfoldComments() {
+  if (!isMobileSheet() && commentsCollapsed()) setCommentsCollapsed(false);
+}
+
 function openThread(id, { focus = true } = {}) {
+  unfoldComments();
   if (!id || ended) return;
   const pending = pendingThreadPrompt(id);
   if (openThreadId !== id) {
@@ -4816,6 +5225,7 @@ function threadEntryFor(message) {
 // One plain word per thread for where its latest message stands. Drafts come first: a thread
 // with an unsent note is Not sent (Sending while its batch is in flight, Not delivered after a
 // failed send); otherwise an agent answer reads Replied and a sent note reads its receipt.
+/** @returns {{ text: string, retry: boolean, at?: string, trail?: string } | null} */
 function threadStatus(messages) {
   const drafts = messages.filter((message) => message.pending);
   if (drafts.length) {
@@ -4826,8 +5236,36 @@ function threadStatus(messages) {
   }
   const last = [...messages].reverse().find((message) => message.role === "user" || message.role === "agent");
   if (!last) return null;
-  if (last.role === "agent") return { text: "Replied", retry: false };
-  return { text: deliveryLabel(threadEntryFor(last) || last), retry: false };
+  if (last.role === "agent") return { text: "Replied", retry: false, ...deliveryTimes(null, last) };
+  const entry = threadEntryFor(last) || last;
+  return { text: deliveryLabel(entry), retry: false, ...deliveryTimes(entry, null) };
+}
+
+// When the latest state happened (shown beside the word) and the whole trail (its tooltip):
+// sent, delivered to the agent, working, answered.
+function deliveryTimes(entry, answer) {
+  if (answer) {
+    const at = clockTime(answer.at);
+    return at ? { at, trail: `Answered by the agent at ${at}` } : {};
+  }
+  if (!entry || entry.receipt === "none") return {};
+  const steps = [
+    ["Sent", entry.at],
+    ["delivered to the agent", entry.delivered_at],
+    ["agent working", entry.working_at],
+    ["answered", entry.done_at],
+  ]
+    .map(([label, iso]) => [label, clockTime(iso)])
+    .filter(([, at]) => at);
+  if (!steps.length) return {};
+  return { at: steps[steps.length - 1][1], trail: steps.map(([label, at]) => `${label} ${at}`).join(" · ") };
+}
+
+function timeHtml(status) {
+  if (!status?.at) return "";
+  return (
+    '<time class="thread-time" title="' + escapeHtml(status.trail || "") + '">' + escapeHtml(status.at) + "</time>"
+  );
 }
 
 function statusHtml(status) {
@@ -5014,12 +5452,20 @@ function buildThreadCard(thread, placement, missing, messages, status) {
   card.tabIndex = 0;
   // A table-cell draft names its row and column, which the raw cell text alone would lose.
   const cell = thread.pending ? promptAnchor(thread.anchor) : null;
+  // A canvas card's title alone reads like a sentence of its own ("Poll takes the whole batch"), so
+  // the row says it is the card the comment is on.
+  const boardCard = thread.anchor?.target?.type === "board-card" ? thread.anchor.target : null;
   const quote = String(
-    (cell?.kind === "cell" && cell.excerpt) || thread.anchor.text || thread.anchor.selector || "Comment",
+    (cell?.kind === "cell" && cell.excerpt) ||
+      boardCard?.title ||
+      thread.anchor.text ||
+      thread.anchor.selector ||
+      "Comment",
   )
     .replace(/\s+/g, " ")
     .trim();
-  card.setAttribute("aria-label", "Comment on " + quote.slice(0, 120));
+  const headline = boardCard ? "On card: " + quote : quote;
+  card.setAttribute("aria-label", (boardCard ? "Comment on card " : "Comment on ") + quote.slice(0, 120));
   // A compact card sits beside its anchor, so its one line says what was last written there.
   const latest = [...messages].reverse().find((message) => message.role === "user" || message.role === "agent");
   const snippet = latest
@@ -5030,12 +5476,16 @@ function buildThreadCard(thread, placement, missing, messages, status) {
     : quote;
   card.innerHTML =
     '<header class="thread-head"><button type="button" class="thread-quote" title="Show in page">' +
-    escapeHtml(quote) +
+    escapeHtml(headline) +
     '</button><span class="thread-snippet" aria-hidden="true">' +
     escapeHtml(snippet.slice(0, 160)) +
     '</span><span class="thread-status">' +
     statusHtml(status) +
-    "</span></header>" +
+    "</span>" +
+    timeHtml(status) +
+    // A resolved comment is a one-line row; Reopen sits on it, never behind an expand.
+    (thread.resolved ? '<button type="button" class="text-button thread-reopen">Reopen</button>' : "") +
+    "</header>" +
     (missing ? '<p class="thread-notice">The text this comment was on is no longer on the page.</p>' : "") +
     '<ol class="thread-messages"></ol><div class="thread-error" role="status"></div>';
   fillThreadMessages(card.querySelector(".thread-messages"), messages);
@@ -5047,14 +5497,10 @@ function buildThreadCard(thread, placement, missing, messages, status) {
     else openThread(thread.id);
   });
   if (thread.resolved) {
-    const actions = document.createElement("div");
-    actions.className = "thread-actions";
-    actions.innerHTML = '<button type="button" class="text-button thread-reopen">Reopen</button>';
-    actions.querySelector(".thread-reopen").addEventListener("click", (event) => {
+    card.querySelector(".thread-reopen").addEventListener("click", (event) => {
       event.stopPropagation();
       setThreadResolved(thread.id, false, card);
     });
-    card.appendChild(actions);
   } else if (!thread.pending && !ended) {
     const form = document.createElement("form");
     form.className = "thread-reply";
@@ -5145,6 +5591,10 @@ function renderPageThread() {
   if (signature === pageSignature) return;
   pageSignature = signature;
   pageThreadStatus.innerHTML = statusHtml(status);
+  if (pageThreadTime) {
+    pageThreadTime.textContent = status?.at || "";
+    pageThreadTime.title = status?.trail || "";
+  }
   bindStatusRetry(pageThreadStatus);
   // A new reply never yanks the reader: the list follows the end only if they were already there.
   const atEnd = pageMessages.scrollTop + pageMessages.clientHeight >= pageMessages.scrollHeight - 4;
@@ -5164,13 +5614,8 @@ function renderPageThread() {
 function renderResolvedDrawer(threads, missing) {
   const resolved = threads.filter((thread) => thread.resolved);
   const offPage = threads.filter((thread) => !thread.resolved && missing(thread));
-  const total = resolved.length + offPage.length;
-  resolvedWrap.hidden = total === 0 || ended;
-  resolvedCount.textContent =
-    (resolved.length ? resolved.length + " resolved" : "") +
-    (resolved.length && offPage.length ? " · " : "") +
-    (offPage.length ? offPage.length + " off-page" : "");
-  if (resolvedWrap.hidden && resolvedDrawerOpen) setResolvedDrawerOpen(false);
+  threadCounts = { resolved: resolved.length, offPage: offPage.length };
+  renderStatusPill();
   const nodes = [];
   if (offPage.length) {
     const heading = document.createElement("div");
@@ -5198,6 +5643,81 @@ function closeResolvedDrawer({ restoreFocus = false } = {}) {
   if (!resolvedDrawerOpen) return;
   setResolvedDrawerOpen(false);
   if (restoreFocus) resolvedButton.focus();
+}
+
+// Activity: the session's history from server.log, newest first, so the reviewer can see when a
+// comment reached the agent, when it answered, and why it stopped listening.
+function setActivityDrawerOpen(open) {
+  if (!activityDrawer) return;
+  activityDrawerOpen = Boolean(open) && !ended;
+  activityDrawer.hidden = !activityDrawerOpen;
+  activityOpenButton?.setAttribute("aria-expanded", String(activityDrawerOpen));
+  if (activityDrawerOpen) {
+    setMenuOpen(moreButton, moreMenu, false);
+    void loadActivity();
+  }
+}
+
+function closeActivityDrawer({ restoreFocus = false } = {}) {
+  if (!activityDrawerOpen) return;
+  setActivityDrawerOpen(false);
+  if (restoreFocus) moreButton.focus();
+}
+
+async function loadActivity() {
+  if (!activityList || !activityNow) return;
+  const request = ++activityRequest;
+  let history;
+  try {
+    const response = await fetch(`/api/${key}/history`);
+    history = response.ok ? await response.json() : null;
+  } catch {
+    history = null;
+  }
+  if (request !== activityRequest) return;
+  renderActivity(history);
+}
+
+function renderActivity(history) {
+  if (!activityList || !activityNow) return;
+  if (!history) {
+    activityNow.textContent = "Activity is not available: Hilight did not answer.";
+    activityList.replaceChildren();
+    return;
+  }
+  const stopped =
+    history.stopped && history.stopped.at ? { since: history.stopped.at, why: history.stopped.why } : null;
+  activityNow.textContent =
+    history.presence === "listening"
+      ? "Your agent is listening. Send delivers right away."
+      : history.presence === "working"
+        ? "Your agent is working on what you sent. New comments reach it on its next poll."
+        : stopped
+          ? notListeningSentence(stopped)
+          : "No agent is listening. Comments you send will queue until it polls.";
+  const events = Array.isArray(history.events) ? [...history.events].reverse() : [];
+  if (!events.length) {
+    const empty = document.createElement("li");
+    empty.className = "activity-empty";
+    empty.textContent = "Nothing recorded yet.";
+    activityList.replaceChildren(empty);
+    return;
+  }
+  activityList.replaceChildren(
+    ...events.map((event) => {
+      const item = document.createElement("li");
+      item.className = "activity-item";
+      const time = document.createElement("time");
+      time.className = "activity-time";
+      time.dateTime = String(event.at || "");
+      time.textContent = clockTime(event.at);
+      const text = document.createElement("span");
+      text.className = "activity-text";
+      text.textContent = String(event.text || "");
+      item.append(time, text);
+      return item;
+    }),
+  );
 }
 
 function renderThreads() {
@@ -5381,7 +5901,12 @@ events.set("chat-sync", (data) => {
   // After the transcript, so thread cards read fresh delivery receipts.
   syncThreads(data);
 });
-events.set("agent-presence", (data) => setAgentPresence(data.mode === "external-listener" ? "external" : data.state));
+events.set("agent-presence", (data) => {
+  agentStopped =
+    data.state === "waiting" && data.since ? { since: String(data.since), why: String(data.why || "") } : null;
+  setAgentPresence(data.mode === "external-listener" ? "external" : data.state);
+  if (activityDrawerOpen) void loadActivity();
+});
 events.set("layout-warnings", (data) => setLayoutWarnings(data.warnings || []));
 events.set("ended", () => markSessionEnded());
 connectLiveEvents();

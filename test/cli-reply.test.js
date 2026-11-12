@@ -158,29 +158,33 @@ async function queuePrompt(base, key, text) {
   assert.equal(queued.status, 200, await queued.text());
 }
 
-test("reply help and top-level help say when to prefer reply over poll --agent-reply", async () => {
+test("reply help and top-level help say when to prefer reply over poll --agent-reply-file", async () => {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "lavish-reply-help-"));
   const env = cliEnv(stateDir, 0);
   try {
     const top = await runCli(["--help"], { env });
     assert.equal(top.status, 0, top.stderr || top.stdout);
-    assert.match(top.stdout, /hilight reply <html-file> --agent-reply/);
-    assert.match(top.stdout, /not about to long-poll/);
-    assert.match(top.stdout, /poll <html-file> --agent-reply/);
+    assert.match(top.stdout, /hilight reply <html-file> --agent-reply-file <path>/);
+    assert.match(top.stdout, /`hilight reply` posts without listening/);
+    assert.match(top.stdout, /hilight poll <html-file> --agent-reply-file <reply-file>/);
 
     const reply = await runCli(["reply", "--help"], { env });
     assert.equal(reply.status, 0, reply.stderr || reply.stdout);
-    assert.match(reply.stdout, /--agent-reply "\.\.\."/);
     assert.match(reply.stdout, /--agent-reply-file <path>/);
-    assert.match(reply.stdout, /Exit 0 only when the server answers that the reply was sent/);
-    assert.match(reply.stdout, /not about to wait for more feedback/);
-    assert.match(reply.stdout, /hilight poll <html-file> --agent-reply/);
-    assert.match(reply.stdout, /does not exit when the reply is accepted/);
+    assert.match(reply.stdout, /exits 0 once Hilight accepts it/);
+    assert.match(reply.stdout, /not about to long-poll/);
+    assert.match(reply.stdout, /status: held/);
+
+    const fullReply = await runCli(["reply", "--help", "--full"], { env });
+    assert.match(
+      fullReply.stdout,
+      /Exit 0 once the server accepts it: `status: sent` means it was posted[^;]*; `status: held` means [^.]*nothing was posted/,
+    );
+    assert.match(fullReply.stdout, /does not exit when the reply is accepted/);
 
     const poll = await runCli(["poll", "--help"], { env });
     assert.equal(poll.status, 0, poll.stderr || poll.stdout);
-    assert.match(poll.stdout, /hilight reply <html-file> --agent-reply/);
-    assert.match(poll.stdout, /not about to long-poll/);
+    assert.match(poll.stdout, /hilight poll report\.html --agent-reply-file reply\.md/);
     assert.match(poll.stdout, /hilight poll report\.html --agent-reply "Renamed the payment step\."/);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
@@ -217,7 +221,7 @@ test("reply exits 0 only after the server accepts, delivers the reply, and clear
       const reply = await replyPromise;
       assert.equal(reply.status, 0, reply.stderr || reply.stdout);
       assert.match(reply.stdout, /status: sent/);
-      assert.match(reply.stdout, /no longer showing Working/);
+      assert.match(reply.stdout, /no longer shows Working/);
       assert.doesNotMatch(reply.stdout, /status: waiting/);
       assert.ok(reply.stdout.includes(`file: ${path.sep === "\\" ? JSON.stringify(absolute) : absolute}`));
     } finally {
@@ -442,6 +446,39 @@ test("reply fails with a timeout when the server stalls before headers or mid-bo
   }
 });
 
+test("a plain reply to a single card comment lands in that comment's thread", async () => {
+  await withArtifact(async ({ base, key, env, artifact }) => {
+    const queued = await fetch(`${base}/api/${key}/prompts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({
+        prompts: [{ prompt_id: "p1", selector: "body", tag: "body", text: "ok", prompt: "What is this card?" }],
+      }),
+    });
+    assert.equal(queued.status, 200);
+    const delivered = await runCli(["poll", artifact, "--timeout-ms", "100"], { env });
+    assert.match(delivered.stdout, /prompts\[1\]\{thread_id,on,text\}:\n {2}c1,ok,What is this card\?/);
+
+    const reply = await runCli(["reply", artifact, "--agent-reply", "It explains the demo."], { env });
+    assert.equal(reply.status, 0, reply.stderr || reply.stdout);
+    assert.match(reply.stdout, /threads\[1\]: c1/, "the receipt says where the reply landed");
+
+    const data = chromeSessionData(await (await fetch(`${base}/session/${key}`)).text());
+    assert.deepEqual(
+      data.initialThreads[0].messages.map((message) => [message.role, message.text]),
+      [
+        ["user", "What is this card?"],
+        ["agent", "It explains the demo."],
+      ],
+    );
+    assert.deepEqual(
+      data.initialChat.filter((message) => message.role === "agent"),
+      [],
+      "nothing lands in the page thread",
+    );
+  });
+});
+
 test("reply and poll route `## <thread_id>` sections into threads and reject unknown ids", async () => {
   await withArtifact(async ({ base, key, env, artifact, dir }) => {
     const queued = await fetch(`${base}/api/${key}/prompts`, {
@@ -457,7 +494,7 @@ test("reply and poll route `## <thread_id>` sections into threads and reject unk
     assert.equal(queued.status, 200);
     const delivered = await runCli(["poll", artifact, "--timeout-ms", "100"], { env });
     assert.equal(delivered.status, 0, delivered.stderr || delivered.stdout);
-    assert.match(delivered.stdout, /thread_id: c1/);
+    assert.match(delivered.stdout, /\n {2}c1,ok,Why this\?\n {2}page,page,General question\n/);
 
     const replyFile = path.join(dir, "answer.md");
     await writeFile(replyFile, "General answer.\n\n## c1 reveal=r1\n**Specific answer**\n");

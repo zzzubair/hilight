@@ -9,7 +9,7 @@ const REVISION_ID_RE = /^\S{1,128}$/;
 // heading line makes it an ordinary Markdown heading, so `## c4 model` stays in chat.
 const SECTION_RE = /^##[ \t]+(c[1-9]\d{0,8})(?:[ \t]+reveal=(\S+))?[ \t]*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
-const NON_THREAD_TAGS = new Set(["message", "whiteboard", "layout-warnings"]);
+const NON_THREAD_TAGS = new Set(["message", "whiteboard", "board", "layout-warnings"]);
 
 function badRequest(message) {
   return Object.assign(new Error(message), { status: 400, code: "VALIDATION_ERROR" });
@@ -127,4 +127,21 @@ export function recordThreadPrompts(threads, prompts, entries) {
     thread.resolved = false;
     thread.messages.push({ ...entry });
   }
+}
+
+const oneLine = (value, max) => {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+};
+
+/**
+ * The one line that tells an agent where a thread sits, so a reply in it can be delivered as only
+ * the new message: `card "Poll takes the whole batch"` for a board card, else the quoted text.
+ */
+export function threadAnchorLine(thread) {
+  const target = thread?.anchor?.target;
+  if (target?.type === "board-card") return `card: ${oneLine(target.title || target.card, 80)}`;
+  return oneLine(thread?.anchor?.text, 80) || oneLine(thread?.anchor?.selector, 80);
 }

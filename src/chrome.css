@@ -494,6 +494,97 @@ body {
   position: relative;
   flex-shrink: 0;
 }
+/* Folds the comments margin away (desktop only). A small handle on the
+   margin's left edge while it is open; a slim tab on the screen's right edge,
+   with the unsent count, while it is folded. */
+.layout {
+  position: relative;
+}
+.comments-toggle {
+  position: absolute;
+  z-index: 6;
+  top: 50%;
+  right: var(--margin-w);
+  width: 22px;
+  height: 56px;
+  margin-top: -28px;
+  margin-right: -11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--bg-bar);
+  color: var(--fg-dim);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.comments-toggle::before {
+  /* A 44px hit area around the slim handle. */
+  content: "";
+  position: absolute;
+  inset: -4px -11px;
+}
+.comments-toggle:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+.comments-toggle:focus-visible {
+  outline: 2px solid var(--accent, #1f6fe0);
+  outline-offset: 2px;
+}
+.comments-toggle svg {
+  transition: transform 0.18s ease;
+}
+.comments-toggle[aria-expanded="false"] {
+  right: 0;
+  margin-right: 0;
+  width: 24px;
+  height: auto;
+  min-height: 64px;
+  padding: 10px 0;
+  border-right: 0;
+  border-radius: 11px 0 0 11px;
+  color: var(--fg);
+}
+.comments-toggle[aria-expanded="false"] svg {
+  transform: rotate(180deg);
+}
+.comments-toggle-count {
+  min-width: 18px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg-bar);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+.comments-toggle-count[hidden] {
+  display: none;
+}
+@media (min-width: 861px) {
+  body.comments-collapsed .layout {
+    grid-template-columns: minmax(0, 1fr) 0;
+  }
+  body.comments-collapsed .comments {
+    visibility: hidden;
+    border-left: 0;
+  }
+}
+@media (max-width: 860px) {
+  .comments-toggle {
+    display: none;
+  }
+}
 .more-button {
   width: 34px;
   height: 34px;
@@ -1102,6 +1193,32 @@ body {
 .ended-overlay[hidden] {
   display: none;
 }
+/* A canvas board on a phone: touch is the only input. The test is the input, never the width, so a
+   small desktop window still draws the board, and a laptop with a touchscreen (it also has a fine
+   pointer) keeps it too. */
+.board-phone-note {
+  display: none;
+}
+.board-phone-note .ended-copy {
+  margin-top: 10px;
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: 16px;
+}
+@media (pointer: coarse) and (any-hover: none) and (not (any-pointer: fine)) {
+  body.board-page > :not(.board-phone-note, script) {
+    display: none !important;
+  }
+  body.board-page > .board-phone-note {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--bg);
+  }
+}
 .ended-card {
   width: min(360px, calc(100vw - 48px));
   border: 1px solid var(--border);
@@ -1128,6 +1245,20 @@ body {
 .ended-action {
   margin-top: var(--space-8);
 }
+/* A normal load is revealed within CHROME_LAYOUT_GATE_CHECK_MS, so the checking gate shows only
+   the empty frame: no scrim and no card unless the wait outlasts that hold. */
+.layout-gate-overlay[data-state="checking"] {
+  background: transparent;
+}
+.layout-gate-overlay[data-state="checking"] .ended-card {
+  visibility: hidden;
+  animation: layout-gate-card-late 0s linear 1.5s forwards;
+}
+@keyframes layout-gate-card-late {
+  to {
+    visibility: visible;
+  }
+}
 .layout-gate-bypass {
   margin-left: var(--space-4);
 }
@@ -1139,8 +1270,10 @@ iframe {
   opacity: 1;
   transition: opacity var(--dur-fast) var(--ease);
 }
+/* Not 0: Chromium throttles a cross-origin frame at opacity 0 to about one animation frame a
+   second, which stretched the layout pass behind the gate to several seconds. */
 body.layout-gate-active iframe#artifact {
-  opacity: 0;
+  opacity: 0.001;
 }
 /* Narrow chrome: the drawer stops hanging off the button and spans the viewport instead, so the
    list never overflows horizontally on a phone-width window. */
@@ -1315,6 +1448,39 @@ body.layout-gate-active iframe#artifact {
      past the drawer edge instead of ellipsizing. */
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
+}
+.activity-now {
+  margin: var(--space-2) 0 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.activity-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  list-style: none;
+}
+.activity-item {
+  display: grid;
+  grid-template-columns: minmax(5ch, max-content) minmax(0, 1fr);
+  gap: var(--space-3);
+  color: var(--fg-label);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+.activity-time {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.activity-text {
+  overflow-wrap: anywhere;
+}
+.activity-empty {
+  color: var(--fg-faint);
+  font-size: var(--text-sm);
 }
 .resolved-list .comment-thread {
   position: static;
@@ -1521,12 +1687,38 @@ body.layout-gate-active iframe#artifact {
 .thread-status:empty {
   display: none;
 }
+/* When the latest state happened; the full trail (sent, delivered, answered) is its tooltip. */
+.thread-time {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thread-time:empty {
+  display: none;
+}
 .comment-thread.is-pending .thread-status,
 .thread-status .thread-retry {
   color: var(--accent);
 }
 .thread-retry {
   font-size: 11px;
+}
+/* Reopen on a resolved row: always shown, with a 32px target that the negative margin keeps from
+   making the one-line row taller. */
+.thread-head .thread-reopen {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 32px;
+  margin: -8px -6px -8px 0;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-weight: var(--w-semi);
+}
+.thread-head .thread-reopen:hover {
+  background: var(--accent-soft);
 }
 .thread-messages {
   display: grid;
@@ -1614,23 +1806,14 @@ body.layout-gate-active iframe#artifact {
   font-size: 11px;
   font-weight: var(--w-semi);
 }
-.thread-actions {
-  display: none;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
 .thread-reply {
   display: none;
   margin-top: 8px;
 }
-.comment-thread.is-open .thread-reply,
-.comment-thread.is-open .thread-actions {
+.comment-thread.is-open .thread-reply {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.comment-thread.is-open .thread-actions {
-  flex-direction: row;
 }
 .thread-reply textarea,
 .thread-edit-input {
@@ -2076,4 +2259,187 @@ body.layout-gate-active iframe#artifact {
   100% {
     box-shadow: 0 0 0 10px transparent;
   }
+}
+
+/* Canvas mode: one top bar. The board's title replaces the file name, its summary sits behind an
+   info button, code-card health joins the status pill, and the board's note and Queue marks sit
+   in the comments panel beside Send. */
+body.board-page {
+  --bar-h: 44px;
+  --board-warn: #f0b04a;
+  --board-warn-line: #5a4316;
+  --board-ok: #4fbf72;
+}
+@media (prefers-color-scheme: light) {
+  body.board-page {
+    --board-warn: #9a5c00;
+    --board-warn-line: #f3d9a6;
+    --board-ok: #2f8a4c;
+  }
+}
+body.board-page .brand {
+  position: relative;
+  align-items: center;
+  gap: 8px;
+}
+.board-title {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.board-crumb {
+  min-width: 0;
+  max-width: 40ch;
+  overflow: hidden;
+  padding: 4px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-label);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.board-crumb {
+  cursor: pointer;
+}
+button.board-crumb:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.board-crumb.is-current {
+  color: var(--fg);
+  font-weight: var(--w-semi);
+}
+.board-sep {
+  color: var(--fg-label);
+}
+.board-info-wrap[hidden] {
+  display: none;
+}
+.board-info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--fg-label);
+  cursor: pointer;
+}
+.board-info-button:hover,
+.board-info-button[aria-expanded="true"] {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.board-info {
+  top: 38px;
+  left: 0;
+  width: min(420px, calc(100vw - 24px));
+  padding: var(--space-6) var(--space-8);
+  white-space: normal;
+}
+.board-info-text {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.board-info-file {
+  margin: var(--space-4) 0 0;
+  color: var(--fg-label);
+  font-size: var(--text-xs);
+}
+.resolved-button.has-health::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--board-ok);
+  vertical-align: 1px;
+}
+.resolved-button.is-warn {
+  border-color: var(--board-warn-line);
+  color: var(--board-warn);
+}
+.resolved-button.is-warn::before {
+  background: var(--board-warn);
+}
+.board-health {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  margin: 0 var(--space-4) var(--space-6);
+  padding: var(--space-5) var(--space-6);
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.board-health[hidden],
+.board-health [hidden] {
+  display: none;
+}
+.board-health-text {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.board-health-show {
+  min-height: 28px;
+  color: var(--accent);
+  font-weight: var(--w-semi);
+}
+.board-problems {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--board-warn);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.board-marks {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.board-note {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.board-note:focus {
+  border-color: var(--border-strong);
+  outline: none;
+}
+.board-queue {
+  flex: 0 0 auto;
+  height: 36px;
+  padding: 0 12px;
+  border: var(--hairline);
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+.board-queue:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.board-queue:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

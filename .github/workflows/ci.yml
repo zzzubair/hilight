@@ -34,3 +34,21 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm test
       - run: pnpm run build
+      # Every agent feature has to work from any shell, so on Windows drive the CLI from PowerShell:
+      # the agent loop (argv only, no shell), the version fast path, an unknown flag's exit code,
+      # and the short help.
+      - name: PowerShell smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          node --test test/agent-loop.test.js
+          if ($LASTEXITCODE -ne 0) { throw "agent loop failed" }
+          $version = node dist/cli.mjs --version
+          $expected = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne $expected) { throw "version $version, expected $expected" }
+          $refused = node dist/cli.mjs poll report.html --nope
+          if ($LASTEXITCODE -ne 2) { throw "unknown flag exited $LASTEXITCODE, expected 2" }
+          if (-not ($refused | Select-String -SimpleMatch "Valid flags")) { throw "unknown flag error does not list the valid flags" }
+          if (-not (node dist/cli.mjs --help | Select-String -SimpleMatch "hilight catch-up")) { throw "help does not list catch-up" }
+          exit 0

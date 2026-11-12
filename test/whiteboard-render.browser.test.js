@@ -1,44 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import http from "node:http";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import * as esbuild from "esbuild";
 import { parse } from "parse5";
 
-const projectRoot = fileURLToPath(new URL("..", import.meta.url));
-
-async function chromePath() {
-  const candidates = [
-    process.env.CHROME_PATH,
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/usr/bin/google-chrome",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-  return "";
-}
-
-function contentType(file) {
-  if (file.endsWith(".html")) return "text/html; charset=utf-8";
-  if (file.endsWith(".js")) return "text/javascript; charset=utf-8";
-  if (file.endsWith(".css")) return "text/css; charset=utf-8";
-  if (file.endsWith(".woff2")) return "font/woff2";
-  return "application/octet-stream";
-}
+import { chromePath, serveFixture } from "./fixtures/browser-fixture.js";
 
 function dumpChromeDom(chrome, args, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -99,84 +66,37 @@ async function runBrowserFixture(t, fixtureName) {
     t.skip("Chrome or Chromium is required for the real-render regression");
     return null;
   }
-  const root = await mkdtemp(path.join(os.tmpdir(), "lavish-excalidraw-render-"));
+  const site = await serveFixture(fixtureName, (url, response) => {
+    if (url.pathname !== "/result") return false;
+    const value = String(url.searchParams.get("value") || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;");
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    response.end(`<!doctype html><html><body data-result="${value}"></body></html>`);
+    return true;
+  });
   try {
-    await esbuild.build({
-      entryPoints: [path.join(projectRoot, `test/fixtures/${fixtureName}.browser.jsx`)],
-      outdir: root,
-      entryNames: "fixture",
-      assetNames: "assets/[name]-[hash]",
-      bundle: true,
-      format: "iife",
-      platform: "browser",
-      conditions: ["production"],
-      loader: { ".woff2": "file", ".woff": "file", ".ttf": "file" },
-      define: {
-        "process.env.NODE_ENV": '"production"',
-        "process.env.IS_PREACT": '"false"',
-      },
-    });
-    await cp(
-      path.join(projectRoot, "node_modules/@excalidraw/excalidraw/dist/prod/fonts"),
-      path.join(root, "whiteboard-assets/fonts"),
-      { recursive: true },
+    const stdout = await dumpChromeDom(
+      chrome,
+      [
+        "--headless=new",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        `--user-data-dir=${path.join(site.root, "chrome-profile")}`,
+        "--run-all-compositor-stages-before-draw",
+        "--virtual-time-budget=20000",
+        "--dump-dom",
+        site.url,
+      ],
+      75_000,
     );
-    await writeFile(
-      path.join(root, "index.html"),
-      '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"></head><body><script src="/fixture.js"></script></body></html>',
-    );
-    const server = http.createServer(async (request, response) => {
-      try {
-        const url = new URL(request.url, "http://127.0.0.1");
-        const pathname = url.pathname;
-        if (pathname === "/result") {
-          const value = String(url.searchParams.get("value") || "")
-            .replaceAll("&", "&amp;")
-            .replaceAll('"', "&quot;");
-          response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-          response.end(`<!doctype html><html><body data-result="${value}"></body></html>`);
-          return;
-        }
-        const relative = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
-        const file = path.resolve(root, relative);
-        if (file !== root && !file.startsWith(`${root}${path.sep}`)) throw new Error("outside fixture root");
-        const body = await readFile(file);
-        response.writeHead(200, { "content-type": contentType(file), "cache-control": "no-store" });
-        response.end(body);
-      } catch {
-        response.writeHead(404).end();
-      }
-    });
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("test server did not bind to a TCP port");
-      const profile = path.join(root, "chrome-profile");
-      const stdout = await dumpChromeDom(
-        chrome,
-        [
-          "--headless=new",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          "--no-sandbox",
-          `--user-data-dir=${profile}`,
-          "--run-all-compositor-stages-before-draw",
-          "--virtual-time-budget=20000",
-          "--dump-dom",
-          `http://127.0.0.1:${address.port}/`,
-        ],
-        75_000,
-      );
-      const result = resultFromDump(stdout);
-      assert.ok(result, "browser fixture did not report a result");
-      assert.equal(result.pass, true, result.error);
-      return result;
-    } finally {
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
-    }
+    const result = resultFromDump(stdout);
+    assert.ok(result, "browser fixture did not report a result");
+    assert.equal(result.pass, true, result.error);
+    return result;
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await site.close();
   }
 }
 
@@ -209,3 +129,29 @@ test("library icon nodes keep their arrows attached and panel inserts stay named
   assert.equal(result.dropped, 2);
   assert.match(result.summary, /^Added library item fixture\/Gear near \(/);
 });
+
+test(
+  "a board renders live code cards, refreshes their status, and opens nested levels",
+  { timeout: 90_000 },
+  async (t) => {
+    const result = await runBrowserFixture(t, "board-canvas");
+    if (!result) return;
+    assert.ok(result.opening.includes("intro"), "the board opens on its top row");
+    assert.deepEqual(
+      result.root.map((card) => card.id),
+      ["intro", "fresh", "stale", "inside"],
+    );
+    assert.match(result.root.find((card) => card.id === "fresh").className, /is-fresh/);
+    assert.match(result.root.find((card) => card.id === "stale").className, /is-stale/);
+    assert.equal(result.changedLines, 1);
+    assert.deepEqual(result.landings, [1, 1], "an arrow highlights the line it starts on and the line it ends on");
+    assert.deepEqual(result.legend, ["Add"]);
+    assert.match(result.health, /1 of 2 code cards changed/);
+    assert.equal(result.savedCards, 5);
+    assert.equal(result.savedLinks, 5, "saved cards keep their link so a reload admits them again");
+    assert.equal(result.connectorsSaved, 0, "connectors come from the file, never from the saved scene");
+    assert.match(result.healthAfter, /2 code cards match/);
+    assert.deepEqual(result.nested, ["deep"]);
+    assert.match(result.crumbs, /Math\s*\/\s*Inside/);
+  },
+);

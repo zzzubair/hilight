@@ -259,7 +259,8 @@ test(
       open(url);
       let g = geometry();
       assertDocked(g);
-      assert.equal(g.summary, "Agent not listening");
+      // "since <time>" follows once a poll has come and gone; this page has seen none or one.
+      assert.match(g.summary, /^Agent not listening( since .+)?$/);
 
       evaluate('() => { document.getElementById("sheetHead").click(); return "ok"; }');
       wait(500);

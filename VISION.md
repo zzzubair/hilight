@@ -8,7 +8,7 @@ It owns exactly one thing: the review loop between one person and one agent over
 
 The saved HTML file is the source of truth, and serving it adds exactly one script tag and nothing else.
 Nothing else is injected, because an artifact must render identically when it is opened directly with Hilight absent.
-A rendered Mermaid diagram can be edited as a whiteboard, but the Mermaid source stays authoritative and the edits return as a summary the agent applies to that source.
+A rendered Mermaid diagram can be edited as a whiteboard, and a board's cards can be laid out and drawn on as a canvas, but the source in the file stays authoritative and the edits return as a summary the agent applies to that source.
 Export inlines local assets only and makes no outbound request, so exporting can never become fetching.
 A change that makes the served artifact differ from the file on disk is refused.
 

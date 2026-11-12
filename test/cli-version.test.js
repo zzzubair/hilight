@@ -9,7 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { isVersionOnlyArgv, VERSION } from "../src/cli.js";
+import { isVersionOnlyArgv, shortHelpFlag, VERSION } from "../src/cli.js";
 
 const execFileAsync = promisify(execFile);
 const BIN = fileURLToPath(new URL("../bin/hilight.js", import.meta.url));
@@ -48,6 +48,17 @@ test("isVersionOnlyArgv matches exactly the SDK's version-flag shapes", () => {
   for (const argv of [[], ["--help"], ["open"], ["--version", "extra"], ["open", "--version"]]) {
     assert.equal(isVersionOnlyArgv(argv), false);
   }
+});
+
+test("-h is --help, except as the value of a flag that takes one", () => {
+  assert.deepEqual(shortHelpFlag(["-h"]), ["--help"]);
+  assert.deepEqual(shortHelpFlag(["poll", "-h"]), ["poll", "--help"]);
+  assert.deepEqual(shortHelpFlag(["reply", "a.html", "--agent-reply", "-h"]), [
+    "reply",
+    "a.html",
+    "--agent-reply",
+    "-h",
+  ]);
 });
 
 test("--version prints the version fast and skips telemetry and state-dir init", async (t) => {

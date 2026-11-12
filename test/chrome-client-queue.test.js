@@ -11,15 +11,15 @@ const sourceUrl = new URL("../src/chrome-client.js", import.meta.url);
 // The ids the served chrome page actually declares. The client reaches for these by id, so a page
 // that stopped declaring one would leave the corresponding feature silently dead behind an
 // `if (element)` guard - a harness that invents an element for any id would never notice.
-const servedChromeIds = new Set(
-  [...createChromeHtml({ key: "abc", file: "/tmp/artifact.html" }).matchAll(/\sid="([^"]+)"/g)].map(
-    (match) => match[1],
-  ),
+const servedIds = (html) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
+const servedChromeIds = servedIds(createChromeHtml({ key: "abc", file: "/tmp/artifact.html" }));
+const servedBoardChromeIds = servedIds(
+  createChromeHtml({ key: "abc", file: "/tmp/artifact.html" }, { boardPage: true }),
 );
 
 const SERVED_TAB_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>";
 
-/** @typedef {{ key: string, file: string, layoutGateEnabled?: boolean, layoutGateMaxHoldMs?: number, modeToggleHotkeyKey?: string, initialChat?: any[], initialChatAckIds?: string[], initialChatRevision?: number, initialLayoutWarnings?: any[], chromeLoadToken?: string, initialArtifactRevision?: number, initialArtifactLoadToken?: string, initialArtifactLoadSequence?: number, attachmentMaxBytes?: number, attachmentMaxCount?: number, attachmentAcceptedMime?: string[], initialEnded?: boolean, initialEndedBy?: string | null, revisionPalette?: { hex: string, borderStyle: string, pattern: string }[] }} HarnessSessionData */
+/** @typedef {{ key: string, file: string, layoutGateEnabled?: boolean, layoutGateMaxHoldMs?: number, layoutGateCheckMs?: number, boardPage?: boolean, modeToggleHotkeyKey?: string, initialChat?: any[], initialThreads?: any[], initialChatAckIds?: string[], initialChatRevision?: number, initialLayoutWarnings?: any[], chromeLoadToken?: string, initialArtifactRevision?: number, initialArtifactLoadToken?: string, initialArtifactLoadSequence?: number, attachmentMaxBytes?: number, attachmentMaxCount?: number, attachmentAcceptedMime?: string[], initialEnded?: boolean, initialEndedBy?: string | null, revisionPalette?: { hex: string, borderStyle: string, pattern: string }[] }} HarnessSessionData */
 /** @type {HarnessSessionData} */
 const defaultSessionData = {
   key: "abc",
@@ -106,8 +106,11 @@ async function createChromeHarness({
   // chrome's sheet breakpoint, with `setMobile` flipping it the way a resize would. Left off, the
   // window has no matchMedia at all, which is the desktop the other tests run against.
   mobile = false,
+  // The window's CSS width; `resizeWindow` changes it and fires the window's resize listeners.
+  windowWidth = 1440,
 } = {}) {
   const source = await readFile(sourceUrl, "utf8");
+  const performanceMarks = [];
   // Seed sessionStorage before the client boots, to model a tab whose queue was
   // already persisted by an earlier page load.
   if (storedQueue) storage.set(`lavish-axi:queued:${sessionData.key}`, JSON.stringify(storedQueue));
@@ -464,7 +467,8 @@ async function createChromeHarness({
       getElementById(id) {
         // Answer only for ids the served page declares, so an id the client and the page disagree
         // on fails here the way it would go dead in a browser.
-        if (!servedChromeIds.has(id) && !elements.has(id)) return null;
+        const served = sessionData.boardPage ? servedBoardChromeIds : servedChromeIds;
+        if (!served.has(id) && !elements.has(id)) return null;
         return element(id);
       },
       addEventListener(type, handler, capture) {
@@ -519,9 +523,19 @@ async function createChromeHarness({
         localStore.delete(key);
       },
     },
+    performance: {
+      mark(name, options) {
+        performanceMarks.push({ name, detail: options?.detail });
+      },
+    },
     window: {
+      innerWidth: windowWidth,
       clearTimeout: fakeClearTimeout,
       setTimeout: fakeSetTimeout,
+      // The board's code re-read runs on an interval no test advances.
+      setInterval: () => 0,
+      clearInterval: () => {},
+      requestAnimationFrame: (callback) => fakeSetTimeout(callback, 16),
       addEventListener(type, handler) {
         if (!windowListeners.has(type)) windowListeners.set(type, []);
         windowListeners.get(type).push(handler);
@@ -556,6 +570,11 @@ async function createChromeHarness({
   return {
     element,
     frame,
+    performanceMarks,
+    resizeWindow(width) {
+      context.window.innerWidth = width;
+      for (const handler of windowListeners.get("resize") || []) handler({ type: "resize" });
+    },
     postedToFrame,
     postedToWhiteboard,
     clipboardWrites,
@@ -4227,6 +4246,21 @@ test("layout gate timeout fails open when no result arrives", async () => {
   assert.equal(chrome.element("body").classList.contains("layout-gate-active"), false);
 });
 
+test("the checking gate releases on its short hold, well before the failure-card hold", async () => {
+  const chrome = await createChromeHarness({
+    sessionData: { key: "abc", file: "/tmp/artifact.html", layoutGateCheckMs: 20, layoutGateMaxHoldMs: 500 },
+  });
+
+  chrome.eventSource().listeners.get("reload")();
+  assert.equal(chrome.element("layoutGateOverlay").hidden, false);
+  chrome.runTimers(20);
+
+  assert.equal(chrome.element("layoutGateOverlay").hidden, true);
+  assert.equal(chrome.element("body").classList.contains("layout-gate-active"), false);
+  // Measurable from any browser: when the gate lifted, and why.
+  assert.deepEqual(chrome.performanceMarks.at(-1), { name: "hilight:layout-gate-revealed", detail: "timeout" });
+});
+
 test("layout gate re-arms on reload and still reveals on the next completed pass", async () => {
   const { fetchImpl } = diagnosticsHarness([[], [warningPayload()]]);
   const chrome = await createChromeHarness({
@@ -7677,6 +7711,20 @@ test("the chrome's queued anchor agrees with the server's transcript anchor for 
       text: "2 layout issues",
       target: { type: "layout-warnings", warnings: [{ id: "a" }, { id: "b" }] },
     },
+    {
+      prompt: "note",
+      selector: "",
+      tag: "board",
+      text: "Board: canvas marks",
+      target: { type: "board-canvas", scenePath: "/s", stats: {} },
+    },
+    {
+      prompt: "note",
+      selector: "section#srv",
+      tag: "section",
+      text: "Server code",
+      target: { type: "board-card", card: "srv", kind: "code", title: "Artifact route", code: "src/server.js:1-2" },
+    },
     { prompt: "note", selector: "", tag: "message", text: "Freeform message" },
   ];
   const unescape = (value) =>
@@ -8809,6 +8857,44 @@ function queueHeadingNote(chrome, prompt = "Make this heading bigger", selector 
   chrome.sendFrameMessage({ type: "lavish:queuePrompt", prompt: { prompt, selector, tag: "h2", text: "Pricing" } });
 }
 
+test("a resolved comment shows Reopen on its collapsed row, and a board comment names its card", async () => {
+  const at = "2026-11-12T10:00:00.000Z";
+  const chrome = await createChromeHarness({
+    sessionData: {
+      ...defaultSessionData,
+      initialThreads: [
+        {
+          id: "c1",
+          anchor: {
+            selector: '[data-card="poll"]',
+            text: "Poll takes the whole batch",
+            tag: "section",
+            target: { type: "board-card", card: "poll", title: "Poll takes the whole batch" },
+          },
+          resolved: true,
+          messages: [{ role: "user", text: "What does this mean?", at }],
+        },
+        {
+          id: "c2",
+          anchor: { selector: "h2", text: "Pricing", tag: "h2" },
+          resolved: true,
+          messages: [{ role: "user", text: "Bigger", at }],
+        },
+      ],
+    },
+  });
+  const html = subtreeHtml(chrome.element("resolvedList"));
+  // The row says what the comment is on, in plain words, and Reopen is on the row itself.
+  assert.match(html, /class="thread-quote"[^>]*>On card: Poll takes the whole batch<\/button>/);
+  assert.match(
+    html,
+    /<header class="thread-head">(?:(?!<\/header>).)*class="text-button thread-reopen">Reopen<\/button>/s,
+  );
+  // An ordinary page comment keeps its quote as it was.
+  assert.match(html, /class="thread-quote"[^>]*>Pricing<\/button>/);
+  assert.doesNotMatch(html, /thread-actions/, "Reopen is not hidden behind an expand");
+});
+
 test("clicking an unsent note's quote opens it for editing and reveals its anchor", async () => {
   const chrome = await createChromeHarness();
   queueHeadingNote(chrome);
@@ -9175,6 +9261,51 @@ test("a margin thread's status reads the stamps on its latest message's transcri
   assert.equal(chrome.pageItems().length, 0, "a threaded entry stays out of the page thread");
 });
 
+// Beside the word, when it happened; the tooltip has the whole trail. The reviewer can see when a
+// comment reached the agent and when it was answered.
+test("a thread shows when its latest state happened, with the sent-delivered-answered trail", async () => {
+  const sent = "2026-10-04T10:00:00.000Z";
+  const delivered = "2026-10-04T10:02:00.000Z";
+  const done = "2026-10-04T10:09:00.000Z";
+  const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const chrome = await createChromeHarness({
+    sessionData: {
+      ...defaultSessionData,
+      initialChat: [
+        {
+          role: "user",
+          kind: "message",
+          text: "Fix it",
+          at: sent,
+          delivered_at: delivered,
+          delivered_seq: 1,
+          done_at: done,
+        },
+      ],
+    },
+  });
+  assert.equal(pageStatus(chrome), "Replied", "the word itself is unchanged");
+  const time = chrome.element("pageThreadTime");
+  assert.match(time.textContent, new RegExp(clock(done).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(time.title, /^Sent .+ · delivered to the agent .+ · answered .+$/);
+});
+
+test("Not listening says since when and why, and the tooltip says comments will queue", async () => {
+  const chrome = await createChromeHarness();
+  const presence = (data) => chrome.eventSource().listeners.get("agent-presence")({ data: JSON.stringify(data) });
+  const since = new Date().toISOString();
+  const clock = new Date(since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  presence({ state: "waiting", since, why: "the server stopped (SIGTERM: stopped by its supervisor or a kill)" });
+  const status = chrome.element("agentStatus");
+  assert.equal(status.textContent, `Not listening since ${clock} · server restarted`);
+  assert.equal(
+    status.title,
+    `Your agent stopped listening at ${clock}: the server stopped (SIGTERM: stopped by its supervisor or a kill). Comments you send will queue until it polls again.`,
+  );
+  presence({ state: "listening", mode: "agent-listener" });
+  assert.equal(status.textContent, "Listening", "a listening agent clears the reason");
+});
+
 test("an unseen note's status ignores live presence, which the top bar reports instead", async () => {
   const chrome = await createChromeHarness({
     sessionData: { ...defaultSessionData, initialChat: [{ role: "user", kind: "message", text: "Waiting" }] },
@@ -9403,4 +9534,108 @@ test("thread anchor messages never expose reviewer writing to the artifact", asy
   assert.notEqual(message.anchors[0].id, "forged-thread");
   assert.ok(!JSON.stringify(message).includes("Private reviewer question"));
   assert.equal(chrome.queued()[0].thread_id, undefined, "the iframe cannot route a note into another thread");
+});
+
+test("a board page never docks its comments into the phone sheet", async () => {
+  const phone = await createChromeHarness({ mobile: true });
+  assert.equal(phone.element("commentsBody").inert, true, "an ordinary page docks the sheet at phone width");
+
+  const board = await createChromeHarness({ mobile: true, sessionData: { ...defaultSessionData, boardPage: true } });
+  assert.equal(board.element("commentsBody").inert, false);
+  assert.equal(board.element("commentsFoot").inert, false);
+});
+
+test("a board folds its comments in a narrow window, also after a resize, until the reviewer chooses", async () => {
+  const sessionData = { ...defaultSessionData, boardPage: true };
+  const folded = (chrome) => chrome.element("body").classList.contains("comments-collapsed");
+  const wide = await createChromeHarness({ sessionData, windowWidth: 1440 });
+  assert.equal(folded(wide), false);
+  wide.resizeWindow(780);
+  assert.equal(folded(wide), true, "made narrow after opening wide: the board gets the room");
+  wide.resizeWindow(1300);
+  assert.equal(folded(wide), false);
+
+  const narrow = await createChromeHarness({ sessionData, windowWidth: 780 });
+  assert.equal(folded(narrow), true);
+
+  // The reviewer's own choice wins at every width.
+  const chose = await createChromeHarness({
+    sessionData,
+    windowWidth: 780,
+    localStore: new Map([[`lavish-axi:comments-collapsed:${sessionData.key}`, "0"]]),
+  });
+  assert.equal(folded(chose), false);
+  chose.resizeWindow(700);
+  assert.equal(folded(chose), false);
+
+  // An ordinary page keeps its comments open.
+  const page = await createChromeHarness({ windowWidth: 780 });
+  assert.equal(folded(page), false);
+});
+
+test("canvas mode shows the board's title, summary and health in the one top bar, and queues marks from the comments panel", async () => {
+  const chrome = await createChromeHarness({
+    sessionData: { ...defaultSessionData, boardPage: true },
+    fetchImpl: async (url) => {
+      if (String(url).includes("/whiteboard-channel")) return { ok: true };
+      if (String(url).endsWith("/board")) return { ok: true, json: async () => ({ board: { revision: "r1" } }) };
+      return { ok: true, json: async () => ({ whiteboard: null }) };
+    },
+  });
+  const board = chrome.createInlineWhiteboard();
+  chrome.sendInlineWhiteboardMessage(board, {
+    type: "lavish-whiteboard:ready",
+    diagramIndex: 999,
+    diagramId: "",
+    channelToken: "board-channel",
+  });
+  for (let i = 0; i < 4; i++) await flushPromises();
+  assert.equal(board.posted.at(-1)?.type, "lavish-whiteboard:init");
+
+  chrome.sendInlineWhiteboardMessage(board, {
+    type: "hilight-board:header",
+    diagramIndex: 999,
+    channelId: "board-channel",
+    path: [
+      { id: "", title: "How Hilight works" },
+      { id: "canvas", title: "How the canvas is built" },
+    ],
+    summary: "One board file, two views.",
+    health: { text: "1 of 3 code cards changed", detail: "1 of 3 changed.", warn: true, drifted: "cli", problems: [] },
+  });
+  await flushPromises();
+
+  const crumbs = chrome.element("boardTitle").children;
+  assert.deepEqual(
+    crumbs.map((node) => node.textContent),
+    ["How Hilight works", "/", "How the canvas is built"],
+  );
+  assert.equal(chrome.element("boardInfoWrap").hidden, false, "the summary sits behind the info button");
+  assert.equal(chrome.element("boardInfoText").textContent, "One board file, two views.");
+  assert.equal(chrome.element("resolvedWrap").hidden, false);
+  assert.equal(chrome.element("resolvedCount").textContent, "1 of 3 code cards changed");
+  assert.equal(chrome.element("resolvedButton").classList.contains("is-warn"), true);
+
+  // A parent crumb opens that level on the canvas; Show the first changed card reveals it.
+  crumbs[0].onclick();
+  assert.equal(board.posted.at(-1).type, "hilight-board:openLevel");
+  assert.equal(board.posted.at(-1).level, "");
+  chrome.element("boardHealthShow").onclick();
+  assert.equal(board.posted.at(-1).type, "hilight-board:revealCard");
+  assert.equal(board.posted.at(-1).card, "cli");
+
+  // Queue marks lives in the comments panel: it asks the canvas for the marks and waits.
+  chrome.element("boardNote").value = "Look at the red circle";
+  chrome.element("boardMarks").dispatch("submit", { preventDefault() {} });
+  assert.equal(board.posted.at(-1).type, "hilight-board:queueMarks");
+  assert.equal(board.posted.at(-1).note, "Look at the red circle");
+  assert.equal(chrome.element("boardQueue").disabled, true);
+  chrome.sendInlineWhiteboardMessage(board, {
+    type: "hilight-board:queueSkipped",
+    diagramIndex: 999,
+    channelId: "board-channel",
+  });
+  await flushPromises();
+  assert.equal(chrome.element("boardQueue").disabled, false, "nothing to queue settles the button");
+  assert.equal(chrome.element("boardNote").value, "Look at the red circle", "the note survives a skipped queue");
 });

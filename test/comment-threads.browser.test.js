@@ -322,7 +322,7 @@ test(
       page(`document.getElementById('send').click();return true`);
       wait(1500);
       poll = cli("poll", artifact, "--timeout-ms", "300");
-      assert.match(poll, /tradeoff[^\n]*,c1\n/, poll);
+      assert.match(poll, /^ {2}c1,[^\n]*tradeoff/m, poll);
 
       // One agent reply: the lead-in goes to the page thread, each section to its own card.
       const replyFile = path.join(temp, "reply.md");
@@ -426,11 +426,11 @@ test(
       wait(300);
       const drawer = page(`const list=document.getElementById('resolvedList');
         const box=document.getElementById('resolvedDrawer').getBoundingClientRect(),c=list.querySelector('.comment-thread').getBoundingClientRect();
-        return {quote:list.querySelector('.thread-quote')?.textContent||'',text:list.textContent,reopen:list.querySelectorAll('.thread-reopen').length,
+        return {quote:list.querySelector('.thread-quote')?.textContent||'',text:list.textContent,reopen:[...list.querySelectorAll('.comment-thread:not(.is-open) .thread-reopen')].filter((b)=>b.getBoundingClientRect().height>=32).length,
         inside:c.left>=box.left&&c.right<=box.right+0.5}`);
       assert.match(drawer.quote, /Collect feedback/);
       assert.match(drawer.text, /launch lead/);
-      assert.equal(drawer.reopen, 1);
+      assert.equal(drawer.reopen, 1, "Reopen shows on the collapsed row with a 32px target");
       assert.equal(drawer.inside, true, "a drawer card stays inside the drawer");
       screenshot("after-resolved-drawer.png");
       page(`document.querySelector('#resolvedList .thread-reopen').click();return true`);

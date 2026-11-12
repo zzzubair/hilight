@@ -369,6 +369,66 @@ export const PLAYBOOKS = [
       "Use slides for persuasion or presentation, not for dense code review.",
     ],
   },
+  {
+    id: "board",
+    example: `Copy this board, then fill it in with real cards, flows, and text. Save it as an .html file, run \`hilight board check <file>\` until it reports no problems, then \`hilight board stamp <file>\` and \`hilight <file>\`.
+\`\`\`html
+<main data-hilight-board="How checkout charges a card once">
+  <p>A payment request becomes exactly one charge, even when the client retries. Read Pay left to right, then Retry.</p>
+  <section id="api" data-code="src/api/pay.ts:12-40">
+    <h2>API takes the request</h2>
+    <p>Validates the body and reads the Idempotency-Key header. Without the key a retried request would charge twice.</p>
+  </section>
+  <section id="charge" data-code="src/payments/charge.ts:40-88">
+    <h2>Charge calls the processor once</h2>
+    <p>Looks the key up before calling the processor and saves the answer after, so a repeat gets the first answer back.</p>
+  </section>
+  <section id="keys" data-code="src/payments/keys.ts:5-30">
+    <h2>Key store</h2>
+    <p>Keeps each key's answer for 24 hours: that window is how long a retry is safe.</p>
+  </section>
+  <ol data-flow="Pay">
+    <li>api:31-33 -> charge:44-47 hands the checked request and its key to the charge</li>
+    <li>charge:60-62 -> keys:12-15 saves the processor's answer under the key</li>
+  </ol>
+  <ol data-flow="Retry">
+    <li>api:31-33 -> keys:20-24 a retry with the same key finds the saved answer</li>
+  </ol>
+</main>
+\`\`\``,
+    use_when:
+      "Explain how code works as a canvas: real code ranges side by side, with the paths requests or data take between them drawn as coloured flows. The reviewer pans, zooms, draws, and comments.",
+    you_write: [
+      'Cards: a <section> with an id and a heading. With data-code="path:start-end" (path from the repository root, 10-60 lines that prove one point) it is a code card showing those live lines; without it, a text card of any HTML. A <section> that holds sections is a nested board the reviewer double-clicks to open. Keep 4-12 cards per level.',
+      "Flows: one <ol data-flow=\"Name\"> per flow, one step per item: cardA:12-18 -> cardB:40-44, then a few words on what moves. Line numbers are the file's, inside each code card's range; leave them off (cardA -> cardB) to point at a whole card. Chain a -> b -> c when nothing happens in between.",
+      "Text: the <p> directly inside <main> is the board summary, shown above the canvas; the <p> in a card is its overview.",
+    ],
+    hilight_does:
+      "Hilight places the cards (text cards on top, flow cards left to right in step order), routes every step from its source lines to its target lines around the other cards and highlights both ends, gives each flow its own colour and a legend, sizes code cards to their lines, and opens at a readable zoom. Do not write coordinates, sizes, arrows, colours, or CSS for the canvas.",
+    flows: [
+      "Group steps into flows by the job they do together: one flow per path a request, event, or piece of data takes (Pay, Retry, Refund). Two to four flows per board; a board with one path has one flow.",
+      "List steps in the order they happen, and point each end at the exact lines responsible: the line that calls, and the line that receives.",
+      'Name a flow for what it achieves ("Retry is safe"), not for its mechanism ("HTTP").',
+    ],
+    describing: [
+      "Each card overview says what the part does and why it matters to the flow, in one to three sentences (under about 300 characters). Name the consequence, not only the component.",
+      "Bad: <h2>Charge</h2><p>Charge logic.</p> Good: <h2>Charge calls the processor once</h2><p>Looks the key up before calling the processor and saves the answer after, so a retry gets the first answer back instead of a second charge.</p>",
+      "The board summary says what question the board answers and how to read it (which flow first). Step words say what moves between the two lines.",
+    ],
+    checking: [
+      "`hilight board check <file>` lists every problem as one sentence that says what to fix: an unknown card, lines outside a card's range, a malformed step. It also shows code cards that went stale.",
+      "`hilight board stamp <file>` pins each code card so it turns Stale when its lines change. After editing code cards, run it again; add `--repin` for cards whose code you changed on purpose, after updating what they say.",
+      'Answering a thread by changing the board: edit the same file in place. Hilight marks the cards and steps you add as New and takes the reviewer to them. Also put `data-lavish-revision="r2"` on each added card, list `r2` in the page\'s revisions registry (`hilight design`), and answer `## c1 reveal=r2` so the thread offers Reveal change.',
+    ],
+    pitfalls: [
+      "Do not paste code into a text card when it lives in the repository; use a code card.",
+      "Do not split one board across files; nest boards in the one file.",
+      "Optional, only when the user asks: data-x, data-y, data-w on a card place it yourself; data-to on a card is the older connector form.",
+    ],
+    lavish_notes: [
+      'Reviewer marks arrive as a tag "board" prompt that names cards by id and code by line; comments on a card arrive as ordinary threads whose target names the card and, for code cards, its range and pin status.',
+    ],
+  },
 ];
 
 export function listPlaybooks() {

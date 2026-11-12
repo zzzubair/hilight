@@ -20,6 +20,7 @@ import {
   computeCopilotCliHookUpdate,
   createCopilotCliAmbientContextScript,
   createCopilotCliSessionStartHook,
+  createBoardOutput,
   createDesignOutput,
   createExportOutput,
   createHomeOutput,
@@ -37,6 +38,7 @@ import {
   detectInvokingAgent,
   fetchJson,
   getCommandHelp,
+  assertKnownFlags,
   herdrPollChimeEnabled,
   normalizeArgv,
   notifyHerdrPollReady,
@@ -91,20 +93,17 @@ function setupHooksEnv(homeDir, stateDir) {
   return { ...env, HOME: homeDir, HILIGHT_STATE_DIR: stateDir };
 }
 
+// The wake-path contract in plain shell terms, so it reads the same to any agent in any shell.
 function assertObservablePollWakePath(text) {
-  assert.match(text, /Keep the poll in the foreground by default/i);
-  assert.match(text, /return the feedback directly to the agent/i);
-  assert.match(text, /harness-native tracked background-job facility/i);
-  assert.match(text, /guaranteed to resume or notify the same agent/i);
-  assert.match(text, /Never use `nohup`/);
-  assert.match(text, /shell `&`/);
+  assert.match(text, /Run the poll in the foreground and read its output when it exits/);
+  assert.match(text, /in the background only when you are told the moment a background command finishes/);
+  assert.match(text, /Never detach it to keep it alive/);
+  assert.match(text, /`nohup`/);
+  assert.match(text, /a trailing `&`/);
   assert.match(text, /`disown`/);
-  assert.match(text, /redirected fire-and-forget processes/);
-  assert.match(text, /detached terminal without an explicit verified callback/);
-  assert.match(text, /no completion-aware background facility/i);
-  assert.match(text, /verified wake callback into the surrounding supervisor/i);
-  assert.match(text, /Do not tell the user the artifact is being monitored until that wake path is live/i);
-  assert.doesNotMatch(text, /foreground command may run.*run the poll as a background task/i);
+  assert.match(text, /`start \/b`/);
+  assert.match(text, /Do not tell the user you are watching the page until a poll is actually running/);
+  assert.doesNotMatch(text, /harness|supervisor|wake callback|background-job facility/i);
 }
 
 test("home help names HILIGHT_ALLOWED_HOSTS for the 403 forbidden host case", () => {
@@ -293,7 +292,7 @@ test("home output warns agents that poll needs an observable wake path", () => {
   assertObservablePollWakePath(pollHelp);
   assert.doesNotMatch(pollHelp, /Codex/);
   assert.match(pollHelp, /re-run/);
-  assert.match(pollHelp, /feedback remains queued until delivery/);
+  assert.match(pollHelp, /feedback stays queued until a poll delivers it/);
   assert.match(pollHelp, /`Send all and end session` ends the session/);
   assert.match(pollHelp, /final feedback is still delivered once/);
   assert.doesNotMatch(pollHelp, /above 10 minutes/);
@@ -324,7 +323,7 @@ test("home output keeps static skill poll guidance safe and agent-neutral", () =
   assertObservablePollWakePath(pollHelp);
   assert.doesNotMatch(pollHelp, /keep the poll attached to the active turn/i);
   assert.doesNotMatch(pollHelp, /Codex detected/);
-  assert.match(pollHelp, /feedback remains queued until delivery/);
+  assert.match(pollHelp, /feedback stays queued until a poll delivers it/);
 });
 
 test("invoking agent detection recognizes Codex runtime markers only", () => {
@@ -335,12 +334,12 @@ test("invoking agent detection recognizes Codex runtime markers only", () => {
   assert.equal(detectInvokingAgent({ PATH: "/bin" }), "generic");
 });
 
-test("top-level help renders static home output without dynamic sessions", async () => {
+test("--help is a short command list; --help --full renders the static home output without sessions", async () => {
   const stateDir = await mkdtemp(`${os.tmpdir()}/lavish-axi-help-test-`);
   try {
     const result = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../bin/hilight.js", import.meta.url)), "--help"],
+      [fileURLToPath(new URL("../bin/hilight.js", import.meta.url)), "--help", "--full"],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         encoding: "utf8",
@@ -349,7 +348,7 @@ test("top-level help renders static home output without dynamic sessions", async
     );
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /playbooks\[8\]/);
+    assert.match(result.stdout, /playbooks\[9\]/);
     assert.match(result.stdout, /hilight playbook <playbook_id>/);
     assert.match(result.stdout, /reference other filesystem assets/);
     assert.match(result.stdout, /same directory as the HTML file/);
@@ -357,11 +356,27 @@ test("top-level help renders static home output without dynamic sessions", async
     assert.match(result.stdout, /hilight design/);
     assert.match(result.stdout, /strict priority order/);
     assert.match(result.stdout, /never kill it/);
-    assert.match(result.stdout, /feedback remains queued until delivery/);
+    assert.match(result.stdout, /feedback stays queued until a poll delivers it/);
     assert.doesNotMatch(result.stdout, /above 10 minutes/);
     assert.doesNotMatch(result.stdout, /lavish-design/);
     assert.doesNotMatch(result.stdout, /sessions\[/);
     assert.doesNotMatch(result.stdout, /Known IDs/);
+
+    const short = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../bin/hilight.js", import.meta.url)), "--help"],
+      {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        encoding: "utf8",
+        env: { ...process.env, HILIGHT_STATE_DIR: stateDir },
+      },
+    );
+    assert.equal(short.status, 0, short.stderr || short.stdout);
+    assert.ok(short.stdout.length < 2000, `--help stays short (${short.stdout.length} bytes)`);
+    assert.match(short.stdout, /hilight catch-up <html-file> \[thread_id\]/);
+    assert.match(short.stdout, /--agent-reply-file <reply-file>/);
+    assert.match(short.stdout, /`hilight --help --full`/);
+    assert.doesNotMatch(short.stdout, /playbooks\[9\]/);
   } finally {
     await rm(stateDir, { force: true, recursive: true });
   }
@@ -371,7 +386,7 @@ test("design output prints copy-pasteable CDN URLs so agents can opt in to Daisy
   const output = createDesignOutput();
 
   assert.match(output.playbook_router.instruction, /MUST open each matching playbook before writing HTML/);
-  assert.equal(output.playbook_router.playbooks.length, 8);
+  assert.equal(output.playbook_router.playbooks.length, 9);
   assert.equal(
     output.playbook_router.playbooks.find((playbook) => playbook.id === "diagram")?.use_when,
     "Explain relationships, flows, state, architecture, and concepts with illustrations",
@@ -442,10 +457,10 @@ test("design output recommends luxury as the default theme and warns against @ap
 test("playbook index output lists known playbooks with concise descriptions", () => {
   const output = createPlaybookOutput([]);
 
-  assert.equal(output.playbooks.length, 8);
+  assert.equal(output.playbooks.length, 9);
   assert.deepEqual(
     output.playbooks.map((playbook) => playbook.id),
-    ["diagram", "table", "comparison", "plan", "code", "input", "explanation", "slides"],
+    ["diagram", "table", "comparison", "plan", "code", "input", "explanation", "slides", "board"],
   );
   assert.equal(
     output.playbooks.find((playbook) => playbook.id === "plan")?.use_when,
@@ -898,7 +913,7 @@ test("open output keeps the user URL in session data and next_step focused on po
   assert.match(output.next_step, /never kill it/);
   assertObservablePollWakePath(output.next_step);
   assert.doesNotMatch(output.next_step, /Codex/);
-  assert.match(output.next_step, /feedback remains queued until delivery/);
+  assert.match(output.next_step, /feedback stays queued until a poll delivers it/);
   assert.match(output.next_step, /Do not pass --timeout-ms/);
   assert.match(output.next_step, /If the user ends the session, stop polling and do not reopen it/);
   assert.match(output.next_step, /--reopen/);
@@ -912,7 +927,6 @@ test("open output gives Codex the shared wake-path contract plus an attached-tur
     agent: "codex",
   });
 
-  assertObservablePollWakePath(output.next_step);
   assert.match(output.next_step, /Codex detected/);
   assert.match(output.next_step, /keep the poll attached to the active turn/);
 });
@@ -1731,14 +1745,14 @@ test("share command refuses a whitespace-only password instead of quietly publis
 });
 
 test("poll help requires an observable wake path", () => {
-  const help = getCommandHelp("poll");
+  const help = getCommandHelp("poll", { full: true });
 
   assert.match(help, /long-polls indefinitely/);
   assert.match(help, /stays silent/);
   assert.match(help, /never kill it/);
   assertObservablePollWakePath(help);
   assert.doesNotMatch(help, /Codex/);
-  assert.match(help, /feedback remains queued until delivery/);
+  assert.match(help, /feedback stays queued until a poll delivers it/);
   assert.match(help, /Do not pass --timeout-ms/);
   assert.match(help, /tests and debugging only/);
   assert.match(help, /`Send all and end session` ends the session/);
@@ -1747,7 +1761,7 @@ test("poll help requires an observable wake path", () => {
 });
 
 test("poll help is Codex-aware when requested", () => {
-  const help = getCommandHelp("poll", { agent: "codex" });
+  const help = getCommandHelp("poll", { agent: "codex", full: true });
 
   assertObservablePollWakePath(help);
   assert.match(help, /Codex detected/);
@@ -1808,7 +1822,7 @@ test("home share guidance defers republish and unpublish mechanics to share --he
   assert.match(help, /NO delete endpoint/);
 });
 
-test("feedback next step keeps the next poll completion observable", () => {
+test("feedback next step is short: the reply rule first, both commands, and catch-up", () => {
   const output = createPollOutput({
     file: "/tmp/report.html",
     response: { status: "feedback", dom_snapshot: "", prompts: [] },
@@ -1816,16 +1830,23 @@ test("feedback next step keeps the next poll completion observable", () => {
 
   assert.equal("artifact_failures" in output, false);
   assert.equal("layout_warnings" in output, false);
-  assert.match(output.next_step, /never kill it/);
-  assert.match(output.next_step, /without --timeout-ms/);
-  assertObservablePollWakePath(output.next_step);
-  assert.doesNotMatch(output.next_step, /Codex/);
-  assert.match(output.next_step, /feedback remains queued until delivery/);
-  assert.match(output.next_step, /Do not respond to the user just yet\. If you are continuing to wait for feedback/);
-  assert.doesNotMatch(output.next_step, /above 10 minutes/);
+  assert.match(output.next_step, /^Apply the requested changes .*a line `## <thread_id>` starts each thread's answer/);
+  assert.match(
+    output.next_step,
+    /`hilight poll \/tmp\/report\.html --agent-reply-file <reply-file>` to post it and keep listening/,
+  );
+  assert.match(
+    output.next_step,
+    /`hilight reply \/tmp\/report\.html --agent-reply-file <reply-file>` to post it and stop/,
+  );
+  assert.match(output.next_step, /the reply is held and they come back to you/);
+  assert.match(output.next_step, /Missing context\? Run `hilight catch-up \/tmp\/report\.html`/);
+  assert.match(output.next_step, /Full rules: `hilight poll --help`/);
+  assert.doesNotMatch(output.next_step, /Codex|harness|background-job/);
+  assert.ok(output.next_step.length < 900, `next_step stays short (${output.next_step.length} chars)`);
 });
 
-test("poll feedback and the next step are emitted before the bulky DOM snapshot", async () => {
+test("poll feedback lists prompts, then failures, then the next step, and leaves the DOM snapshot out", async () => {
   const stateDir = await mkdtemp(`${os.tmpdir()}/lavish-axi-poll-output-test-`);
   const artifact = `${stateDir}/artifact.html`;
   await writeFile(artifact, "<html><body>hello</body></html>", "utf8");
@@ -1883,10 +1904,9 @@ test("poll feedback and the next step are emitted before the bulky DOM snapshot"
     assert.ok(promptsIndex >= 0, "poll stdout contains prompts");
     assert.ok(failuresIndex >= 0, "poll stdout contains artifact_failures");
     assert.ok(nextStepIndex >= 0, "poll stdout contains next_step");
-    assert.ok(snapshotIndex >= 0, "poll stdout contains dom_snapshot");
+    assert.equal(snapshotIndex, -1, "the page snapshot is not in every poll (catch-up --full has it)");
     assert.ok(promptsIndex < failuresIndex, "prompts precede artifact_failures in poll stdout");
     assert.ok(failuresIndex < nextStepIndex, "artifact_failures precede next_step in poll stdout");
-    assert.ok(nextStepIndex < snapshotIndex, "next_step precedes dom_snapshot in poll stdout");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(stateDir, { force: true, recursive: true });
@@ -1900,7 +1920,6 @@ test("feedback next step is Codex-aware when requested", () => {
     agent: "codex",
   });
 
-  assertObservablePollWakePath(output.next_step);
   assert.match(output.next_step, /Codex detected/);
   assert.match(output.next_step, /keep the poll attached to the active turn/);
 });
@@ -1917,11 +1936,9 @@ test("detected layout warnings never appear in poll output", () => {
 
   assert.equal("layout_warnings" in output, false);
   assert.equal("artifact_failures" in output, false);
-  assert.match(output.next_step, /Apply the requested changes to \/tmp\/report\.html in place/);
-  assert.match(output.next_step, /hilight poll \/tmp\/report\.html --agent-reply/);
-  assert.match(output.next_step, /continuing to wait for feedback/);
-  assert.match(output.next_step, /hilight reply \/tmp\/report\.html --agent-reply/);
-  assert.match(output.next_step, /without starting another long-poll/);
+  assert.match(output.next_step, /Apply the requested changes to the file in place/);
+  assert.match(output.next_step, /hilight poll \/tmp\/report\.html --agent-reply-file <reply-file>/);
+  assert.match(output.next_step, /hilight reply \/tmp\/report\.html --agent-reply-file <reply-file>/);
 });
 
 test("a queued layout-warnings batch reads as ordinary feedback with lifecycle guidance", () => {
@@ -1944,11 +1961,12 @@ test("a queued layout-warnings batch reads as ordinary feedback with lifecycle g
   });
 
   assert.equal("layout_warnings" in output, false, "no parallel protocol - it is just a prompt");
-  assert.equal(output.prompts[0].tag, "layout-warnings");
-  assert.match(output.next_step, /Layout issues inbox/);
-  assert.match(output.next_step, /in one pass before saving so the user's review refreshes once/);
-  assert.match(output.next_step, /Queueing is a repair request, not a resolution/);
-  assert.match(output.next_step, /newer artifact load and a complete check at the same viewport/);
+  assert.deepEqual(output.prompts[0], {
+    thread_id: "page",
+    on: "layout issues w1 w2",
+    text: "Fix these 2 layout issues the browser detected in this artifact:\\n1. [w1] ...",
+  });
+  assert.match(output.next_step, /Layout issues: fix every listed one in one pass/);
 });
 
 test("a fatal artifact failure is the only thing that reaches the agent without user action", () => {
@@ -1999,12 +2017,12 @@ test("whiteboard feedback tells agents to read the summary, inspect files when n
     },
   });
 
-  assert.match(output.next_step, /whiteboard edits \(tag "whiteboard"\)/);
-  assert.match(output.next_step, /read the edit summary in the prompt text first/);
-  assert.match(output.next_step, /scenePath/);
-  assert.match(output.next_step, /previewPath/);
-  assert.match(output.next_step, /Mermaid source stays authoritative/);
-  assert.match(output.next_step, /never try to write the \.excalidraw scene back/);
+  assert.match(
+    output.next_step,
+    /Whiteboard edits: apply them to the Mermaid source in the file, never the scene file/,
+  );
+  assert.equal(output.prompts[0].on, "whiteboard edits");
+  assert.equal(output.prompts[0].files, "/state/whiteboards/k/0.excalidraw /state/whiteboards/k/0.png");
 });
 
 test("image-attachment feedback tells agents to open the local image paths", () => {
@@ -2037,9 +2055,8 @@ test("image-attachment feedback tells agents to open the local image paths", () 
     },
   });
 
-  assert.match(output.next_step, /image attachments/);
-  assert.match(output.next_step, /`attachments` array/);
-  assert.match(output.next_step, /absolute local `path`/);
+  assert.match(output.next_step, /Open the image files in the files column/);
+  assert.equal(output.prompts[0].files, "/state/attachments/k/" + "a".repeat(64) + ".png");
 });
 
 test("feedback without attachments does not mention image attachments", () => {
@@ -2389,6 +2406,10 @@ test("spawned poll with piped stderr banners once and leaves re-run guidance whe
     });
 
     await waitForPollListening(base, key);
+    // The banner follows the server's first answer, which says whether this is the first delivery.
+    for (let tries = 0; !/Long-polling for user feedback/.test(stderr) && tries < 100; tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     assert.equal(
       stderr.match(/Long-polling for user feedback/g)?.length,
       1,
@@ -3711,11 +3732,10 @@ test("question-only feedback tells the agent to answer each thread, not to apply
   ]);
   assert.match(
     nextStep,
-    /^This feedback is only questions\. Answer each one in its own thread \(see the `## <thread_id>` reply format below\)\. Do not edit \/tmp\/report\.html unless an answer genuinely needs the page to change\. /,
+    /^These are only questions: answer each one, and edit the file only if an answer needs the page to change\. /,
   );
   assert.doesNotMatch(nextStep, /Apply the requested changes/);
-  assert.match(nextStep, /a line `## <thread_id>` \(for example `## c1`\) starts that thread's answer/);
-  assert.match(nextStep, /`## c1 reveal=<revision-id>`/);
+  assert.match(nextStep, /a line `## <thread_id>` starts each thread's answer/);
 });
 
 test("feedback with any change request tells the agent to apply it in place", () => {
@@ -3723,14 +3743,8 @@ test("feedback with any change request tells the agent to apply it in place", ()
     { thread_id: "c1", prompt: "Why ten teams?", selector: "#launch", tag: "p" },
     { thread_id: "c2", prompt: "Can you make the title bigger?", selector: "h1", tag: "h1" },
   ]);
-  assert.match(
-    nextStep,
-    /^Apply the requested changes to \/tmp\/report\.html in place and answer any questions in its own thread/,
-  );
-  assert.match(
-    feedbackNextStep([{ prompt: "Why?", tag: "message" }]),
-    /^This feedback is only questions\. Answer each one in your reply\./,
-  );
+  assert.match(nextStep, /^Apply the requested changes to the file in place and answer any questions\. /);
+  assert.match(feedbackNextStep([{ prompt: "Why?", tag: "message" }]), /^These are only questions: answer each one/);
 });
 
 test("question detection treats requests, whiteboards and layout fixes as changes", () => {
@@ -3747,15 +3761,12 @@ test("question detection treats requests, whiteboards and layout fixes as change
   assert.equal(isQuestionOnlyFeedback([]), false);
 });
 
-test("help, poll and reply guidance and the generated skill keep follow-ups on one page per topic", async () => {
-  const { createSkillMarkdown } = await import("../src/skill.js");
+// Said once where an agent starts (help, the skill, opening a page), not in every poll and reply.
+test("help and open guidance keep follow-ups on one page per topic", () => {
   const texts = [
-    createSkillMarkdown(),
-    getCommandHelp("poll"),
-    getCommandHelp("reply"),
+    getCommandHelp("poll", { full: true }),
+    getCommandHelp("reply", { full: true }),
     createOpenOutput({ file: "/tmp/report.html", url: "http://localhost/session/k", status: "opened" }).next_step,
-    feedbackNextStep([{ prompt: "Why?" }]),
-    createReplyOutput("/tmp/report.html", "Done").next_step,
   ];
   for (const text of texts) {
     assert.match(text, /One page per topic: keep discussing in the same HTML file and session/);
@@ -3771,4 +3782,111 @@ test("reply output lists the threads a sectioned reply answered", () => {
     threads: ["c2", "c1"],
   });
   assert.deepEqual(createReplyOutput("/tmp/r.html", "Plain").reply, { file: "/tmp/r.html", status: "sent" });
+});
+
+test("createBoardOutput lists each code card and says how to re-pin the ones that drifted", () => {
+  const result = {
+    root: "/repo",
+    changed: false,
+    cards: [
+      { card: "a", code: "src/a.js:1-4", state: "fresh", status: "pinned" },
+      { card: "b", code: "src/b.js:9-12", state: "stale", status: "stale" },
+      { card: "c", code: "src/c.js:3-5", state: "moved", status: "moved", moved_to: "src/c.js:7-9" },
+      { card: "d", code: "src/d.js:1-2", state: "unpinned", status: "pinned" },
+    ],
+  };
+  const check = createBoardOutput("check", "board.html", result);
+  assert.deepEqual(
+    check.code_cards.map((card) => [card.card, card.status, card.note]),
+    [
+      ["a", "fresh", ""],
+      ["b", "stale", ""],
+      ["c", "moved", "moved to src/c.js:7-9"],
+      ["d", "unpinned", ""],
+    ],
+  );
+  assert.equal(check.board.changed, undefined);
+  assert.match(check.help[0], /hilight board stamp board.html` to pin the 1 unpinned/);
+  assert.match(check.help[1], /2 code card\(s\) no longer match.*--repin/);
+  const stamp = createBoardOutput("stamp", "board.html", { ...result, cards: [result.cards[0]] });
+  assert.deepEqual(stamp.board, { file: "board.html", root: "/repo", changed: false });
+  assert.equal(stamp.help, undefined);
+});
+
+test("every command refuses a flag it does not read, naming the valid ones", () => {
+  assert.throws(
+    () => assertKnownFlags("reply", ["r.html", "--agent-reply-fle", "x.md"]),
+    (/** @type {any} */ error) => {
+      assert.equal(error.code, "VALIDATION_ERROR");
+      assert.match(error.message, /Unknown flag for `hilight reply`: --agent-reply-fle/);
+      assert.match(error.suggestions[0], /--agent-reply <value>, --agent-reply-file <value>/);
+      return true;
+    },
+  );
+  assert.throws(() => assertKnownFlags("end", ["r.html", "--force"]), /Unknown flag for `hilight end`: --force/);
+  // Value flags consume their value, even one that looks like a flag; `--flag=value`, `-` for
+  // stdin, `--help`, and anything after `--` all pass.
+  assert.doesNotThrow(() => assertKnownFlags("poll", ["r.html", "--agent-reply", "--not-a-flag", "--full"]));
+  assert.doesNotThrow(() => assertKnownFlags("poll", ["r.html", "--timeout-ms=10", "--agent-reply-file", "-"]));
+  assert.doesNotThrow(() => assertKnownFlags("reply", ["r.html", "--help"]));
+  assert.doesNotThrow(() => assertKnownFlags("open", ["--", "--odd-name.html"]));
+  assert.doesNotThrow(() => assertKnownFlags("setup", ["hooks", "--replace-lavish"]), "setup checks its own args");
+});
+
+test("a poll leaves the page snapshot out but says how big it is and where it is", () => {
+  const response = { status: "feedback", dom_snapshot: "x".repeat(120), prompts: [{ prompt: "Hi", tag: "message" }] };
+  const short = createPollOutput({ file: "/tmp/r.html", response });
+  assert.equal("dom_snapshot" in short, false);
+  assert.equal(short.changes.page_snapshot, "120 chars not shown (catch-up --full)");
+  const full = createPollOutput({ file: "/tmp/r.html", response, full: true });
+  assert.equal(full.dom_snapshot.length, 120);
+  assert.equal(full.changes, undefined);
+  const empty = createPollOutput({ file: "/tmp/r.html", response: { ...response, dom_snapshot: "" } });
+  assert.equal(empty.changes, undefined, "nothing to say when there is no snapshot");
+});
+
+test("the poll banner is full on a session's first delivery and one line after that", () => {
+  const lines = [];
+  startPollWaitReporter({ file: "/tmp/r.html", write: (line) => lines.push(line), narrateTicks: false }).stop();
+  startPollWaitReporter({
+    file: "/tmp/r.html",
+    write: (line) => lines.push(line),
+    narrateTicks: false,
+    short: true,
+  }).stop();
+  assert.match(lines[0], /Long-polling for user feedback/);
+  assert.equal(
+    lines[1],
+    "[hilight] Waiting for feedback on /tmp/r.html; silent until it arrives, never kill it. If it dies, re-run `hilight poll /tmp/r.html`.\n",
+  );
+  assert.ok(lines[1].length < lines[0].length / 3);
+});
+
+test("next_step is full on the first delivery and one line after, keeping what is special about the batch", () => {
+  const response = { status: "feedback", prompts: [{ prompt: "Make it blue.", tag: "message" }] };
+  const first = createPollOutput({ file: "/tmp/r.html", response });
+  const later = createPollOutput({ file: "/tmp/r.html", response, firstDelivery: false });
+  assert.match(first.next_step, /Answer everything in one reply file/);
+  assert.equal(
+    later.next_step,
+    "Reply: `## <thread_id>` sections in a file, then `hilight poll /tmp/r.html --agent-reply-file <reply-file>`. Lost context? `hilight catch-up /tmp/r.html`",
+  );
+  const questions = createPollOutput({
+    file: "/tmp/r.html",
+    response: { status: "feedback", prompts: [{ prompt: "Why two stores?", tag: "message" }] },
+    firstDelivery: false,
+  });
+  assert.match(questions.next_step, /^These are only questions/);
+  const marks = createPollOutput({
+    file: "/tmp/r.html",
+    response: { status: "feedback", prompts: [{ prompt: "Marks", tag: "board" }] },
+    firstDelivery: false,
+  });
+  assert.match(marks.next_step, /^Canvas marks: edit those cards in the file/);
+  const held = createPollOutput({
+    file: "/tmp/r.html",
+    response: { ...response, status: "held" },
+    firstDelivery: false,
+  });
+  assert.match(held.next_step, /Your reply was NOT posted/, "a held reply keeps its full text");
 });

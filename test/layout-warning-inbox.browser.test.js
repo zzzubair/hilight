@@ -66,10 +66,10 @@ test(
       return url;
     }
 
-    function poll(file, timeoutMs) {
+    function poll(file, timeoutMs, extra = []) {
       return run(
         process.execPath,
-        ["bin/hilight.js", "poll", file, "--timeout-ms", String(timeoutMs)],
+        ["bin/hilight.js", "poll", file, "--timeout-ms", String(timeoutMs), ...extra],
         lavishEnv,
         timeoutMs + 45_000,
       );
@@ -304,7 +304,8 @@ test(
       run("chrome-devtools-axi", ["eval", '() => document.getElementById("send").click()'], chromeEnv);
       wait(1200);
 
-      const feedback = poll(artifact, 8000);
+      // The compact rows leave out the tag and element text; --full carries every prompt field.
+      const feedback = poll(artifact, 8000, ["--full"]);
       assert.match(feedback, /tag:\s*layout-warnings/);
       assert.match(feedback, /Layout issues: 2 selected/);
       assert.doesNotMatch(feedback, /^layout_warnings\[/m, "no parallel agent protocol at the CLI boundary");

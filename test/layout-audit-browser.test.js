@@ -23,6 +23,11 @@ function run(command, args, env, timeout = 45_000) {
   return `${result.stdout || ""}${result.stderr || ""}`;
 }
 
+// `chrome-devtools-axi wait <ms>` fails with "fn is not a function" in 0.1.34, so settle times sleep here.
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 async function freePort() {
   const server = net.createServer();
   await new Promise((resolve, reject) => {
@@ -70,6 +75,23 @@ test(
       return openArtifact(file);
     }
 
+    // `open` returns once the page's accessibility tree is ready, and gives up after 10s on a page
+    // that is deliberately slow (real-heavy-clean). The navigation has happened by then, and the
+    // audit's own settle and inbox read decide the result, so only that timeout is tolerated.
+    function openPage(url) {
+      const result = spawnSync("chrome-devtools-axi", ["open", url], {
+        cwd: repoRoot,
+        env: { ...process.env, ...chromeEnv },
+        encoding: "utf8",
+        timeout: 45_000,
+      });
+      if (result.error) throw result.error;
+      const output = `${result.stdout || ""}${result.stderr || ""}`;
+      if (result.status !== 0 && !/waiting for the accessibility tree/.test(output)) {
+        assert.fail(`chrome-devtools-axi open ${url}\n${output}`);
+      }
+    }
+
     function readInbox() {
       const output = run(
         "chrome-devtools-axi",
@@ -97,16 +119,18 @@ test(
     // the poll return - only the user queueing a fix does that.
     async function audit(name, viewport, settleMs, expectedCount) {
       const { file, url } = await openFixture(name);
+      // chrome-devtools-axi 0.1.34 refuses `emulate` until a page is selected.
+      if (auditRun === 1) run("chrome-devtools-axi", ["open", "data:text/html,"], chromeEnv);
       run("chrome-devtools-axi", ["emulate", "--viewport", viewport], chromeEnv);
-      run("chrome-devtools-axi", ["open", url], chromeEnv);
-      run("chrome-devtools-axi", ["wait", String(settleMs)], chromeEnv, settleMs + 45_000);
+      openPage(url);
+      sleep(settleMs);
       let inbox = readInbox();
       // A busy browser can return from navigation before the refreshed chrome has painted its
       // first diagnostic result. Re-open once when the gate is still checking (or a warning-count
       // assertion is otherwise not ready), then keep the final gate assertion strict.
       if (inbox.gate || (expectedCount > 0 && Number(inbox.badge) !== expectedCount)) {
-        run("chrome-devtools-axi", ["open", url], chromeEnv);
-        run("chrome-devtools-axi", ["wait", String(settleMs)], chromeEnv, settleMs + 45_000);
+        openPage(url);
+        sleep(settleMs);
         inbox = readInbox();
       }
       const poll = run(process.execPath, ["bin/hilight.js", "poll", file, "--timeout-ms", "600"], lavishEnv);
@@ -157,7 +181,7 @@ test(
       const revalidation = openArtifact(revalidationFile);
       run("chrome-devtools-axi", ["emulate", "--viewport", "390x844x1,mobile,touch"], chromeEnv);
       run("chrome-devtools-axi", ["open", revalidation.url], chromeEnv);
-      run("chrome-devtools-axi", ["wait", "3200"], chromeEnv);
+      sleep(3200);
       const detected = readInbox();
       assert.equal(Number(detected.badge), 3);
       assert.equal(detected.gate, false);
@@ -170,7 +194,7 @@ test(
         revalidationFile,
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Repaired controls</title></head><body><button>Continue</button></body></html>',
       );
-      run("chrome-devtools-axi", ["wait", "4500"], chromeEnv);
+      sleep(4500);
       const repaired = readInbox();
       assert.equal(Number(repaired.badge), 0);
       assert.equal(repaired.wrapHidden, true);

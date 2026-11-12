@@ -39,6 +39,7 @@ Seven-tab pool regression: `HILIGHT_BROWSER_E2E=1 node --test test/event-transpo
 - A test that runs a pre-rename build must pass `LAVISH_AXI_*` env names. That build ignores `HILIGHT_*` and falls back to the real `~/.lavish-axi` and port 4387.
 - `canonicalFile` runs `realpath`. Two paths to the same file are one session.
 - `normalizeArgv` must let AXI `RESERVED_COMMANDS` (including `update`) pass through. A bare `hilight update` must not become `open update`.
+- A new command flag goes into `COMMAND_FLAGS` (`src/cli.js`), or the command refuses it with exit 2.
 
 ## Safety and correctness
 
@@ -72,7 +73,7 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - Every poll exit path undoes the presence it set and cancels the disconnect grace timer. `/api/poll` subscribes to closure before its first `await`. [Request flow](docs/invariants.md#request-flow).
 - Poll stdout is reserved for the final JSON/TOON response. Recurring wait ticks go to stderr only on a TTY, and notification failure never affects the poll. [Request flow](docs/invariants.md#request-flow).
 - The chrome never promotes presence to `working` on send. It renders only the state the live stream reports. [Request flow](docs/invariants.md#request-flow).
-- Poll feedback field order is `prompts`, `artifact_failures`, `next_step`, then `dom_snapshot`. Never move `next_step` after the snapshot. [Request flow](docs/invariants.md#request-flow).
+- Poll feedback field order is `prompts`, `artifact_failures`, `changes`, `next_step`, then `dom_snapshot` (only with `--full`). Never move `next_step` after the snapshot. Polls send only what is new; context comes from `hilight catch-up`, never a guess. [Request flow](docs/invariants.md#request-flow).
 - `takeFeedback` is destructive. A disconnected poll restores through `queuePrompts` `restore`: prepend, do not re-plan, re-emit `feedback`, and exempt only the request-wide attachment-ref cap. [Request flow](docs/invariants.md#request-flow).
 - A disconnected-poll restore never overwrites a newer `dom_snapshot` or `artifact_failures` recorded after the take. [Request flow](docs/invariants.md#request-flow).
 - A layout warning clears only on a newer artifact revision plus a complete pass at the same viewport class. Do not emit `feedback` for a detection. [Passive layout-warning inbox](docs/invariants.md#passive-layout-warning-inbox).
@@ -135,6 +136,9 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - Self-paint stays a warning. Never block open and never auto-repair. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).
 - The layout audit fails open. An empty completed pass means repaired. A failed run publishes `complete: false` and no findings. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).
 - The layout audit is severe-only. Scroll dimensions alone are never proof, diagram surfaces are excluded, and a finding needs the same severe root in two samples. [Things to know when editing](docs/invariants.md#things-to-know-when-editing).
+- The server writes every lifecycle and session event to `server.log` itself (synchronous, append-only, rotated, never truncated). A stop logs each listening poll's `listen-end` before `server-stop`, and signals stop through `server.stop(cause)`. [Event log and traceability](docs/invariants.md#event-log-and-traceability).
+- A reconnecting poll never resends a reply after the server answered, and waits before starting its own server so a supervisor's wins. Server errors carry `why` and `log`. [Event log and traceability](docs/invariants.md#event-log-and-traceability).
+- Board code cards read only inside the code root after `realpath`, `GET /api/:key/board` never writes, and the board scene lives in the `BOARD_SCENE_INDEX` sidecar, never the file. Flow arrows are rebuilt from the file and never saved, and authoring mistakes go to `board.problems`, never a throw. [Boards](docs/invariants.md#boards-canvas-mode).
 
 ## Maintaining this file
 

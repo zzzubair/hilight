@@ -82,7 +82,7 @@ function runCli(args, { cwd = REPO_ROOT, env = process.env, stdin } = {}) {
   });
 }
 
-test("open and poll next_step keep --agent-reply concise-first and structure-when-long", () => {
+test("open next_step teaches the reply-file loop, and poll points at the full rules", () => {
   const open = createOpenOutput({
     file: "/tmp/artifact.html",
     url: "http://127.0.0.1:4387/session/abc",
@@ -93,29 +93,33 @@ test("open and poll next_step keep --agent-reply concise-first and structure-whe
     response: { status: "feedback", dom_snapshot: "", prompts: [] },
   });
 
-  assertConciseFirstGuidance(open.next_step);
-  assertConciseFirstGuidance(poll.next_step);
-  assert.match(open.next_step, /hilight poll --help|README/);
-  assert.match(poll.next_step, /hilight poll --help|README/);
+  // A reply goes through a file, so no shell has to quote a multi-line body.
+  assert.match(open.next_step, /hilight poll \/tmp\/artifact\.html --agent-reply-file <reply-file>/);
+  assert.match(open.next_step, /hilight reply \/tmp\/artifact\.html --agent-reply-file <reply-file>/);
+  assert.match(open.next_step, /A line `## c1` in the reply answers comment thread c1/);
+  assert.match(open.next_step, /`hilight poll --help --full`/);
+  // Every poll keeps it short and points at the full rules instead of repeating them.
+  assert.match(poll.next_step, /--agent-reply-file <reply-file>/);
+  assert.match(poll.next_step, /Full rules: `hilight poll --help`/);
 });
 
-test("poll help documents --agent-reply-file for longer Markdown and points at README's subset", () => {
+test("poll help is short and file-based; --full keeps the Markdown rules and README pointer", () => {
   const help = getCommandHelp("poll");
-
-  assert.match(help, /--agent-reply "\.\.\."/);
+  assert.ok(help.length < 2500, `short poll help stays short (${help.length} bytes)`);
   assert.match(help, /--agent-reply-file <path>/);
-  assert.match(help, /concise/i);
-  assert.match(help, /Only when a longer reply is genuinely necessary/);
-  assert.match(help, /blank-line paragraphs/);
-  assert.match(help, /`- `/);
-  assert.match(help, /`1\. `/);
-  assert.match(help, /`## `/);
-  assert.match(help, /`-` reads stdin|`--agent-reply-file -`/);
-  assert.match(help, /README/);
-  assert.match(help, /Feedback controls/);
-  assert.doesNotMatch(help, /prefer multiline/i);
-  assert.match(help, /hilight poll report\.html --agent-reply "Renamed the payment step\."/);
+  assert.match(help, /A line\n?\s*`## c1` starts the answer for thread c1/);
+  assert.match(help, /status: held/);
   assert.match(help, /hilight poll report\.html --agent-reply-file reply\.md/);
+  assert.match(help, /Every rule: `hilight poll --help --full`/);
+  assert.doesNotMatch(help, /printf|<<|\$\(/, "no shell-specific examples");
+
+  const full = getCommandHelp("poll", { full: true });
+  assertConciseFirstGuidance(full.replace('--agent-reply "..."', '--agent-reply "<message for the user>"'));
+  assert.match(full, /README/);
+  assert.match(full, /Feedback controls/);
+  assert.match(full, /hilight poll report\.html --agent-reply "Renamed the payment step\."/);
+  assert.match(full, /status held/);
+  assert.doesNotMatch(full, /printf/);
 });
 
 test("resolveAgentReply keeps the inline --agent-reply string", async () => {

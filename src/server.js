@@ -39,6 +39,7 @@ import {
 import * as artifactRevisions from "./artifact-revisions.js";
 import * as mermaidNode from "./mermaid-node.js";
 import * as tableCellHelpers from "./table-cell.js";
+import { BOARD_ATTRIBUTE, readBoard } from "./board-source.js";
 import { extractMermaidSources, whiteboardSourceHash } from "./mermaid-source.js";
 import { createExcalidrawLibraryCache, excalidrawLibrariesDir } from "./whiteboard-library-store.js";
 import { parseLibraryIconDirectives } from "./whiteboard-libraries.js";
@@ -59,6 +60,7 @@ import { hostRejectedShareWrite, publishedDespiteError, publishToHtmlApp } from 
 import { serializeChat, serializeChatAckIds, serializeChatSync, serializeThreads } from "./chat-messages.js";
 import { planThreadReply, splitThreadReply } from "./comment-threads.js";
 import { formatServerLogLine, serverStdioIsTimestamped } from "./server-log.js";
+import { createEventLog, pageEventText, previousServerExit, readEvents } from "./event-log.js";
 import { injectLavishSdk } from "./html-transform.js";
 import {
   bindHost,
@@ -110,6 +112,8 @@ const designAssetUrls = {
   },
 };
 
+export const DELIVERED_HEADER = "Hilight-Delivered";
+const HISTORY_EVENTS = 40;
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60_000;
 const WHITEBOARD_CHANNEL_TOKEN_TTL_MS = 5 * 60_000;
 const NETWORK_RECONCILE_CACHE_MS = 1_000;
@@ -142,6 +146,12 @@ const ATTACHMENT_SWEEP_INTERVAL_MS = 60 * 60_000;
 // in the chrome's outdated banner, so an unknown value is dropped rather than passed through to
 // text the user would read as a fact.
 const SHUTDOWN_REASONS = new Set(["upgrade", "local-build", "stop"]);
+// The words server.log and the pages use for each requested shutdown.
+const SHUTDOWN_CAUSES = {
+  upgrade: "replaced by a newer Hilight",
+  "local-build": "restarted to load a local build",
+  stop: "stopped with `hilight stop`",
+};
 const AGENT_LISTENER_LABEL = "agent-listener";
 
 // Live-reload coalescing. A normal save is one reload after a short debounce. While a queued
@@ -313,6 +323,7 @@ export async function serve({
   extraListenHosts = [],
   bindRecoveryDelaysMs = BIND_RECOVERY_DELAYS_MS,
   whiteboardAssetsDir = defaultWhiteboardAssetsDir(),
+  eventLog = createEventLog(path.join(path.dirname(stateFile), "server.log")),
 } = {}) {
   // Keep the transport dependency off fast metadata paths such as `--version`.
   const { WebSocket, WebSocketServer } = await import("ws");
@@ -353,6 +364,13 @@ export async function serve({
   const watchers = new Map();
   const activePolls = new Map();
   const deliveredFeedback = new Set();
+  // When and why each session's agent last stopped listening, so a page can say more than
+  // "Not listening". Seeded from server.log at startup, so it survives a restart.
+  /** @type {Map<string, { at: string, why: string }>} */
+  const listenEnded = new Map();
+  const serverStartedAt = new Date();
+  /** @type {{ at: string, why: string } | null} */
+  let previousExit = null;
   const pollOwnershipLock = new AsyncMutex();
   // Keyed by session so a version-driven shutdown can reload the one chrome whose artifact is
   // being reopened and leave every other open review page on screen. Current chromes use a
@@ -406,8 +424,19 @@ export async function serve({
   events.on("agent-reply", (key, entry) => broadcastLiveEvent("agent-reply", key, entry));
   events.on("chat-sync", (key, session) => broadcastLiveEvent("chat-sync", key, serializeChatSync(session)));
   events.on("agent-presence", (key, state) =>
-    broadcastLiveEvent("agent-presence", key, presenceEventData(key, state, activePolls, deliveredFeedback)),
+    broadcastLiveEvent(
+      "agent-presence",
+      key,
+      presenceEventData(key, state, activePolls, deliveredFeedback, listenEnded),
+    ),
   );
+  // Every way a poll stops listening goes through releasePollListener, which emits this once.
+  events.on("listen-end", (holder) => {
+    const why = holder.endReason || "the poll ended";
+    listenEnded.set(holder.key, { at: new Date().toISOString(), why });
+    if (holder.logged && !holder.endLogged) eventLog.write(holder.key, "listen-end", why);
+    holder.endLogged = true;
+  });
   events.on("layout-warnings", (key, warnings) => broadcastLiveEvent("layout-warnings", key, { warnings }));
   events.on("ended", (key, endedBy) => broadcastLiveEvent("ended", key, { ended_by: endedBy || null }));
 
@@ -465,7 +494,7 @@ export async function serve({
     }
     client.sendEvent("chat-sync", serializeChatSync(session));
     const presence = computePresence(key, activePolls, deliveredFeedback);
-    client.sendEvent("agent-presence", presenceEventData(key, presence, activePolls, deliveredFeedback));
+    client.sendEvent("agent-presence", presenceEventData(key, presence, activePolls, deliveredFeedback, listenEnded));
     // A connection that attaches after the live end event still needs the terminal snapshot.
     if (session?.status === "ended") client.sendEvent("ended", { ended_by: session.ended_by || null });
   }
@@ -539,8 +568,9 @@ export async function serve({
     }
   }
 
-  function finishFeedbackDelivery(key, result) {
+  function finishFeedbackDelivery(key, result, event = "delivered") {
     if (result.status !== "feedback") return;
+    eventLog.write(key, event, describeBatch(result, event));
     markFeedbackDelivered(key, activePolls, deliveredFeedback, events);
     // The take already stamped the batch Seen in state.json (docs/delivery-acks.md); tell the open
     // tabs only now, on the path that is about to write the response, never from the destructive
@@ -560,10 +590,59 @@ export async function serve({
   // What the agent receives. `delivery_seq` is the store's own bookkeeping for undoing a take's Seen
   // stamps on a closed poll; it means nothing to an agent and stays off the wire.
   function agentFacingFeedback(result) {
-    if (!result || result.status !== "feedback" || !("delivery_seq" in result)) return result;
+    if (!result || result.status !== "feedback") return result;
+    if (!("delivery_seq" in result) && !("code_status_previous" in result)) return result;
     const rest = { ...result };
     delete rest.delivery_seq;
+    delete rest.code_status_previous;
     return rest;
+  }
+
+  // A prepared delivery that never reached the agent (its poll closed while code-card changes were
+  // computed) gives the code-card baseline back, so the redelivery names the same changes.
+  async function undoCodeStatus(key, prepared) {
+    if (!prepared || !("code_status_previous" in prepared)) return;
+    await store.exchangeAgentCodeStatus(key, prepared.code_status_previous).catch(() => {});
+  }
+
+  // On a board, what happened to the code cards since the agent's last turn: the cards whose
+  // status moved, or none. A page that is not a board says nothing.
+  async function withCodeCardChanges(key, result) {
+    if (result?.status !== "feedback") return result;
+    try {
+      const session = await store.findByKey(key);
+      const html = session ? await readFile(session.file, "utf8").catch(() => null) : null;
+      const board = html === null ? null : await readBoard(session.file, html);
+      if (!board) return result;
+      const now = Object.fromEntries(
+        board.cards.filter((card) => card.kind === "code" && card.code).map((card) => [card.id, card.code.status]),
+      );
+      const previous = await store.exchangeAgentCodeStatus(key, now);
+      // The first time, a change is a card that no longer matches its pin; after that, any move.
+      const drifted = new Set(["stale", "moved", "missing", "invalid"]);
+      const changed = Object.entries(now)
+        .filter(([id, status]) =>
+          previous ? previous[id] !== undefined && previous[id] !== status : drifted.has(status),
+        )
+        .map(([id, status]) => ({ card: id, status }));
+      return {
+        ...result,
+        code_cards: { total: Object.keys(now).length, changed, since: previous ? "last_turn" : "pinned" },
+        code_status_previous: previous,
+      };
+    } catch {
+      return result;
+    }
+  }
+
+  // A reply sent while new comments wait is held, not posted: the agent gets those comments back
+  // and answers everything in one reply (re-running the same command). Nothing is published, so
+  // the review stays on Working. Returns the agent-facing hold, or null when nothing is waiting.
+  async function holdReplyForPending(key) {
+    const taken = await store.takeFeedback(key, { onlyPrompts: true });
+    if (taken.status !== "feedback") return null;
+    const prepared = await withCodeCardChanges(key, taken);
+    return { taken, prepared, response: { ...agentFacingFeedback(prepared), status: "held" } };
   }
 
   // `takeFeedback` is destructive: it clears the batch from `state.json` before anything is
@@ -580,6 +659,11 @@ export async function serve({
   async function restoreClosedFeedback(key, result) {
     if (result.status !== "feedback") return;
     const prompts = Array.isArray(result.prompts) ? result.prompts : [];
+    eventLog.write(
+      key,
+      "requeued",
+      `${countLabel(prompts.length, "comment")} put back: the poll closed before it got them`,
+    );
     let session = null;
     let restoreError = null;
     try {
@@ -797,6 +881,9 @@ export async function serve({
         key,
         label: listenerLabel(holder),
       })),
+      pid: process.pid,
+      started_at: serverStartedAt.toISOString(),
+      ...(previousExit ? { previous_exit: previousExit } : {}),
     });
   });
 
@@ -814,7 +901,7 @@ export async function serve({
     const reason = SHUTDOWN_REASONS.has(String(req.body?.reason || "")) ? String(req.body.reason) : "";
     res.json({ status: "shutting-down" });
     // Defer until after the response flushes so the client gets confirmation.
-    setImmediate(() => shutdown(reloadKey, reason, "shutdown-request"));
+    setImmediate(() => shutdown(reloadKey, reason, SHUTDOWN_CAUSES[reason] || "shutdown requested"));
   });
 
   app.post("/api/sessions", async (req, res, next) => {
@@ -846,6 +933,7 @@ export async function serve({
         clearFeedbackDelivery(key, activePolls, deliveredFeedback, events);
       }
       logEvent?.(`session opened key=${key} file=${file}`);
+      eventLog.write(key, "opened", file);
       await syncOutstandingRepairs(key);
       await watchSession(session, watchers, events, logEvent, reloadDebounceMs);
       res.json({
@@ -871,15 +959,12 @@ export async function serve({
   async function publishAgentReply(key, text, { requireOpen = false } = {}) {
     const session = await store.addAgentReply(key, text, { requireOpen });
     if (!session || (requireOpen && session.status === "ended")) return session;
-    // A reply made only of `## c1` thread sections adds nothing to chat; the threads arrive in
-    // the chat-sync below. Only a chat part is announced as a new agent bubble.
-    const plan = splitThreadReply(text);
-    if (plan.sections.length === 0 || plan.chat) {
-      const lastEntry = session.chat?.at(-1);
-      const entry = serializeChat([
-        lastEntry?.role === "agent" ? lastEntry : { role: "agent", text: plan.chat || text, at: session.updated_at },
-      ])[0];
-      events.emit("agent-reply", key, entry);
+    eventLog.write(key, "reply", describeReply(text));
+    // Only a reply that added a page message is announced as a new agent bubble. Thread answers
+    // (`## c1` sections, or a plain reply to comments from one thread) arrive in the chat-sync below.
+    const lastEntry = session.chat?.at(-1);
+    if (lastEntry?.role === "agent" && lastEntry.at === session.updated_at) {
+      events.emit("agent-reply", key, serializeChat([lastEntry])[0]);
     }
     events.emit("chat-sync", key, session);
     // The reply concludes the delivered-feedback "working" state. Human sends remain available
@@ -929,6 +1014,10 @@ export async function serve({
     try {
       const file = await canonicalFile(String(req.query.file || ""));
       const key = sessionKey(file);
+      // How many batches this session already delivered, so the CLI prints its full guidance on
+      // the first and one line after that. Every response path below carries it.
+      const delivered = Number((await store.findByKey(key))?.delivery_seq) || 0;
+      res.set(DELIVERED_HEADER, String(delivered));
       const ownerValue = typeof req.query.owner === "string" ? req.query.owner.trim() : "";
       if (ownerValue.toLowerCase() === "none" || ownerValue.startsWith("-")) {
         detachRequestClose();
@@ -956,17 +1045,42 @@ export async function serve({
           res.status(400).json({ status: "error", code: "VALIDATION_ERROR", error: error.message });
           return;
         }
+        // Comments that arrived while the agent worked are answered in this same turn.
+        // Only for the listener that owns this session (or nobody): another agent's poll must not
+        // take the owner's comments; it gets LISTENER_ACTIVE below, before anything is taken.
+        const held = existing && !takeover && !activePolls.has(key) ? await holdReplyForPending(key) : null;
+        if (held) {
+          detachRequestClose();
+          if (requestClosed || res.writableEnded) {
+            await undoCodeStatus(key, held.prepared);
+            await restoreClosedFeedback(key, held.taken);
+            return;
+          }
+          finishFeedbackDelivery(key, held.taken, "held");
+          res.json(held.response);
+          return;
+        }
       }
       const { holder, previousPresence, conflict, missing } = await pollOwnershipLock.runExclusive(async () => {
         const currentHolder = activePolls.get(key);
         if (currentHolder && !takeover) return { conflict: listenerConflict(currentHolder, "LISTENER_ACTIVE") };
-        const nextHolder = { key, owner, startedAt: Date.now(), replaced: false, replace: null };
+        const nextHolder = {
+          key,
+          owner,
+          startedAt: Date.now(),
+          replaced: false,
+          replace: null,
+          endReason: "",
+          endLogged: false,
+          logged: false,
+        };
         claimedHolder = nextHolder;
         const priorPresence = presenceSignature(key, activePolls, deliveredFeedback);
         if (currentHolder) {
           // Install the successor before releasing the old response so its cleanup cannot emit a
           // transient "waiting" state or clear the successor's listener ownership.
           currentHolder.replaced = true;
+          currentHolder.endReason = `${listenerLabel(nextHolder)} took over listening`;
           activePolls.set(key, nextHolder);
           currentHolder.replace?.();
         } else {
@@ -1004,17 +1118,24 @@ export async function serve({
           releasePollListener(holder, activePolls, deliveredFeedback, events);
           return;
         }
-        if (requestClosed || res.writableEnded) {
+        // Everything that awaits runs before the closed check, so a poll that dies meanwhile gets
+        // its batch put back instead of written into a dead socket.
+        const prepared = await withCodeCardChanges(key, immediate);
+        if (holder.replaced || requestClosed || res.writableEnded) {
+          await undoCodeStatus(key, prepared);
           await restoreClosedFeedback(key, immediate);
-          releasePollListener(holder, activePolls, deliveredFeedback, events);
           detachRequestClose();
+          if (holder.replaced && !requestClosed && !res.writableEnded) {
+            res.json(listenerConflict(holder, "LISTENER_REPLACED"));
+          }
+          releasePollListener(holder, activePolls, deliveredFeedback, events);
           return;
         }
         finishFeedbackDelivery(key, immediate);
         releasePollListener(holder, activePolls, deliveredFeedback, events);
         if (immediate.session_ended) clearFeedbackDelivery(key, activePolls, deliveredFeedback, events);
         detachRequestClose();
-        res.json(agentFacingFeedback(immediate));
+        res.json(agentFacingFeedback(prepared));
         return;
       }
       if (holder.replaced) {
@@ -1039,12 +1160,27 @@ export async function serve({
         heartbeat.unref?.();
       }
       refreshIdleTimer();
+      holder.logged = true;
+      eventLog.write(
+        key,
+        "listen",
+        [
+          req.query.reconnect === "1" ? "reconnected after the server went away" : "",
+          owner ? `owner ${owner}` : "",
+          timeoutMs === null ? "" : `timeout ${timeoutMs}ms`,
+        ]
+          .filter(Boolean)
+          .join(", "),
+      );
       let timer = null;
       let cleaned = false;
       let responding = false;
       const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
+        holder.endReason ||= requestClosed
+          ? "the agent's poll disconnected (its process ended or was killed)"
+          : "the poll ended";
         if (timer) clearTimeout(timer);
         if (heartbeat) clearInterval(heartbeat);
         events.off("feedback", onFeedback);
@@ -1082,7 +1218,12 @@ export async function serve({
           // is only the non-terminal replacement for a poll that would otherwise keep waiting.
           const responseResult = forcedResult && result.status === "waiting" ? forcedResult : result;
           finalSessionEnded = responseResult?.session_ended === true;
+          holder.endReason ||= pollEndReason(responseResult, requestClosed || res.writableEnded);
+          // Code-card changes are computed before the checks below, so nothing awaits between the
+          // last closed check and the write.
+          const prepared = await withCodeCardChanges(key, responseResult);
           if (holder.replaced) {
+            await undoCodeStatus(key, prepared);
             if (responseResult.status !== "waiting") await restoreClosedFeedback(key, responseResult);
             if (!requestClosed && !res.writableEnded) {
               if (streamHeartbeat) res.end(JSON.stringify(listenerConflict(holder, "LISTENER_REPLACED")));
@@ -1091,11 +1232,12 @@ export async function serve({
             return;
           }
           if (requestClosed || res.writableEnded) {
+            await undoCodeStatus(key, prepared);
             await restoreClosedFeedback(key, responseResult);
             return;
           }
           finishFeedbackDelivery(key, responseResult);
-          const agentResponse = agentFacingFeedback(responseResult);
+          const agentResponse = agentFacingFeedback(prepared);
           if (streamHeartbeat) {
             res.end(JSON.stringify(agentResponse));
           } else {
@@ -1340,6 +1482,7 @@ export async function serve({
   app.post("/api/:key/end", async (req, res, next) => {
     try {
       const session = await store.endSession(req.params.key, "user");
+      eventLog.write(req.params.key, "ended", "by the reviewer");
       clearFeedbackDelivery(req.params.key, activePolls, deliveredFeedback, events);
       events.emit("ended", req.params.key, session?.ended_by);
       res.json({ status: "ended" });
@@ -1371,9 +1514,92 @@ export async function serve({
     }
   });
 
-  app.post("/api/:key/agent-reply", async (req, res, next) => {
+  // The session's history from server.log for the page's Activity list: what reached the agent,
+  // when it listened and why it stopped. Read-only, and refused to a foreign page like /review.
+  app.get("/api/:key/history", (req, res) => {
+    if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+      res.status(403).json({ error: "cross-origin history request rejected" });
+      return;
+    }
+    const key = String(req.params.key);
+    const events = readEvents(eventLog.file, { session: key, limit: HISTORY_EVENTS }).map((event) => ({
+      at: event.at,
+      event: event.event,
+      text: pageEventText(event),
+    }));
+    const presence = computePresence(key, activePolls, deliveredFeedback);
+    res.json({ presence, stopped: presence === "waiting" ? listenEnded.get(key) || null : null, events });
+  });
+
+  // What `hilight catch-up` prints: everything an agent without the earlier context needs once -
+  // the board, every comment thread, the page messages, what is still waiting, and the last page
+  // snapshot an agent was sent. Read-only; a foreign Origin is refused like the poll's.
+  app.get("/api/:key/review", async (req, res, next) => {
     try {
-      const session = await publishAgentReply(req.params.key, String(req.body?.text || ""), {
+      if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ error: "cross-origin review request rejected" });
+        return;
+      }
+      const session = await store.findByKey(req.params.key);
+      if (!session) {
+        res.status(404).json({ error: "session not found" });
+        return;
+      }
+      const html = await readFile(session.file, "utf8").catch(() => null);
+      const board = html === null ? null : await readBoard(session.file, html).catch(() => null);
+      const code = board ? board.cards.filter((card) => card.kind === "code" && card.code) : [];
+      res.json({
+        status: session.status,
+        title: board?.title || "",
+        threads: serializeThreads(session.threads || []),
+        page: (session.chat || [])
+          .filter((entry) => entry && !entry.thread_id)
+          .map((entry) => ({ role: entry.role === "agent" ? "agent" : "user", text: String(entry.text || "") })),
+        pending_prompts: Array.isArray(session.prompts) ? session.prompts.length : 0,
+        ...(board
+          ? {
+              code_cards: {
+                total: code.length,
+                drifted: code
+                  .filter((card) => ["stale", "moved", "missing", "invalid"].includes(card.code.status))
+                  .map((card) => ({ card: card.id, status: card.code.status })),
+              },
+              board_problems: board.problems || [],
+            }
+          : {}),
+        dom_snapshot: String(session.last_dom_snapshot || ""),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/:key/agent-reply", async (req, res, next) => {
+    // After the body is parsed `req.aborted` stays false on a disconnect; the response's close is
+    // the signal (as in handlePoll), so a held batch is put back when the CLI gave up waiting.
+    let clientGone = false;
+    res.on("close", () => {
+      if (!res.writableEnded) clientGone = true;
+    });
+    try {
+      const text = String(req.body?.text || "");
+      const existing = await store.findByKey(req.params.key);
+      if (existing && existing.status !== "ended") {
+        // A bad `## c9` is still a plain 400, before anything is taken.
+        planThreadReply(existing.threads, text);
+        const held = await holdReplyForPending(req.params.key);
+        if (held) {
+          if (clientGone || req.aborted || res.writableEnded) {
+            await undoCodeStatus(req.params.key, held.prepared);
+            await restoreClosedFeedback(req.params.key, held.taken);
+            return;
+          }
+          finishFeedbackDelivery(req.params.key, held.taken, "held");
+          res.json(held.response);
+          return;
+        }
+      }
+      const session = await publishAgentReply(req.params.key, text, {
         requireOpen: true,
       });
       if (!session) {
@@ -1384,7 +1610,14 @@ export async function serve({
         res.status(409).json({ status: "ended", ended_by: session.ended_by });
         return;
       }
-      res.json({ status: "sent" });
+      // Where the reply landed: the threads that took an answer from it (the receipt names them).
+      const threads = (session.threads || [])
+        .filter((thread) => {
+          const last = thread.messages?.at(-1);
+          return last?.role === "agent" && last.at === session.updated_at;
+        })
+        .map((thread) => thread.id);
+      res.json({ status: "sent", ...(threads.length ? { threads } : {}) });
     } catch (error) {
       next(error);
     }
@@ -1512,6 +1745,7 @@ export async function serve({
       const file = await canonicalFile(req.body.file);
       const key = sessionKey(file);
       const session = await store.endSession(key, "agent");
+      eventLog.write(key, "ended", "by the agent");
       clearFeedbackDelivery(key, activePolls, deliveredFeedback, events);
       events.emit("ended", key, session?.ended_by);
       res.json({ status: "ended" });
@@ -1533,6 +1767,7 @@ export async function serve({
       await watchSession(session, watchers, events, logEvent, reloadDebounceMs);
       const artifactHtml = await readFile(session.file, "utf8").catch(() => "");
       const { faviconTag, title } = extractArtifactHead(artifactHtml);
+      const boardPage = isBoardPage(artifactHtml);
       // Nothing legitimately frames the review chrome - it is the top-level
       // page, and shares/exports ship standalone HTML rather than embedding it.
       // Refusing to be framed denies an attacker page both a window handle to
@@ -1545,6 +1780,7 @@ export async function serve({
       res.type("html").send(
         createChromeHtml(session, {
           layoutGateEnabled: shouldEnableLayoutGate(req.query || {}),
+          boardPage,
           faviconTag,
           title: title ? `${title} · Hilight` : "Hilight",
           artifactRevision: chromeLoad.artifact_revision,
@@ -1687,7 +1923,8 @@ export async function serve({
 
   app.get("/chrome.css", async (req, res, next) => {
     try {
-      res.type("text/css").send(await readFile(chromeCssUrl, "utf8"));
+      const css = await readFile(chromeCssUrl, "utf8");
+      res.type("text/css").send(req.query.layout === "desktop" ? desktopOnlyChromeCss(css) : css);
     } catch (error) {
       next(error);
     }
@@ -1808,6 +2045,36 @@ export async function serve({
       // library file that changed between the two requests means the frame's
       // libraries do not match these hashes.
       res.json(snapshot ? { sources, libraries_version: snapshot.version } : { sources });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The board model for canvas mode: the cards parsed from the board file on
+  // disk plus the live code of every code card, read now from the repository
+  // that holds the board (never outside it) and checked against the card's pin.
+  // Only the ranges the board file names are ever read, and a present foreign
+  // Origin/Referer is refused like the other read routes that carry file data.
+  app.get("/api/:key/board", async (req, res, next) => {
+    try {
+      if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ error: "cross-origin board request rejected" });
+        return;
+      }
+      const session = await store.findByKey(req.params.key);
+      if (!session) {
+        res.status(404).json({ error: "session not found" });
+        return;
+      }
+      if (refuseNonHtmlArtifact(session, res)) return;
+      const html = await readFile(session.file, "utf8").catch(() => null);
+      const board = html === null ? null : await readBoard(session.file, html);
+      if (!board) {
+        res.status(404).json({ error: "this artifact is not a board" });
+        return;
+      }
+      res.setHeader("cache-control", "no-store");
+      res.json({ board });
     } catch (error) {
       next(error);
     }
@@ -2305,6 +2572,46 @@ export async function serve({
   }
   serverReady = true;
   scheduleBindRecovery();
+  recordServerStart();
+
+  // The previous server's last word (or its silence) explains the gap a restart leaves, both in
+  // this start line and on every page whose agent was listening when it went away.
+  function recordServerStart() {
+    try {
+      const recent = readEvents(eventLog.file, { since: Date.now() - 7 * 24 * 60 * 60 * 1000 });
+      previousExit = previousServerExit(recent);
+      const listening = new Map();
+      for (const event of recent) {
+        if (!event.session) continue;
+        if (event.event === "listen") listening.set(event.session, event);
+        if (event.event === "listen-end") {
+          listening.delete(event.session);
+          listenEnded.set(event.session, { at: event.at, why: event.cause });
+        }
+      }
+      // A listen with no end line: the previous server went away without saying so.
+      for (const session of listening.keys()) {
+        listenEnded.set(session, {
+          at: previousExit?.at || "",
+          why: `the server stopped (${previousExit?.why || "no reason logged"})`,
+        });
+      }
+    } catch {
+      previousExit = null;
+    }
+    eventLog.write(
+      "",
+      "server-start",
+      [
+        `pid ${process.pid}`,
+        version ? `v${version}` : "",
+        `port ${publicPort}`,
+        previousExit ? `previous server: ${previousExit.why}${previousExit.at ? ` at ${previousExit.at}` : ""}` : "",
+      ]
+        .filter(Boolean)
+        .join(", "),
+    );
+  }
 
   // `cause` is log-only and never reaches a chrome: `reason` is the user-facing SHUTDOWN_REASONS
   // value, and widening it here would let an internal cause render as a banner line that claims
@@ -2313,6 +2620,18 @@ export async function serve({
     if (shuttingDown) return;
     shuttingDown = true;
     writeLog(`[hilight] shutting down: ${cause}${reason ? ` (reason=${reason})` : ""}`);
+    // Each listening agent's line names this stop, before the sockets close and before the stop
+    // line, so a session's history reads in order: why it stopped listening, then the server.
+    for (const holder of activePolls.values()) {
+      holder.endReason = `the server stopped (${cause})`;
+      if (holder.logged && !holder.endLogged) eventLog.write(holder.key, "listen-end", holder.endReason);
+      holder.endLogged = true;
+    }
+    eventLog.write(
+      "",
+      "server-stop",
+      `${cause}${reason ? ` (reason=${reason})` : ""}, pid ${process.pid}, up ${formatUptime(Date.now() - serverStartedAt.getTime())}`,
+    );
     if (idleTimer) {
       clearTimeout(idleTimer);
       idleTimer = null;
@@ -2462,6 +2781,11 @@ export async function serve({
     addresses: httpServers.map((server) => server.address()),
     close: async () => {
       shutdown("", "", "close() called");
+      await done;
+    },
+    // A signal or a supervisor stop: the cause is logged, so the reason survives the process.
+    stop: async (cause) => {
+      shutdown("", "", cause);
       await done;
     },
     done,
@@ -2851,6 +3175,7 @@ function releasePollListener(holder, activePolls, deliveredFeedback, events) {
   if (activePolls.get(holder.key) !== holder) return;
   const previousPresence = computePresence(holder.key, activePolls, deliveredFeedback);
   activePolls.delete(holder.key);
+  events.emit("listen-end", holder);
   const nextPresence = computePresence(holder.key, activePolls, deliveredFeedback);
   if (nextPresence !== previousPresence) events.emit("agent-presence", holder.key, nextPresence);
 }
@@ -2906,9 +3231,50 @@ export function presenceMode(key, activePolls, deliveredFeedback) {
   return holder.owner ? "external-listener" : "agent-listener";
 }
 
-function presenceEventData(key, state, activePolls, deliveredFeedback) {
+function presenceEventData(key, state, activePolls, deliveredFeedback, listenEnded = new Map()) {
   const mode = presenceMode(key, activePolls, deliveredFeedback);
-  return mode === "waiting-on-captain" ? { state } : { state, mode };
+  // Not listening says since when and why, when the server knows.
+  const ended = state === "waiting" ? listenEnded.get(key) : null;
+  const stopped = ended ? { since: ended.at, why: ended.why } : {};
+  return mode === "waiting-on-captain" ? { state, ...stopped } : { state, mode, ...stopped };
+}
+
+// Why a waiting poll answered, in words a reviewer and an agent both read.
+export function pollEndReason(result, closed) {
+  if (closed) return "the agent's poll disconnected (its process ended or was killed)";
+  if (result?.status === "feedback") return "it took your comments";
+  if (result?.status === "browser_disconnected") return "the review page was closed";
+  if (result?.status === "ended") return "the session ended";
+  if (result?.status === "waiting") return "the poll timed out";
+  return "the poll ended";
+}
+
+export function countLabel(count, noun) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+// One line for server.log: how many comments, and which threads.
+function describeBatch(result, event) {
+  const prompts = Array.isArray(result.prompts) ? result.prompts : [];
+  const threads = [...new Set(prompts.map((prompt) => prompt?.thread_id || "page"))];
+  const failures = Array.isArray(result.artifact_failures) ? result.artifact_failures.length : 0;
+  const parts = [`${countLabel(prompts.length, "comment")}${threads.length ? ` (${threads.join(", ")})` : ""}`];
+  if (failures) parts.push(countLabel(failures, "artifact failure"));
+  if (event === "held") parts.push("the agent's reply was held so it answers these too");
+  return parts.join(", ");
+}
+
+function describeReply(text) {
+  const threads = [...new Set(splitThreadReply(String(text || "")).sections.map((section) => section.threadId))];
+  return threads.length ? `to ${threads.join(", ")}` : "to the page";
+}
+
+function formatUptime(ms) {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return `${Math.max(0, Math.round(ms / 1000))}s`;
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}` : `${Math.floor(hours / 24)}d`;
 }
 
 function chromeIcon(paths, size = 16, strokeWidth = 1.7) {
@@ -2928,6 +3294,7 @@ const chromeIcons = {
     12,
   ),
   check: chromeIcon('<polyline points="20 6 9 17 4 12"/>', 12),
+  clock: chromeIcon('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>'),
   refresh: chromeIcon(
     '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
     15,
@@ -2960,6 +3327,7 @@ const chromeIcons = {
   ),
   // The phone comments sheet's only chevron: CSS rotates it when the sheet is open.
   chevronUp: chromeIcon('<polyline points="6 15 12 9 18 15"/>', 18, 2),
+  chevron: chromeIcon('<path d="m9 6 6 6-6 6"/>', 14),
 };
 
 // Display the path with the home directory shortened to "~", split so the directory part can
@@ -3072,6 +3440,29 @@ export function extractArtifactHead(html) {
 // gate escape for every later overlay state.
 export const CHROME_BOOT_FAILSAFE_MS = 15000;
 export const CHROME_LAYOUT_GATE_MAX_HOLD_MS = 12000;
+// How long the plain "Checking layout" gate may hold a load. A failure card keeps the longer hold
+// above; an ordinary load is revealed by this point whether or not the layout pass has finished,
+// so nobody waits on the gate for more than a moment.
+export const CHROME_LAYOUT_GATE_CHECK_MS = 1500;
+
+// What a board page shows on a phone instead of the canvas. chrome.css decides when (touch is the
+// only input, never the window width), so a small desktop window still draws the board.
+// Canvas mode has one top bar: the board's title (its summary behind an info
+// button) replaces the file name, filled in from the board frame's header.
+function boardTitleHtml(pathTail) {
+  return `<nav class="board-title" id="boardTitle" aria-label="Board levels"><span class="board-crumb is-current">${escapeHtml(pathTail)}</span></nav><div class="board-info-wrap" id="boardInfoWrap" hidden><button class="board-info-button" id="boardInfoButton" type="button" aria-label="About this board" aria-haspopup="dialog" aria-expanded="false" aria-controls="boardInfo"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></button><div class="menu board-info" id="boardInfo" role="dialog" aria-label="About this board" hidden><p class="board-info-text" id="boardInfoText"></p><p class="board-info-file">${escapeHtml(pathTail)}</p></div></div>`;
+}
+
+// The status pill's drawer opens with the code cards' health and any board problems.
+const BOARD_HEALTH_HTML =
+  '<section class="board-health" id="boardHealth" hidden><p class="board-health-text" id="boardHealthText"></p><button class="text-button board-health-show" id="boardHealthShow" type="button" hidden>Show the first changed card</button><ul class="board-problems" id="boardProblems" hidden></ul></section>';
+
+// Marks drawn on the board go to the agent from the comments panel, beside Send.
+const BOARD_MARKS_HTML =
+  '<form class="board-marks" id="boardMarks"><input class="board-note" id="boardNote" type="text" autocomplete="off" placeholder="Note (optional)" aria-label="Note for the agent about your marks"><button class="button board-queue" id="boardQueue" type="submit" title="Describe your arrows, notes and marks to the agent as a page comment">Queue marks</button></form>';
+
+export const BOARD_PHONE_NOTE_HTML =
+  '<div class="board-phone-note" role="alert"><div class="ended-card"><div class="ended-title">Canvas boards aren&#39;t supported on phones yet.</div><p class="ended-copy">Open this link on a laptop or desktop.</p></div></div>';
 // The failsafe's button is the only control on a page whose client script is dead, so its own
 // probe is bounded too: a port that accepts and never answers must not disable it for good.
 const CHROME_BOOT_FAILSAFE_PROBE_TIMEOUT_MS = 4000;
@@ -3088,7 +3479,7 @@ window.__lavishLayoutGateEscape={arm:armGate,cancel:cancelGate,reveal:reveal,man
 a=document.getElementById("layoutGateAction");
 if(ended){reveal();b=document.getElementById("endedOverlay");if(b)b.hidden=false;}
 if(a&&!ended)a.onclick=manualReveal;
-if(o&&!o.hidden&&!ended)armGate(${CHROME_LAYOUT_GATE_MAX_HOLD_MS});
+if(o&&!o.hidden&&!ended)armGate(${CHROME_LAYOUT_GATE_CHECK_MS});
 window.__lavishCancelChromeBootFailsafe=function(){clearTimeout(t);};
 window.__lavishChromeBootFailed=function(){clearTimeout(t);fail();};
 function fail(){
@@ -3099,6 +3490,7 @@ a=document.getElementById("layoutGateAction");
 if(h)h.textContent="Hilight could not finish loading.";
 if(c)c.textContent="The Hilight editor script did not load. The server usually restarted while this page was opening. Check and reload to reconnect.";
 if(a){a.textContent="Check and reload";a.disabled=false;a.onclick=check;}
+if(o)o.dataset.state="failure";
 showBypass();
 if(o)o.hidden=false;
 if(document.body)document.body.classList.add("layout-gate-active");
@@ -3117,10 +3509,24 @@ if(c)c.textContent=outcome==="no-answer"?"Hilight did not answer the check, so t
 }
 })();`;
 
+// A board is a canvas at every window size: its chrome never switches to the phone layout (the
+// bottom comments sheet), which left a narrow window with an empty canvas area. The page asks for
+// a desktop-only stylesheet, and the client's phone controller stays off (`boardPage`).
+export function isBoardPage(html) {
+  return new RegExp(`<[a-zA-Z][^>]*\\s${BOARD_ATTRIBUTE}(?=[\\s=/>])`).test(String(html || ""));
+}
+
+// chrome.css with its phone breakpoint switched off: phone-only blocks never match and
+// desktop-only blocks always do.
+export function desktopOnlyChromeCss(css) {
+  return css.replaceAll("(max-width: 860px)", "(max-width: 0px)").replaceAll("(min-width: 861px)", "(min-width: 0px)");
+}
+
 export function createChromeHtml(
   session,
   {
     layoutGateEnabled = true,
+    boardPage = false,
     faviconTag = HILIGHT_DEFAULT_FAVICON,
     title = "Hilight",
     artifactRevision = 0,
@@ -3154,6 +3560,8 @@ export function createChromeHtml(
     initialArtifactLoadSequence: artifactLoadSequence,
     chromeLoadToken,
     layoutGateEnabled,
+    layoutGateCheckMs: CHROME_LAYOUT_GATE_CHECK_MS,
+    boardPage,
     modeToggleHotkeyKey: MODE_TOGGLE_HOTKEY_KEY,
     attachmentMaxBytes,
     attachmentMaxCount,
@@ -3165,7 +3573,7 @@ export function createChromeHtml(
     revisionPalette: artifactRevisions.revisionPalette(),
   });
   const { head: pathHead, tail: pathTail } = displayPathParts(session.file);
-  const bodyClass = layoutGateEnabled ? "lavish layout-gate-active" : "lavish";
+  const bodyClass = (layoutGateEnabled ? "lavish layout-gate-active" : "lavish") + (boardPage ? " board-page" : "");
   const layoutGateHidden = layoutGateEnabled ? "" : " hidden";
   const modeHotkeyUpper = MODE_TOGGLE_HOTKEY_KEY.toUpperCase();
   const modeToggleHint = `Toggle annotate/explore mode (⌘${modeHotkeyUpper} / Ctrl+${modeHotkeyUpper})`;
@@ -3176,14 +3584,14 @@ export function createChromeHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>${escapeHtml(title)}</title>
 ${faviconTag}
-<link rel="stylesheet" href="/chrome.css">
+<link rel="stylesheet" href="/chrome.css${boardPage ? "?layout=desktop" : ""}">
 </head>
 <body class="${bodyClass}">
-<div class="bar"><div class="brand"><span class="brand-mark">${HILIGHT_BRAND_MARK}</span><span class="brand-file" title="${escapeHtml(session.file)}">${escapeHtml(pathTail)}</span></div><div class="spacer" aria-hidden="true"></div><span class="agent-status" id="agentStatus" role="status" aria-live="polite" data-state="waiting" title="No agent is polling this review. Ask your agent to run hilight poll.">Not listening</span><div class="warnings-wrap" id="warningsWrap" hidden><button class="warnings-button" id="warningsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="warningsDrawer">${chromeIcons.warning}<span class="warnings-count" id="warningsCount">0</span></button><div class="menu warnings-drawer" id="warningsDrawer" role="dialog" aria-labelledby="warningsTitle" aria-describedby="warningsSummary" hidden><div class="warnings-head"><h2 class="warnings-title" id="warningsTitle">Layout issues</h2><p class="warnings-summary" id="warningsSummary"></p></div><div class="warnings-toolbar"><label class="warnings-selectall"><input type="checkbox" id="warningsSelectAll"><span>Select all</span></label><span class="warnings-selected" id="warningsSelected" role="status" aria-live="polite"></span></div><div class="warnings-list" id="warningsList"></div><div class="warnings-foot"><p class="warnings-note">Queueing adds a repair request to your unsent comments. An issue is marked resolved only after a newer artifact load and a complete check at the same viewport no longer finds it.</p><button class="button" id="warningsQueueButton" type="button" disabled>Queue selected fixes</button></div></div></div><div class="resolved-wrap" id="resolvedWrap" hidden><button class="resolved-button" id="resolvedButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="resolvedDrawer"><span id="resolvedCount">0 resolved</span></button><div class="menu resolved-drawer" id="resolvedDrawer" role="dialog" aria-labelledby="resolvedTitle" hidden><div class="resolved-head"><h2 class="resolved-title" id="resolvedTitle">Resolved and off-page comments</h2></div><div class="resolved-list" id="resolvedList"></div></div></div><button class="annotate-switch" id="annotation" type="button" aria-pressed="true" title="${escapeHtml(modeToggleHint)}"><span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span><span>Annotate</span></button><div class="more-wrap" id="moreWrap"><button class="more-button" id="moreButton" type="button" title="More" aria-haspopup="menu" aria-expanded="false">${chromeIcons.more}</button><div class="menu more-menu" id="moreMenu" hidden><div class="menu-head"><div class="menu-label">Editing</div><button class="menu-file" id="copyPath" type="button" title="Copy path · ${escapeHtml(session.file)}">${chromeIcons.file}<span class="menu-file-text"><span class="path-head">${escapeHtml(pathHead)}</span><span class="path-tail">${escapeHtml(pathTail)}</span></span><span class="copy-hint" id="copyHint"><span class="icon-copy">${chromeIcons.copy}</span><span class="icon-check">${chromeIcons.check}</span><span id="copyHintText">Copy</span></span></button></div><div class="menu-rule"></div><button class="menu-item" id="attachImages" type="button">${chromeIcons.image}<span>Attach images to a page comment</span></button><button class="menu-item" id="reloadArtifact" type="button">${chromeIcons.refresh}<span>Reload artifact</span></button><button class="menu-item" id="copySnapshot" type="button">${chromeIcons.camera}<span>Copy DOM snapshot</span></button><button class="menu-item" id="exportArtifact" type="button">${chromeIcons.download}<span>Export standalone HTML</span></button><button class="menu-item" id="shareArtifact" type="button">${chromeIcons.globe}<span>Publish link</span></button><div class="menu-rule"></div><button class="menu-item" id="sendAndEnd" type="button">${chromeIcons.exit}<span>Send all and end session</span></button><button class="menu-item danger" id="end" type="button">${chromeIcons.exit}<span>End session</span></button></div></div></div>
+${boardPage ? BOARD_PHONE_NOTE_HTML : ""}<div class="bar"><div class="brand"><span class="brand-mark">${HILIGHT_BRAND_MARK}</span>${boardPage ? boardTitleHtml(pathTail) : `<span class="brand-file" title="${escapeHtml(session.file)}">${escapeHtml(pathTail)}</span>`}</div><div class="spacer" aria-hidden="true"></div><span class="agent-status" id="agentStatus" role="status" aria-live="polite" data-state="waiting" title="No agent is polling this review. Ask your agent to run hilight poll.">Not listening</span><div class="warnings-wrap" id="warningsWrap" hidden><button class="warnings-button" id="warningsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="warningsDrawer">${chromeIcons.warning}<span class="warnings-count" id="warningsCount">0</span></button><div class="menu warnings-drawer" id="warningsDrawer" role="dialog" aria-labelledby="warningsTitle" aria-describedby="warningsSummary" hidden><div class="warnings-head"><h2 class="warnings-title" id="warningsTitle">Layout issues</h2><p class="warnings-summary" id="warningsSummary"></p></div><div class="warnings-toolbar"><label class="warnings-selectall"><input type="checkbox" id="warningsSelectAll"><span>Select all</span></label><span class="warnings-selected" id="warningsSelected" role="status" aria-live="polite"></span></div><div class="warnings-list" id="warningsList"></div><div class="warnings-foot"><p class="warnings-note">Queueing adds a repair request to your unsent comments. An issue is marked resolved only after a newer artifact load and a complete check at the same viewport no longer finds it.</p><button class="button" id="warningsQueueButton" type="button" disabled>Queue selected fixes</button></div></div></div><div class="resolved-wrap" id="resolvedWrap" hidden><button class="resolved-button" id="resolvedButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="resolvedDrawer"><span id="resolvedCount">0 resolved</span></button><div class="menu resolved-drawer" id="resolvedDrawer" role="dialog" aria-labelledby="resolvedTitle" hidden><div class="resolved-head"><h2 class="resolved-title" id="resolvedTitle">${boardPage ? "Board status" : "Resolved and off-page comments"}</h2></div>${boardPage ? BOARD_HEALTH_HTML : ""}<div class="resolved-list" id="resolvedList"></div></div></div><button class="annotate-switch" id="annotation" type="button" aria-pressed="true" title="${escapeHtml(modeToggleHint)}"><span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span><span>Annotate</span></button><div class="more-wrap" id="moreWrap"><button class="more-button" id="moreButton" type="button" title="More" aria-haspopup="menu" aria-expanded="false">${chromeIcons.more}</button><div class="menu more-menu" id="moreMenu" hidden><div class="menu-head"><div class="menu-label">Editing</div><button class="menu-file" id="copyPath" type="button" title="Copy path · ${escapeHtml(session.file)}">${chromeIcons.file}<span class="menu-file-text"><span class="path-head">${escapeHtml(pathHead)}</span><span class="path-tail">${escapeHtml(pathTail)}</span></span><span class="copy-hint" id="copyHint"><span class="icon-copy">${chromeIcons.copy}</span><span class="icon-check">${chromeIcons.check}</span><span id="copyHintText">Copy</span></span></button></div><div class="menu-rule"></div><button class="menu-item" id="activityOpen" type="button" aria-haspopup="dialog" aria-controls="activityDrawer">${chromeIcons.clock}<span>Activity</span></button><button class="menu-item" id="attachImages" type="button">${chromeIcons.image}<span>Attach images to a page comment</span></button><button class="menu-item" id="reloadArtifact" type="button">${chromeIcons.refresh}<span>Reload artifact</span></button><button class="menu-item" id="copySnapshot" type="button">${chromeIcons.camera}<span>Copy DOM snapshot</span></button><button class="menu-item" id="exportArtifact" type="button">${chromeIcons.download}<span>Export standalone HTML</span></button><button class="menu-item" id="shareArtifact" type="button">${chromeIcons.globe}<span>Publish link</span></button><div class="menu-rule"></div><button class="menu-item" id="sendAndEnd" type="button">${chromeIcons.exit}<span>Send all and end session</span></button><button class="menu-item danger" id="end" type="button">${chromeIcons.exit}<span>End session</span></button></div><div class="menu resolved-drawer activity-drawer" id="activityDrawer" role="dialog" aria-labelledby="activityTitle" hidden><div class="resolved-head"><h2 class="resolved-title" id="activityTitle">Activity</h2><p class="activity-now" id="activityNow"></p></div><ol class="activity-list" id="activityList"></ol></div></div></div>
 <div class="notices"><div class="notice" id="handoffBanner" hidden><span>This review is open in another Hilight tab. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</span><button class="notice-action" id="handoffTakeover" type="button">Take over here</button></div><div class="notice" id="outdatedBanner" hidden><span id="outdatedText">The Hilight server this page was connected to is no longer running. Reloading will work once it is running again.</span><span class="notice-actions"><button class="notice-action" id="outdatedReload" type="button">Check and reload</button><button class="notice-action" id="outdatedDismiss" type="button">Dismiss</button></span></div></div>
-<div class="layout"><div class="frame"><iframe id="artifact" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" data-artifact-src="/artifact/${session.key}/index.html"></iframe></div><div class="sheet-scrim" id="sheetScrim"></div><aside class="comments" id="comments" aria-label="Comments"><div class="sheet-head" id="sheetHead"><span class="sheet-handle" aria-hidden="true"></span><div class="sheet-head-row"><h2>Comments</h2><span class="sheet-summary" id="sheetSummary" role="status" aria-live="polite"></span><button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="comments" aria-label="Show comments">${chromeIcons.chevronUp}</button></div></div><div class="comments-body" id="commentsBody"><section class="comment-thread page-thread" id="pageThread" data-thread-id="page" tabindex="0" aria-label="Comments on the whole page"><header class="thread-head"><span class="thread-quote">Whole page</span><span class="thread-status" id="pageThreadStatus"></span></header><ol class="thread-messages" id="pageMessages"></ol><div class="thread-reply" id="chatComposer"><textarea id="chatInput" rows="1" aria-label="Comment on the whole page" placeholder="Comment on the whole page"></textarea><div class="chat-attachments" id="chatAttachments"></div><div class="thread-reply-row"><button class="text-button chat-attach" id="chatAttach" type="button">Attach images</button><input id="chatAttachInput" type="file" accept="${escapeHtml(acceptedMime.join(","))}" multiple hidden><span class="chat-attachment-notice" id="chatAttachmentNotice" role="status"></span><span class="thread-hint">Enter saves · Esc closes</span></div></div></section><div id="marginThreads" class="margin-threads"><div id="marginThreadCanvas" class="margin-canvas"></div></div></div><div class="comments-foot" id="commentsFoot"><div class="resolve-toast" id="resolveToast" role="status" hidden><span id="resolveToastText">Resolved</span><button class="text-button" id="resolveUndo" type="button">Undo</button></div><div class="send-hint" id="sendHint" hidden>Nothing to send yet. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</div><button class="button send-button" id="send" type="button">Send to agent</button></div></aside></div>
+<div class="layout"><button class="comments-toggle" id="commentsToggle" type="button" aria-controls="comments" aria-expanded="true" aria-label="Hide comments" title="Hide comments">${chromeIcons.chevron}<span class="comments-toggle-count" id="commentsToggleCount" hidden></span></button><div class="frame"><iframe id="artifact" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" data-artifact-src="/artifact/${session.key}/index.html"></iframe></div><div class="sheet-scrim" id="sheetScrim"></div><aside class="comments" id="comments" aria-label="Comments"><div class="sheet-head" id="sheetHead"><span class="sheet-handle" aria-hidden="true"></span><div class="sheet-head-row"><h2>Comments</h2><span class="sheet-summary" id="sheetSummary" role="status" aria-live="polite"></span><button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="comments" aria-label="Show comments">${chromeIcons.chevronUp}</button></div></div><div class="comments-body" id="commentsBody"><section class="comment-thread page-thread" id="pageThread" data-thread-id="page" tabindex="0" aria-label="Comments on the whole page"><header class="thread-head"><span class="thread-quote">Whole page</span><span class="thread-status" id="pageThreadStatus"></span><time class="thread-time" id="pageThreadTime"></time></header><ol class="thread-messages" id="pageMessages"></ol><div class="thread-reply" id="chatComposer"><textarea id="chatInput" rows="1" aria-label="Comment on the whole page" placeholder="Comment on the whole page"></textarea><div class="chat-attachments" id="chatAttachments"></div><div class="thread-reply-row"><button class="text-button chat-attach" id="chatAttach" type="button">Attach images</button><input id="chatAttachInput" type="file" accept="${escapeHtml(acceptedMime.join(","))}" multiple hidden><span class="chat-attachment-notice" id="chatAttachmentNotice" role="status"></span><span class="thread-hint">Enter saves · Esc closes</span></div></div></section><div id="marginThreads" class="margin-threads"><div id="marginThreadCanvas" class="margin-canvas"></div></div></div><div class="comments-foot" id="commentsFoot"><div class="resolve-toast" id="resolveToast" role="status" hidden><span id="resolveToastText">Resolved</span><button class="text-button" id="resolveUndo" type="button">Undo</button></div><div class="send-hint" id="sendHint" hidden>Nothing to send yet. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</div>${boardPage ? BOARD_MARKS_HTML : ""}<button class="button send-button" id="send" type="button">Send to agent</button></div></aside></div>
 <div class="share-overlay" id="shareDialog" role="dialog" aria-modal="true" aria-labelledby="shareTitleText" hidden><form class="share-card" id="shareForm"><div class="share-head"><div><div class="share-kicker">Publish to <a class="share-link" href="https://ht-ml.app" target="_blank" rel="noopener noreferrer">ht-ml.app</a></div><h2 id="shareTitleText">Publish artifact</h2></div><button class="share-close" id="shareClose" type="button" aria-label="Close publish dialog"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><p class="share-note">ht-ml.app is a separate, third-party hosting service, not part of Hilight. Publishing sends this artifact to its servers.</p><p class="share-copy">This uploads this artifact to ht-ml.app with local assets inlined. Without a password, the page is PUBLIC and anyone with the link can open it. With a password, the page is PRIVATE and viewers must supply the password to view.</p><p class="share-note">Do not publish secrets. The Hilight annotation SDK is not included.</p><div class="share-grid"><label class="share-check"><input id="shareGenerate" type="checkbox"><span>Generate a password (makes this page private)</span></label><label>Password (optional)<input id="sharePassword" name="password" type="password" autocomplete="new-password" placeholder="Leave blank for a public page"></label></div><div class="share-status" id="shareStatus" role="status"></div><div class="share-result" id="shareResult" hidden><label id="shareUrlResult">Share URL<div class="share-copy-row"><input id="shareUrl" readonly><button class="share-copy-btn" id="copyShareUrl" type="button">Copy URL</button></div></label><label id="sharePasswordResult" hidden>Password (shared secret)<div class="share-copy-row"><input id="sharePasswordOut" readonly><button class="share-copy-btn" id="copySharePassword" type="button">Copy password</button></div></label><label id="shareSiteIdResult" hidden>Site ID<div class="share-copy-row"><input id="shareSiteId" readonly><button class="share-copy-btn" id="copyShareSiteId" type="button">Copy site ID</button></div></label><label id="shareUpdateKeyResult">Update key (secret)<div class="share-copy-row"><input id="shareUpdateKey" readonly><button class="share-copy-btn" id="copyUpdateKey" type="button">Copy key</button></div></label><p class="share-note" id="shareUpdateKeyNote">Keep the update key private. ht-ml.app returns it once and it is the only way to update this page later; the service has no delete. Republish this page&#39;s HTML with <code>hilight share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;</code>, and add <code>--private</code> to also lock it behind a new generated password.</p></div><div class="share-actions"><button class="share-cancel" id="shareCancel" type="button">Cancel</button><button class="button" id="sharePublish" type="submit">Publish</button></div></form></div>
-<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Hilight is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
+<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay" data-state="checking"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Hilight is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
 <div class="ended-overlay" id="endedOverlay" hidden><div class="ended-card"><div class="ended-title">Session ended.<br>Return to your agent to continue.</div><p class="ended-copy">${escapeHtml(session.file)}</p></div></div>
 <div class="whiteboard-overlay" id="whiteboardOverlay" hidden><div class="whiteboard-shell"><div class="whiteboard-error" id="whiteboardError" hidden></div><button class="whiteboard-close" id="whiteboardClose" type="button" aria-label="Close whiteboard"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button><iframe id="whiteboardFrame" title="Excalidraw whiteboard" sandbox="allow-scripts allow-popups"></iframe></div></div>
 <script id="lavish-session" type="application/json">${sessionJson}</script>
