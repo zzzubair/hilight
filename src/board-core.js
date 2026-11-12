@@ -351,6 +351,42 @@ export function freshSince(model, known) {
 }
 
 /**
+ * Where each of the board's own top-floating controls (the new-card toast) goes: its resting
+ * top, or `gap` below the lowest floating bar it would otherwise overlap, such as Excalidraw's
+ * Draw toolbar or an earlier floater of ours. Never on top of one. With the bar gone, it is back
+ * at rest. Rects are `{ left, right, top, bottom }` in the board's own coordinates; a floater's
+ * own `top` is ignored, since only its width and height decide where it may go.
+ *
+ * @param {{ left: number, right: number, top: number, bottom: number }[]} floaters
+ * @param {{ left: number, right: number, top: number, bottom: number }[]} bars
+ * @param {{ rest?: number, gap?: number }} [options]
+ * @returns {number[]} each floater's top
+ */
+export function stackTopFloaters(floaters, bars, { rest = 12, gap = 8 } = {}) {
+  const placed = [];
+  return floaters.map((floater) => {
+    const height = floater.bottom - floater.top;
+    const blockers = [...bars, ...placed];
+    let top = rest;
+    // Moving below one bar can land on another, so settle until nothing is in the way. Top only
+    // grows, so this ends.
+    for (let moved = true; moved; ) {
+      moved = false;
+      for (const bar of blockers) {
+        const acrossX = bar.left < floater.right && bar.right > floater.left;
+        const acrossY = bar.top < top + height + gap && bar.bottom + gap > top;
+        if (acrossX && acrossY && bar.bottom + gap > top) {
+          top = bar.bottom + gap;
+          moved = true;
+        }
+      }
+    }
+    placed.push({ left: floater.left, right: floater.right, top, bottom: top + height });
+    return top;
+  });
+}
+
+/**
  * The `known` list to save: everything on the board except what is still new,
  * so an unacknowledged addition is new again after a reload.
  * @param {{ cards: { id: string }[], flows?: any[] }} model

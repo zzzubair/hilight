@@ -53,6 +53,7 @@ import {
   linkLandings,
   reconcileLevelElements,
   similarCanvasSize,
+  stackTopFloaters,
   stepSignature,
   summarizeBoardMarks,
   tagLevel,
@@ -938,6 +939,36 @@ export function startBoard(init, { post }) {
   const TOP_CONTROLS = ".App-toolbar, .bd-reveal";
   const BOTTOM_CONTROLS = ".bd-dock, .bd-legend";
 
+  // The board's own top floaters (the new-card toast) never sit on Excalidraw's top bars: each
+  // goes 8px below any bar it would overlap and back to rest when the bar goes (Draw off).
+  const TOP_BARS = ".App-toolbar";
+  const TOP_FLOAT_REST = 12;
+  function placeTopFloaters() {
+    const box = shell.getBoundingClientRect();
+    const local = (rect) => ({
+      left: rect.left - box.left,
+      right: rect.right - box.left,
+      top: rect.top - box.top,
+      bottom: rect.bottom - box.top,
+    });
+    const floaters = [reveal].filter((node) => !node.hidden);
+    if (!floaters.length) return;
+    const bars = [...shell.querySelectorAll(TOP_BARS)]
+      .filter((node) => !node.closest(".mobile-misc-tools-container"))
+      .map((node) => node.getBoundingClientRect())
+      .filter((rect) => rect.width && rect.height && rect.top < box.top + box.height / 2)
+      .map(local);
+    const tops = stackTopFloaters(
+      floaters.map((node) => local(node.getBoundingClientRect())),
+      bars,
+      { rest: TOP_FLOAT_REST, gap: 8 },
+    );
+    floaters.forEach((node, index) => (node.style.top = `${tops[index]}px`));
+  }
+  // Excalidraw lays its bars out on its own schedule (a resize, the small-screen layout), so
+  // follow its size as well as our own toggles.
+  new window.ResizeObserver(() => placeTopFloaters()).observe(editor);
+
   function controlInsets() {
     const box = editor.getBoundingClientRect();
     let top = 8;
@@ -1202,6 +1233,7 @@ export function startBoard(init, { post }) {
     revealShow.hidden = stage === "shown";
     revealShow.textContent = stage === "back" ? "Show the new card again" : "Show me";
     revealBack.hidden = stage !== "shown" || !s.revealFrom;
+    placeTopFloaters();
   }
 
   async function showFresh({ duration = 650 } = {}) {
@@ -1465,6 +1497,8 @@ export function startBoard(init, { post }) {
     document.body.toggleAttribute("data-drawing", drawing);
     drawButton.setAttribute("aria-pressed", String(drawing));
     drawButton.title = drawing ? "Hide the drawing tools" : "Show the drawing tools";
+    placeTopFloaters();
+    window.requestAnimationFrame(placeTopFloaters);
     if (!drawing && s.api && !VIEW_TOOLS.has(s.api.getAppState().activeTool?.type)) {
       s.api.setActiveTool({ type: "selection" });
     }
@@ -1592,6 +1626,7 @@ export function startBoard(init, { post }) {
   createRoot(editor).render(h(BoardApp));
   renderCrumbs();
   window.addEventListener("resize", () => {
+    placeTopFloaters();
     scheduleGeometry();
     onResize();
   });

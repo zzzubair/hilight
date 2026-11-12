@@ -81,7 +81,11 @@ startBoard(
       ],
       flows: [],
     },
-    saved: null,
+    // `?toast=1`: the saved scene knew every card but "long", so "long" is new and the new-card
+    // toast shows.
+    saved: new URLSearchParams(location.search).has("toast")
+      ? { scene: { elements: [], appState: { hilightBoard: { known: { cards: ["a", "b", "c", "d"], steps: [] } } } } }
+      : null,
     theme: "light",
   },
   { post: () => {} },
@@ -126,4 +130,15 @@ window.probe = {
     return null;
   },
   ready: () => document.querySelectorAll(".bd-card").length > 0,
+  // The new-card toast and Excalidraw's Draw toolbar, as drawn now (null when not shown).
+  toast: () => {
+    const node = document.querySelector(".bd-reveal");
+    return node && !node.hidden ? rect(node) : null;
+  },
+  toolbar: () => {
+    const node = document.querySelector(".App-toolbar");
+    return node && node.getBoundingClientRect().height ? rect(node) : null;
+  },
+  shellTop: () => document.querySelector(".bd-shell").getBoundingClientRect().top,
+  draw: () => document.querySelector(".bd-draw").click(),
 };

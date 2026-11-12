@@ -26,6 +26,7 @@ import {
   freshSince,
   knownAfter,
   stepSignature,
+  stackTopFloaters,
   summarizeBoardMarks,
   WHEEL,
   wheelIntent,
@@ -560,4 +561,22 @@ test("usableSavedView keeps a saved view only for a window of about the size it 
   assert.equal(usableSavedView(undefined, big), null);
   assert.equal(usableSavedView({ zoom: { value: 0 }, scrollX: 0, scrollY: 0 }, big), null);
   assert.equal(usableSavedView({ zoom: 1, scrollX: Number.NaN, scrollY: 0 }, big), null);
+});
+
+test("stackTopFloaters puts a top floater 8px below a bar it would overlap, and at rest otherwise", () => {
+  const toast = { left: 200, right: 900, top: 12, bottom: 56 };
+  const toolbar = { left: 300, right: 850, top: 16, bottom: 60 };
+  assert.deepEqual(stackTopFloaters([toast], [toolbar]), [68]);
+  assert.deepEqual(stackTopFloaters([toast], []), [12], "no bar: back at rest");
+  assert.deepEqual(
+    stackTopFloaters([toast], [{ left: 950, right: 1100, top: 16, bottom: 60 }]),
+    [12],
+    "a bar off to the side leaves it alone",
+  );
+  // A second bar that the first move lands on pushes it again, and a second floater stacks under the first.
+  const lower = { left: 100, right: 400, top: 64, bottom: 90 };
+  assert.deepEqual(
+    stackTopFloaters([toast, { left: 0, right: 2000, top: 0, bottom: 30 }], [toolbar, lower]),
+    [98, 150],
+  );
 });

@@ -64,7 +64,7 @@ async function until(label, check, ms = 15_000) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-async function openBrowser(chrome, url, profile) {
+async function openBrowser(chrome, url, profile, { width = WIDTH, height = HEIGHT } = {}) {
   const child = spawn(
     chrome,
     [
@@ -76,7 +76,7 @@ async function openBrowser(chrome, url, profile) {
       "--no-first-run",
       "--remote-debugging-port=0",
       `--user-data-dir=${profile}`,
-      `--window-size=${WIDTH},${HEIGHT}`,
+      `--window-size=${width},${height}`,
       "about:blank",
     ],
     { detached: true, stdio: "ignore" },
@@ -108,8 +108,8 @@ async function openBrowser(chrome, url, profile) {
     const cdp = new Cdp(socket);
     await cdp.send("Page.enable");
     await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: WIDTH,
-      height: HEIGHT,
+      width,
+      height,
       deviceScaleFactor: 1,
       mobile: false,
     });
@@ -427,4 +427,60 @@ test("a board answers trackpad and mouse input in real Chrome", { timeout: 180_0
     assert.equal(page.scrollX, 0);
     assert.equal(page.scrollY, 0);
   });
+});
+
+// Two things float at the top of a board: Excalidraw's Draw toolbar and the new-card toast. The
+// toast never sits on the toolbar: with Draw on it is 8px below it, and with Draw off back at rest.
+test("the new-card toast sits below the Draw toolbar, never on it", { timeout: 180_000 }, async (t) => {
+  const chrome = await chromePath();
+  if (!chrome) {
+    t.skip("Chrome or Chromium is required for the real-layout regression");
+    return;
+  }
+  const site = await serveFixture("board-input");
+  t.after(() => site.close());
+  for (const [width, height] of [
+    [1470, 860],
+    [1116, 826],
+  ]) {
+    const browser = await openBrowser(chrome, `${site.url}?toast=1`, path.join(site.root, `profile-${width}`), {
+      width,
+      height,
+    });
+    try {
+      const probe = (call) => browser.cdp.eval(`window.probe.${call}`);
+      const settle = async () => {
+        await probe("frames(3)");
+        await sleep(250);
+      };
+      const atRest = await until("the new-card toast", () => probe("toast()"));
+      const shellTop = await probe("shellTop()");
+      assert.equal(Math.round(atRest.y - shellTop), 12, `${width}x${height}: toast at rest`);
+      assert.equal(await probe("toolbar()"), null, "the Draw toolbar is hidden until Draw");
+
+      await probe("draw()");
+      await settle();
+      const toolbar = await probe("toolbar()");
+      const toast = await probe("toast()");
+      assert.ok(toolbar && toast, `${width}x${height}: both shown`);
+      const intersect =
+        toast.x < toolbar.x + toolbar.w &&
+        toast.x + toast.w > toolbar.x &&
+        toast.y < toolbar.y + toolbar.h &&
+        toast.y + toast.h > toolbar.y;
+      assert.equal(
+        intersect,
+        false,
+        `${width}x${height}: toast ${JSON.stringify(toast)} on toolbar ${JSON.stringify(toolbar)}`,
+      );
+      assert.equal(Math.round(toast.y - (toolbar.y + toolbar.h)), 8, `${width}x${height}: 8px below the toolbar`);
+
+      await probe("draw()");
+      await settle();
+      assert.equal(await probe("toolbar()"), null);
+      assert.equal(Math.round((await probe("toast()")).y - shellTop), 12, `${width}x${height}: back at rest`);
+    } finally {
+      browser.close();
+    }
+  }
 });

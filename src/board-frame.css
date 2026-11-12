@@ -632,6 +632,14 @@ body[data-hilight-board] .help-icon {
   border-radius: 12px;
   background: var(--bd-card);
   box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.35);
+  /* placeTopFloaters moves it below the Draw toolbar and back. */
+  transition: top 160ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-reveal {
+    transition: none;
+  }
 }
 
 .bd-reveal[hidden] {
