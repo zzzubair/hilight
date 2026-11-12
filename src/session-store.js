@@ -24,6 +24,7 @@ import {
   markPreReceipt,
   normalizePromptId,
   serializeChatAckIds,
+  soleOpenDeliveryThread,
   stampDelivered,
   stampDone,
   stampWorking,
@@ -781,9 +782,18 @@ export class SessionStore {
       // `## c1` sections route into comment threads; the rest is the chat reply. Validated before
       // any write, so an unknown thread id never lands an answer somewhere else.
       const plan = planThreadReply(session.threads, String(text || ""));
+      // A reply with no sections answers what the agent was handed. When all of that came from one
+      // comment thread, the answer belongs under that comment, not in the page thread.
+      const closedSeq = normalizeRevision(session.closed_delivery_seq);
+      const answering = plan.sections.length ? "" : soleOpenDeliveryThread(session.chat, closedSeq);
+      const answered = answering ? session.threads?.find((thread) => thread.id === answering) : null;
+      if (answered && plan.chat) {
+        plan.sections.push({ threadId: answered.id, revisionId: "", text: plan.chat, thread: answered });
+        plan.chat = "";
+      }
       // Done (docs/delivery-acks.md): the reply answers what the agent has seen. Stamped in the same
       // write as the reply, with the reply's own time, and never on an entry no poll has delivered.
-      stampDone(session.chat, at, normalizeRevision(session.closed_delivery_seq));
+      stampDone(session.chat, at, closedSeq);
       for (const section of plan.sections) {
         section.thread.resolved = false;
         section.thread.messages.push({

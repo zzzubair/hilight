@@ -647,6 +647,18 @@ export function stampWorking(chat, at, closedSeq = 0) {
 
 // An agent reply answers everything the agent has seen this round. An entry that was sent but never
 // delivered is not done - the agent has not read it - and stays for the next poll.
+/**
+ * The comment thread every delivered, unanswered note came from, or "" when they came from more
+ * than one place (a page note counts as its own place) or nothing is waiting for an answer.
+ */
+export function soleOpenDeliveryThread(chat, closedSeq = 0) {
+  const places = new Set();
+  for (const entry of Array.isArray(chat) ? chat : []) {
+    if (isOpenDelivery(entry, closedSeq)) places.add(entry.thread_id ? String(entry.thread_id) : "");
+  }
+  return places.size === 1 ? [...places][0] : "";
+}
+
 export function stampDone(chat, at, closedSeq = 0) {
   let changed = false;
   for (const entry of Array.isArray(chat) ? chat : []) {

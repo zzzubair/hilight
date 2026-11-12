@@ -58,7 +58,7 @@ import {
 } from "./export-bundle.js";
 import { hostRejectedShareWrite, publishedDespiteError, publishToHtmlApp } from "./html-app.js";
 import { serializeChat, serializeChatAckIds, serializeChatSync, serializeThreads } from "./chat-messages.js";
-import { planThreadReply, splitThreadReply } from "./comment-threads.js";
+import { planThreadReply } from "./comment-threads.js";
 import { formatServerLogLine, serverStdioIsTimestamped } from "./server-log.js";
 import { injectLavishSdk } from "./html-transform.js";
 import {
@@ -872,15 +872,11 @@ export async function serve({
   async function publishAgentReply(key, text, { requireOpen = false } = {}) {
     const session = await store.addAgentReply(key, text, { requireOpen });
     if (!session || (requireOpen && session.status === "ended")) return session;
-    // A reply made only of `## c1` thread sections adds nothing to chat; the threads arrive in
-    // the chat-sync below. Only a chat part is announced as a new agent bubble.
-    const plan = splitThreadReply(text);
-    if (plan.sections.length === 0 || plan.chat) {
-      const lastEntry = session.chat?.at(-1);
-      const entry = serializeChat([
-        lastEntry?.role === "agent" ? lastEntry : { role: "agent", text: plan.chat || text, at: session.updated_at },
-      ])[0];
-      events.emit("agent-reply", key, entry);
+    // Only a reply that added a page message is announced as a new agent bubble. Thread answers
+    // (`## c1` sections, or a plain reply to comments from one thread) arrive in the chat-sync below.
+    const lastEntry = session.chat?.at(-1);
+    if (lastEntry?.role === "agent" && lastEntry.at === session.updated_at) {
+      events.emit("agent-reply", key, serializeChat([lastEntry])[0]);
     }
     events.emit("chat-sync", key, session);
     // The reply concludes the delivered-feedback "working" state. Human sends remain available
@@ -1385,7 +1381,14 @@ export async function serve({
         res.status(409).json({ status: "ended", ended_by: session.ended_by });
         return;
       }
-      res.json({ status: "sent" });
+      // Where the reply landed: the threads that took an answer from it (the receipt names them).
+      const threads = (session.threads || [])
+        .filter((thread) => {
+          const last = thread.messages?.at(-1);
+          return last?.role === "agent" && last.at === session.updated_at;
+        })
+        .map((thread) => thread.id);
+      res.json({ status: "sent", ...(threads.length ? { threads } : {}) });
     } catch (error) {
       next(error);
     }

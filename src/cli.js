@@ -105,7 +105,7 @@ export const POLL_WAKE_PATH_RULES = Object.freeze([
 export const POLL_SEND_AND_END_RULE =
   "`Send all and end session` ends the session. Its final feedback is still delivered once. After that response, polling stops, and the agent must not reopen the session uninvited.";
 export const THREAD_REPLY_RULE =
-  "Prompts with a thread_id are margin comment threads. Answer them per thread in one reply body: a line `## <thread_id>` (for example `## c1`) starts that thread's answer, and `## c1 reveal=<revision-id>` also gives the answer a Reveal button that jumps to the blocks you marked with that revision in the page's revisions registry. Text before the first such line goes to the page comment thread; a reply without them goes to the page comment thread whole. Pass a multi-line body with --agent-reply-file (`-` reads stdin).";
+  "Prompts with a thread_id are margin comment threads. Answer them per thread in one reply body: a line `## <thread_id>` (for example `## c1`) starts that thread's answer, and `## c1 reveal=<revision-id>` also gives the answer a Reveal button that jumps to the blocks you marked with that revision in the page's revisions registry. Text before the first such line goes to the page comment thread. A reply without them answers what you were handed: when all of it came from one comment thread it goes into that thread, otherwise to the page comment thread whole; the reply receipt's `threads` names where it landed. Pass a multi-line body with --agent-reply-file (`-` reads stdin).";
 export const POLL_AGENT_REPLY_RULE =
   THREAD_REPLY_RULE +
   " " +
@@ -550,12 +550,16 @@ async function replyCommand(args) {
   await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
   const baseUrl = await ensureServer();
-  await postAgentReply(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, text, absolute);
-  return createReplyOutput(absolute, text);
+  const receipt = await postAgentReply(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, text, absolute);
+  return createReplyOutput(absolute, text, receipt?.threads);
 }
 
-export function createReplyOutput(file, text = "") {
-  const threads = [...new Set(splitThreadReply(text).sections.map((section) => section.threadId))];
+// `landed` is the server's word on which comment threads took the reply. A plain reply to notes
+// from one thread lands there, which the text alone cannot show.
+export function createReplyOutput(file, text = "", landed = undefined) {
+  const threads = Array.isArray(landed)
+    ? landed.map(String)
+    : [...new Set(splitThreadReply(text).sections.map((section) => section.threadId))];
   return {
     reply: { file, status: "sent", ...(threads.length ? { threads } : {}) },
     next_step: `Hilight accepted the reply for ${file} and is no longer showing Working. ${SAME_PAGE_RULE} Run \`hilight poll ${file}\` when you are ready to wait for more feedback.`,

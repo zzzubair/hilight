@@ -442,6 +442,39 @@ test("reply fails with a timeout when the server stalls before headers or mid-bo
   }
 });
 
+test("a plain reply to a single card comment lands in that comment's thread", async () => {
+  await withArtifact(async ({ base, key, env, artifact }) => {
+    const queued = await fetch(`${base}/api/${key}/prompts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({
+        prompts: [{ prompt_id: "p1", selector: "body", tag: "body", text: "ok", prompt: "What is this card?" }],
+      }),
+    });
+    assert.equal(queued.status, 200);
+    const delivered = await runCli(["poll", artifact, "--timeout-ms", "100"], { env });
+    assert.match(delivered.stdout, /What is this card\?,body,body,ok,c1/);
+
+    const reply = await runCli(["reply", artifact, "--agent-reply", "It explains the demo."], { env });
+    assert.equal(reply.status, 0, reply.stderr || reply.stdout);
+    assert.match(reply.stdout, /threads\[1\]: c1/, "the receipt says where the reply landed");
+
+    const data = chromeSessionData(await (await fetch(`${base}/session/${key}`)).text());
+    assert.deepEqual(
+      data.initialThreads[0].messages.map((message) => [message.role, message.text]),
+      [
+        ["user", "What is this card?"],
+        ["agent", "It explains the demo."],
+      ],
+    );
+    assert.deepEqual(
+      data.initialChat.filter((message) => message.role === "agent"),
+      [],
+      "nothing lands in the page thread",
+    );
+  });
+});
+
 test("reply and poll route `## <thread_id>` sections into threads and reject unknown ids", async () => {
   await withArtifact(async ({ base, key, env, artifact, dir }) => {
     const queued = await fetch(`${base}/api/${key}/prompts`, {
