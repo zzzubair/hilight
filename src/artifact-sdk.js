@@ -2228,11 +2228,18 @@ export function createArtifactSdk(
     if (publishRequested) layoutAuditPublishRequested = true;
     if (layoutAuditTimer) window.clearTimeout(layoutAuditTimer);
     const runId = ++layoutAuditRun;
-    layoutAuditTimer = window.setTimeout(() => {
+    const run = () =>
       runLayoutAudit(runId).catch(() => {
         if (runId === layoutAuditRun) publishLayoutAudit([], false);
       });
-    }, 50);
+    // A board's pass only waits for the canvas's first geometry, so it starts at once: in a window
+    // that is not painting, a timer would be held to the next whole second.
+    if (board) {
+      layoutAuditTimer = 0;
+      void Promise.resolve().then(run);
+      return;
+    }
+    layoutAuditTimer = window.setTimeout(run, 50);
   }
 
   function startLayoutAudit() {

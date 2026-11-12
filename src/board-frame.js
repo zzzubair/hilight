@@ -697,6 +697,29 @@ export function startBoard(init, { post }) {
   function scheduleGeometry() {
     if (s.geometryFrame) return;
     s.geometryFrame = window.requestAnimationFrame(sendGeometry);
+    // The page holds its layout gate until the first geometry arrives, and a window that is not
+    // painting (minimised, covered, still behind the gate) runs no animation frames and slows its
+    // timers to once a second. So the first one also goes out on a message-channel task, which
+    // neither waits for a frame nor gets throttled.
+    if (!s.lastGeometry && s.api && s.cardsById.size) {
+      afterThisTask(() => {
+        if (!s.geometryFrame || s.lastGeometry) return;
+        window.cancelAnimationFrame(s.geometryFrame);
+        sendGeometry();
+      });
+    }
+  }
+
+  // Runs `run` in a task of its own, like setTimeout(run, 0), but on a message channel: a page
+  // that is not painting holds every timer to the next whole second, and a board's first view and
+  // geometry are what lift the page's layout gate.
+  function afterThisTask(run) {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      run();
+    };
+    channel.port2.postMessage(null);
   }
 
   function cardRects() {
@@ -1546,9 +1569,11 @@ export function startBoard(init, { post }) {
       renderEmbeddable,
       excalidrawAPI: (api) => {
         s.api = api;
-        if (view) restoreView(view);
-        else {
-          window.setTimeout(() => {
+        if (view) {
+          restoreView(view);
+          afterThisTask(scheduleGeometry);
+        } else {
+          afterThisTask(() => {
             try {
               openingView();
             } catch (error) {
@@ -1556,7 +1581,7 @@ export function startBoard(init, { post }) {
               console.warn("hilight board: opening view failed", error);
             }
             scheduleGeometry();
-          }, 0);
+          });
         }
         window.setTimeout(() => {
           syncLinks();
