@@ -99,6 +99,7 @@ test("an agent runs the whole review loop with plain CLI commands: open, listen,
     assert.match(first.stdout, /code_cards: all 1 unchanged\n/);
     assert.match(first.stdout, /canvas: no new marks/);
     assert.match(first.stdout, /--agent-reply-file <reply-file>/);
+    assert.match(first.stdout, /Answer everything in one reply file/, "the first delivery carries the full guidance");
     assert.doesNotMatch(first.stdout, /dom_snapshot|harness|background-job/);
 
     // While the agent works, three more comments arrive. Its reply is held and they come back.
@@ -141,7 +142,12 @@ test("an agent runs the whole review loop with plain CLI commands: open, listen,
     assert.match(next.stdout, /prompts\[1\]\{thread_id,on,text\}:\n {2}c1,"card: Intro",Thanks\.\n/);
     assert.doesNotMatch(next.stdout, /What does this add|Integers only|integers and floats/);
     assert.match(next.stdout, /code_cards: "?1 of 1 changed since your last turn: add \(stale\)"?\n/);
-    assert.match(next.stdout, /Missing context\? Run `hilight catch-up /);
+    // The full guidance came with the first delivery; later ones get one line.
+    assert.match(
+      next.stdout,
+      /Reply: `## <thread_id>` sections in a file, then `hilight poll .* --agent-reply-file <reply-file>`\. Lost context\? `hilight catch-up /,
+    );
+    assert.doesNotMatch(next.stdout, /Answer everything in one reply file/);
 
     // An agent without the earlier context asks for it once.
     const caught = await hilight(["catch-up", board], env);

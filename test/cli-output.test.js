@@ -2406,6 +2406,10 @@ test("spawned poll with piped stderr banners once and leaves re-run guidance whe
     });
 
     await waitForPollListening(base, key);
+    // The banner follows the server's first answer, which says whether this is the first delivery.
+    for (let tries = 0; !/Long-polling for user feedback/.test(stderr) && tries < 100; tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     assert.equal(
       stderr.match(/Long-polling for user feedback/g)?.length,
       1,
@@ -3839,4 +3843,50 @@ test("a poll leaves the page snapshot out but says how big it is and where it is
   assert.equal(full.changes, undefined);
   const empty = createPollOutput({ file: "/tmp/r.html", response: { ...response, dom_snapshot: "" } });
   assert.equal(empty.changes, undefined, "nothing to say when there is no snapshot");
+});
+
+test("the poll banner is full on a session's first delivery and one line after that", () => {
+  const lines = [];
+  startPollWaitReporter({ file: "/tmp/r.html", write: (line) => lines.push(line), narrateTicks: false }).stop();
+  startPollWaitReporter({
+    file: "/tmp/r.html",
+    write: (line) => lines.push(line),
+    narrateTicks: false,
+    short: true,
+  }).stop();
+  assert.match(lines[0], /Long-polling for user feedback/);
+  assert.equal(
+    lines[1],
+    "[hilight] Waiting for feedback on /tmp/r.html; silent until it arrives, never kill it. If it dies, re-run `hilight poll /tmp/r.html`.\n",
+  );
+  assert.ok(lines[1].length < lines[0].length / 3);
+});
+
+test("next_step is full on the first delivery and one line after, keeping what is special about the batch", () => {
+  const response = { status: "feedback", prompts: [{ prompt: "Make it blue.", tag: "message" }] };
+  const first = createPollOutput({ file: "/tmp/r.html", response });
+  const later = createPollOutput({ file: "/tmp/r.html", response, firstDelivery: false });
+  assert.match(first.next_step, /Answer everything in one reply file/);
+  assert.equal(
+    later.next_step,
+    "Reply: `## <thread_id>` sections in a file, then `hilight poll /tmp/r.html --agent-reply-file <reply-file>`. Lost context? `hilight catch-up /tmp/r.html`",
+  );
+  const questions = createPollOutput({
+    file: "/tmp/r.html",
+    response: { status: "feedback", prompts: [{ prompt: "Why two stores?", tag: "message" }] },
+    firstDelivery: false,
+  });
+  assert.match(questions.next_step, /^These are only questions/);
+  const marks = createPollOutput({
+    file: "/tmp/r.html",
+    response: { status: "feedback", prompts: [{ prompt: "Marks", tag: "board" }] },
+    firstDelivery: false,
+  });
+  assert.match(marks.next_step, /^Canvas marks: edit those cards in the file/);
+  const held = createPollOutput({
+    file: "/tmp/r.html",
+    response: { ...response, status: "held" },
+    firstDelivery: false,
+  });
+  assert.match(held.next_step, /Your reply was NOT posted/, "a held reply keeps its full text");
 });

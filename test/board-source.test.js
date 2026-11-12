@@ -8,6 +8,7 @@ import {
   checkCodeCard,
   codeCardHeight,
   codeRangeHash,
+  layoutLevel,
   parseBoardHtml,
   parseCodeRef,
   parseFlowStep,
@@ -339,4 +340,23 @@ test("the board playbook's copyable example parses with no problems", async () =
   assert.ok(model, "the example is a board");
   assert.deepEqual(model.problems, []);
   assert.ok(model.flows.length >= 2, "the example shows more than one flow");
+});
+
+test("loose cards stay three to a row for small boards and grow with the square root for large ones", () => {
+  const cards = (n) =>
+    Array.from({ length: n }, (_, index) => ({
+      id: `t${index}`,
+      kind: "html",
+      w: 300,
+      h: 160,
+      placed: false,
+      html: "",
+    }));
+  const rowsOf = (list) => new Set(list.map((card) => card.y)).size;
+  const small = cards(9);
+  layoutLevel(small);
+  assert.equal(rowsOf(small), 3);
+  const large = cards(144);
+  layoutLevel(large);
+  assert.equal(rowsOf(large), 12, "144 loose cards make a 12 by 12 grid, not 48 rows of three");
 });

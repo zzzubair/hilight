@@ -555,8 +555,11 @@ export function layoutLevel(cards, flows = []) {
   }
   const order = bands.flat();
   const others = floating.filter((card) => !bandOf.has(card.id));
-  for (let index = 0; index < others.length; index += GRID_COLUMNS) {
-    const row = others.slice(index, index + GRID_COLUMNS);
+  // Three columns reads well for a handful of cards; past nine the grid grows with the square
+  // root, so a large board stays roughly square and Fit can still show all of it.
+  const columns = Math.max(GRID_COLUMNS, Math.ceil(Math.sqrt(others.length)));
+  for (let index = 0; index < others.length; index += columns) {
+    const row = others.slice(index, index + columns);
     let x = originX;
     for (const card of row) {
       card.x = x;

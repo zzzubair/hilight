@@ -111,6 +111,7 @@ const designAssetUrls = {
   },
 };
 
+export const DELIVERED_HEADER = "Hilight-Delivered";
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60_000;
 const WHITEBOARD_CHANNEL_TOKEN_TTL_MS = 5 * 60_000;
 const NETWORK_RECONCILE_CACHE_MS = 1_000;
@@ -964,6 +965,10 @@ export async function serve({
     try {
       const file = await canonicalFile(String(req.query.file || ""));
       const key = sessionKey(file);
+      // How many batches this session already delivered, so the CLI prints its full guidance on
+      // the first and one line after that. Every response path below carries it.
+      const delivered = Number((await store.findByKey(key))?.delivery_seq) || 0;
+      res.set(DELIVERED_HEADER, String(delivered));
       const ownerValue = typeof req.query.owner === "string" ? req.query.owner.trim() : "";
       if (ownerValue.toLowerCase() === "none" || ownerValue.startsWith("-")) {
         detachRequestClose();
@@ -3238,7 +3243,7 @@ const BOARD_HEALTH_HTML =
 
 // Marks drawn on the board go to the agent from the comments panel, beside Send.
 const BOARD_MARKS_HTML =
-  '<form class="board-marks" id="boardMarks"><input class="board-note" id="boardNote" type="text" autocomplete="off" placeholder="Note for the agent (optional)" aria-label="Note for the agent about your marks"><button class="button board-queue" id="boardQueue" type="submit" title="Describe your arrows, notes and marks to the agent as a page comment">Queue marks</button></form>';
+  '<form class="board-marks" id="boardMarks"><input class="board-note" id="boardNote" type="text" autocomplete="off" placeholder="Note (optional)" aria-label="Note for the agent about your marks"><button class="button board-queue" id="boardQueue" type="submit" title="Describe your arrows, notes and marks to the agent as a page comment">Queue marks</button></form>';
 
 export const BOARD_PHONE_NOTE_HTML =
   '<div class="board-phone-note" role="alert"><div class="ended-card"><div class="ended-title">Canvas boards aren&#39;t supported on phones yet.</div><p class="ended-copy">Open this link on a laptop or desktop.</p></div></div>';

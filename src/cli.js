@@ -63,7 +63,7 @@ import { SAME_PAGE_RULE } from "./review-guidance.js";
 import { HILIGHT_TARBALL_URL } from "./skill.js";
 import { analyzeSelfPaint, SELF_PAINT_WARNING } from "./self-paint.js";
 import { stampBoardFile } from "./board-source.js";
-import { resolveDesignAssetPath, serve } from "./server.js";
+import { DELIVERED_HEADER, resolveDesignAssetPath, serve } from "./server.js";
 import { isHtmlPath } from "./artifact-path.js";
 import { canonicalFile, sessionKey, SessionStore } from "./session-store.js";
 import { generateSharePassword } from "./share-password.js";
@@ -518,6 +518,7 @@ async function pollCommand(args) {
   }
   const takeover = args.includes("--takeover");
   const agentReply = await resolveAgentReply(args);
+  await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
   const baseUrl = await ensureServer();
   const timeoutMs = flagValue(args, "--timeout-ms");
@@ -542,12 +543,11 @@ async function pollCommand(args) {
     process.on("SIGINT", onPollSignal);
     process.on("SIGTERM", onPollSignal);
   }
-  const waitReporter = timeoutMs
-    ? null
-    : startPollWaitReporter({
-        file: absolute,
-        narrateTicks: shouldNarratePollWaitTicks({ isTTY: process.stderr.isTTY }),
-      });
+  // The banner waits for the server's first answer, which says whether this session already
+  // delivered a batch: the full text the first time, one line after that.
+  /** @type {{ stop: () => void } | null} */
+  let waitReporter = null;
+  let delivered = 0;
   try {
     const request =
       agentReply || takeover
@@ -563,6 +563,14 @@ async function pollCommand(args) {
       // can leave the first claim alive and make the retry reject itself as LISTENER_ACTIVE.
       retries: 0,
       onResponse: (pollResponse) => {
+        delivered = Number(pollResponse.headers.get(DELIVERED_HEADER)) || 0;
+        if (!timeoutMs) {
+          waitReporter = startPollWaitReporter({
+            file: absolute,
+            narrateTicks: shouldNarratePollWaitTicks({ isTTY: process.stderr.isTTY }),
+            short: delivered > 0,
+          });
+        }
         if (pollResponse.headers.get(POLL_STATE_HEADER) === "listening") notifyHerdrPollReady();
       },
     });
@@ -576,6 +584,7 @@ async function pollCommand(args) {
       response,
       agent: detectInvokingAgent(process.env),
       full: args.includes("--full"),
+      firstDelivery: delivered === 0,
     });
   } finally {
     waitReporter?.stop();
@@ -600,8 +609,8 @@ async function replyCommand(args) {
   const fromFile = inspectValueFlag(args, "--agent-reply-file");
   if (!inline.present && !fromFile.present) {
     throw new AxiError("An agent reply is required", "VALIDATION_ERROR", [
-      'Pass exactly one of --agent-reply "<message>" or --agent-reply-file <path> (`-` reads stdin)',
-      "Use `hilight poll <html-file> --agent-reply` when the reply should be followed by a wait for feedback",
+      'Write the reply to a file, then pass --agent-reply-file <path> (or --agent-reply "<message>" for one short line)',
+      "Use `hilight poll <html-file> --agent-reply-file <path>` when the reply should be followed by a wait for feedback",
     ]);
   }
   const text = await resolveAgentReply(args, { tooLargeHelp: REPLY_TOO_LARGE_HELP });
@@ -643,6 +652,7 @@ async function catchUpCommand(args) {
       "Run `hilight catch-up <html-file> [thread_id]`",
     ]);
   }
+  await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
   const baseUrl = await ensureServer();
   const review = await fetchJson(`${baseUrl}/api/${sessionKey(absolute)}/review`).catch((error) => {
@@ -726,6 +736,11 @@ export function pollWaitBannerText(file) {
   );
 }
 
+// Every poll after a session's first delivery: the agent has read the full banner once already.
+export function pollWaitShortBannerText(file) {
+  return `[hilight] Waiting for feedback on ${file}; silent until it arrives, never kill it. If it dies, re-run \`hilight poll ${file}\`.`;
+}
+
 export function pollWaitTickText(elapsedMs) {
   const minutes = Math.round(elapsedMs / 60_000);
   return `[hilight] Still waiting for user feedback (${minutes}m). Leave this running until the user sends feedback, ends the session, or leaves every review window disconnected.`;
@@ -745,8 +760,9 @@ export function startPollWaitReporter({
   },
   intervalMs = 60_000,
   narrateTicks = true,
+  short = false,
 }) {
-  write(`${pollWaitBannerText(file)}\n`);
+  write(`${short ? pollWaitShortBannerText(file) : pollWaitBannerText(file)}\n`);
   if (!narrateTicks) return { stop: () => {} };
   let elapsedMs = 0;
   const timer = setInterval(() => {
@@ -767,7 +783,7 @@ export function startPollWaitReporter({
  *   dom_snapshot?: string,
  * }}
  */
-export function createPollOutput({ file, response, agent = "generic", full = false }) {
+export function createPollOutput({ file, response, agent = "generic", full = false, firstDelivery = true }) {
   if (response.status === "missing") {
     throw new AxiError("No active Hilight session for this file", "NOT_FOUND", [`Run \`hilight ${file}\` first`]);
   }
@@ -795,7 +811,7 @@ export function createPollOutput({ file, response, agent = "generic", full = fal
       ...(Object.keys(changes).length ? { changes } : {}),
       next_step: held
         ? createHeldNextStep(file, prompts)
-        : createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, prompts, agent),
+        : createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, prompts, agent, firstDelivery),
       ...(full ? { dom_snapshot: response.dom_snapshot || "" } : {}),
     };
   }
@@ -897,7 +913,15 @@ function createHeldNextStep(file, prompts) {
   return `Your reply was NOT posted: ${count} new comment${count === 1 ? "" : "s"} arrived while you worked (above). Handle ${count === 1 ? "it" : "them"} too, then re-run the same command with one reply body that answers everything, the earlier notes and these (\`## <thread_id>\` per thread). ${prompts.some((prompt) => prompt?.tag === "board") ? "Canvas marks: edit those cards in the file. " : ""}Nothing reaches the reviewer until that reply is posted. ${catchUpLine(file)}`;
 }
 
-function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, prompts = [], agent = "generic") {
+function createFeedbackNextStep(
+  file,
+  artifactFailures,
+  sessionEnded,
+  endedBy,
+  prompts = [],
+  agent = "generic",
+  firstDelivery = true,
+) {
   const count = artifactFailures.length;
   const whiteboardNote = prompts.some((prompt) => prompt && prompt.tag === "whiteboard")
     ? `This feedback includes whiteboard edits (tag "whiteboard"): read the edit summary in the prompt text first, and only when it is not enough, open the target's scenePath (.excalidraw scene JSON) or previewPath (PNG) local files for detail. The artifact's Mermaid source stays authoritative - apply the edits by updating the Mermaid text in ${file} (Hilight live-reloads it); never try to write the .excalidraw scene back. `
@@ -942,8 +966,14 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
     prompts.some((prompt) => Array.isArray(prompt?.attachments) && prompt.attachments.length)
       ? "Open the image files in the files column. "
       : "",
-    agent === "codex" ? `${CODEX_POLL_WAKE_PATH_GUIDANCE} ` : "",
+    agent === "codex" && firstDelivery ? `${CODEX_POLL_WAKE_PATH_GUIDANCE} ` : "",
   ].join("");
+  if (!firstDelivery) {
+    // The agent read the full text on this session's first delivery: one line now, plus only what
+    // is special about this batch (questions only, canvas marks, failures).
+    const lead = count > 0 || isQuestionOnlyFeedback(prompts) ? prefix : "";
+    return `${lead}${notes}Reply: \`## <thread_id>\` sections in a file, then \`hilight poll ${file} --agent-reply-file <reply-file>\`. Lost context? \`hilight catch-up ${file}\``;
+  }
   return `${prefix}${notes}${shortReplyGuidance(file)} ${catchUpLine(file)}`;
 }
 
@@ -1009,6 +1039,7 @@ async function endCommand(args) {
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `hilight end <html-file>`"]);
   }
+  await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
   const baseUrl = await ensureServer();
   const response = await postJson(`${baseUrl}/api/end`, { file: absolute });
@@ -2944,10 +2975,12 @@ function serverConnectionError() {
   ]);
 }
 
+// The usual cause is a server restart (an update, a crash). The next poll starts the server again
+// and queued feedback is kept, so the first hint is simply to re-run.
 function pollResponseInterruptedError() {
   return new AxiError("Hilight poll response was interrupted", "SERVER_ERROR", [
-    `Run \`hilight server --verbose\` or inspect \`${displayServerLogFile()}\` for server startup or crash diagnostics`,
-    "Re-run the last `hilight poll <html-file>` command after the server is healthy",
+    "Re-run the same `hilight poll <html-file>` command: it starts the server again if needed, and queued feedback is kept",
+    `If it fails again, inspect \`${displayServerLogFile()}\``,
   ]);
 }
 
