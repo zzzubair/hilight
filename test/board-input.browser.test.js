@@ -296,8 +296,10 @@ test("a board answers trackpad and mouse input in real Chrome", { timeout: 180_0
       settled = Math.abs(moved(after, next, "b").scale - 1) < 0.001 ? settled + 1 : 0;
       after = next;
     }
+    // A loaded runner delivers less of a synthesized 1.5x gesture (1.16x was seen settled on CI),
+    // so this checks the direction and the anchor, not the amount. A broken pinch stays at 1.0x.
     const { scale } = moved(before, after, "b");
-    assert.ok(scale > 1.2, `zoomed in (${scale.toFixed(3)}x)`);
+    assert.ok(scale > 1.1, `zoomed in (${scale.toFixed(3)}x)`);
     steadyUnder(at, before, after, "b", 3);
     assert.equal((await probe("page()")).href, start.href, "the page itself never zoomed or navigated");
   });

@@ -274,7 +274,8 @@ test(
       evaluate('document.getElementById("send").click()');
       const conversationPoll = run(
         process.execPath,
-        ["bin/hilight.js", "poll", artifact, "--timeout-ms", "20000"],
+        // --full: the compact rows give each image as a path, without its original file name.
+        ["bin/hilight.js", "poll", artifact, "--timeout-ms", "20000", "--full"],
         lavishEnv,
         65_000,
       );

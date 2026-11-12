@@ -322,7 +322,7 @@ test(
       page(`document.getElementById('send').click();return true`);
       wait(1500);
       poll = cli("poll", artifact, "--timeout-ms", "300");
-      assert.match(poll, /tradeoff[^\n]*,c1\n/, poll);
+      assert.match(poll, /^ {2}c1,[^\n]*tradeoff/m, poll);
 
       // One agent reply: the lead-in goes to the page thread, each section to its own card.
       const replyFile = path.join(temp, "reply.md");
