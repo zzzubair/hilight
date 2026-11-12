@@ -1086,6 +1086,7 @@ function clockTime(iso) {
 // Two or three words for the status bar; the full reason is in its tooltip and in Activity.
 function shortStopReason(why) {
   const text = String(why || "");
+  if (/hilight stop/.test(text)) return "server was stopped";
   if (/server stopped/.test(text)) return "server restarted";
   if (/poll disconnected/.test(text)) return "poll closed";
   if (/took over/.test(text)) return "listener replaced";

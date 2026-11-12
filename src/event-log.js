@@ -60,7 +60,13 @@ export function appendEventLine(file, line, { maxBytes = EVENT_LOG_MAX_BYTES, fi
   }
 }
 
-function rotateIfFull(file, maxBytes, files) {
+/**
+ * Rotate before the file grows past `maxBytes`. The CLI also calls this before it opens the fd a
+ * detached server's stdio appends to, so that fd starts on a fresh file; a server that outgrows the
+ * cap in one run keeps writing its stdio to the rotated `.1` file until its next start.
+ * @param {string} file
+ */
+export function rotateIfFull(file, maxBytes = EVENT_LOG_MAX_BYTES, files = EVENT_LOG_FILES) {
   let size;
   try {
     size = statSync(file).size;
@@ -68,7 +74,11 @@ function rotateIfFull(file, maxBytes, files) {
     return;
   }
   if (size < maxBytes) return;
-  rmSync(`${file}.${files - 1}`, { force: true });
+  try {
+    rmSync(`${file}.${files - 1}`, { force: true });
+  } catch {
+    // Leave the oldest file in place if it cannot be removed; the rename below replaces it.
+  }
   for (let index = files - 2; index >= 1; index -= 1) {
     try {
       renameSync(`${file}.${index}`, `${file}.${index + 1}`);
@@ -87,23 +97,36 @@ function rotateIfFull(file, maxBytes, files) {
  * @returns {LogEvent[]}
  */
 export function readEvents(file, { session = "", since = 0, limit = 0, files = EVENT_LOG_FILES } = {}) {
-  /** @type {LogEvent[]} */
-  const events = [];
-  for (let index = files - 1; index >= 0; index -= 1) {
+  /** @type {LogEvent[][]} */
+  const chunks = [];
+  let count = 0;
+  // Newest file first, so a `limit` (the page's history, an error's last lines) stops after the
+  // live file instead of parsing every rotated one.
+  for (let index = 0; index < files; index += 1) {
     let text;
     try {
       text = readFileSync(index === 0 ? file : `${file}.${index}`, "utf8");
     } catch {
       continue;
     }
+    /** @type {LogEvent[]} */
+    const chunk = [];
+    let older = false;
     for (const line of text.split("\n")) {
       const event = parseEventLine(line);
       if (!event) continue;
       if (session && event.session && event.session !== session) continue;
-      if (since && Date.parse(event.at) < since) continue;
-      events.push(event);
+      if (since && Date.parse(event.at) < since) {
+        older = true;
+        continue;
+      }
+      chunk.push(event);
     }
+    chunks.unshift(chunk);
+    count += chunk.length;
+    if ((limit > 0 && count >= limit) || older) break;
   }
+  const events = chunks.flat();
   return limit > 0 ? events.slice(-limit) : events;
 }
 

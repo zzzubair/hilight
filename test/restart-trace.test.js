@@ -185,3 +185,25 @@ test("a poll that cannot reconnect fails with the cause and the log lines inline
     await rm(ctx.dir, { recursive: true, force: true });
   }
 });
+
+test("`hilight stop` stops a listening poll too, instead of the poll starting the server again", async () => {
+  const ctx = await setup();
+  const base = `http://127.0.0.1:${ctx.server.port}`;
+  try {
+    const opened = spawnHilight([ctx.page, "--no-open"], ctx.env);
+    assert.equal((await opened.done).status, 0, opened.run.stdout + opened.run.stderr);
+    const poll = spawnHilight(["poll", ctx.page], ctx.env);
+    await until(() => /\[hilight\]/.test(poll.run.stderr), "the poll banner");
+    const stopped = await spawnHilight(["stop"], ctx.env).done;
+    assert.equal(stopped.status, 0, stopped.stdout + stopped.stderr);
+    const result = await poll.done;
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /^error: "The Hilight server was stopped, so this poll stopped too"$/m);
+    assert.match(result.stdout, /^why: ".*stopped with `hilight stop`/m);
+    assert.doesNotMatch(result.stderr, /Reconnecting/);
+    await assert.rejects(fetch(`${base}/health`), "nothing started the server again");
+  } finally {
+    await ctx.server.close().catch(() => {});
+    await rm(ctx.dir, { recursive: true, force: true });
+  }
+});

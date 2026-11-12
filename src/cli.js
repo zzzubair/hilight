@@ -26,8 +26,9 @@ import {
   formatTraceError,
   parseSince,
   recentLogLines,
-  serverExitCause,
+  serverExit,
 } from "./trace.js";
+import { rotateIfFull } from "./event-log.js";
 import { createDesignOutput, DESIGN_PRIORITY_RULE, DESIGN_SYSTEM_HINT } from "./design-reference.js";
 import {
   buildSelfContainedHtml,
@@ -260,6 +261,13 @@ export function pollExecutionGuidance({ agent = "generic" } = {}) {
   return `${sharedGuidance}${agentGuidance}`;
 }
 
+// `-h` is `--help`, unless it is the value of a flag that takes one (`--agent-reply -h`).
+/** @param {string[]} argv */
+export function shortHelpFlag(argv) {
+  const valueFlags = new Set(Object.values(COMMAND_FLAGS).flatMap((spec) => spec.values || []));
+  return argv.map((arg, index) => (arg === "-h" && !valueFlags.has(argv[index - 1]) ? "--help" : arg));
+}
+
 // Mirrors the SDK's own version-flag detection so the fast path below prints exactly
 // what `runAxiCli` would have printed, for exactly the same argv shapes.
 
@@ -271,6 +279,7 @@ export async function run(argv) {
     process.stdout.write(`${VERSION}\n`);
     return;
   }
+  argv = shortHelpFlag(argv);
   await ensureStateDir();
   const normalizedArgv = normalizeArgv(argv);
   const agent = detectInvokingAgent(process.env);
@@ -613,10 +622,14 @@ async function pollCommand(args) {
         // Before any answer, a request that carried a reply may or may not have landed: report it.
         const lost = error instanceof AxiError && /** @type {AxiError & { transport?: string }} */ (error).transport;
         if (!lost || (!answered && request === firstRequest && agentReply)) {
-          throw withTrace(error, key, lost ? serverExitCause(serverLogFile(), pollStartedAt) : "");
+          throw withTrace(error, key, lost ? serverExit(serverLogFile(), pollStartedAt).why : "");
         }
-        const cause = serverExitCause(serverLogFile(), pollStartedAt);
-        reconnect ??= { started: Date.now(), attempt: 0 };
+        const exit = serverExit(serverLogFile(), pollStartedAt);
+        const cause = exit.why;
+        // Stopped on purpose: reconnecting would start the server the user just stopped.
+        if (exit.reconnect === "none") throw withTrace(pollServerStoppedError(absolute), key, cause);
+        reconnect ??= { started: Date.now(), attempt: 0, waitOnly: false };
+        reconnect.waitOnly ||= exit.reconnect === "wait";
         if (reconnect.attempt === 0 && !timeoutMs) {
           process.stderr.write(
             `[hilight] Lost the server: ${cause}. Reconnecting for up to ${pollReconnectWindowMs() / 1000}s; queued feedback is kept.\n`,
@@ -681,7 +694,7 @@ async function logCommand(args) {
   const since = parseSince(sinceFlag);
   if (Number.isNaN(since)) {
     throw new AxiError(`Cannot read --since ${sinceFlag}`, "VALIDATION_ERROR", [
-      "Pass an age (30m, 2h, 1d), a clock time today (23:05), or an ISO time",
+      "Pass an age (30m, 2h, 1d), a clock time (23:05, the most recent one), or an ISO time",
     ]);
   }
   const limitFlag = flagValue(args, "--limit");
@@ -969,7 +982,7 @@ function promptFiles(prompt) {
 /**
  * The agent-facing prompt list: one row per note, the thread it belongs to, where it sits, and the
  * reviewer's words. Only the new message of a thread reply is here; the agent's session already has
- * the earlier back-and-forth (`hilight show <file> <thread_id>` prints a whole thread).
+ * the earlier back-and-forth (`hilight catch-up <file> <thread_id>` prints a whole thread).
  */
 export function compactPrompts(prompts, anchors = {}) {
   const rows = prompts.map((prompt) => ({
@@ -2905,6 +2918,11 @@ async function startServer(port, { alsoListen = [] } = {}) {
   const entry = resolveServerEntry();
   let logFd = null;
   try {
+    rotateIfFull(serverLogFile());
+  } catch {
+    // A log that cannot rotate keeps growing; it must not stop the server from starting.
+  }
+  try {
     logFd = openSync(serverLogFile(), "a");
   } catch {
     // If logging cannot be initialized, keep the server behavior unchanged.
@@ -3111,7 +3129,7 @@ function pollReconnectWindowMs() {
 const POLL_RECONNECT_WAIT_ONLY_MS = 3_000;
 const POLL_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000];
 
-/** @param {{ started: number, attempt: number }} state @returns {Promise<string | null>} */
+/** @param {{ started: number, attempt: number, waitOnly?: boolean }} state @returns {Promise<string | null>} */
 async function reconnectPollServer(state) {
   for (;;) {
     const elapsed = Date.now() - state.started;
@@ -3120,7 +3138,7 @@ async function reconnectPollServer(state) {
     state.attempt += 1;
     await delay(Math.min(wait, pollReconnectWindowMs() - elapsed));
     try {
-      if (Date.now() - state.started < POLL_RECONNECT_WAIT_ONLY_MS) {
+      if (state.waitOnly || Date.now() - state.started < POLL_RECONNECT_WAIT_ONLY_MS) {
         const { baseUrl, health, foreign } = await findRunningServer(defaultPort());
         if (health?.app === "lavish-axi" && !foreign) return baseUrl;
       } else {
@@ -3130,6 +3148,12 @@ async function reconnectPollServer(state) {
       // Still down, or starting: try again until the window closes.
     }
   }
+}
+
+function pollServerStoppedError(file) {
+  return new AxiError("The Hilight server was stopped, so this poll stopped too", "SERVER_ERROR", [
+    `Run \`hilight poll ${file}\` to start it again and keep listening: queued feedback is kept`,
+  ]);
 }
 
 function pollReconnectFailedError(file) {
@@ -3485,7 +3509,7 @@ Example:
 
 This session's history from server.log, oldest first: opened, listen, listen-end (with why),
 delivered, held, reply, requeued, ended, plus the server's own start, stop and crash lines with
-their causes. --since takes an age (30m, 2h, 1d), a clock time today (23:05), or an ISO time.
+their causes. --since takes an age (30m, 2h, 1d), a clock time (23:05, the most recent one), or an ISO time.
 --limit caps the rows (default 30). The same history shows on the page under the agent status.
 
 Examples:
@@ -3498,7 +3522,7 @@ function createCommandHelp({ agent = "generic" } = {}) {
   return {
     open: `Usage: hilight <html-file> [--no-open] [--no-gate] [--reopen]\n\nOpen or resume a Hilight review session for an HTML artifact. Use --no-open when you need to ensure the server/session exists without opening another browser window. Use --no-gate to skip the open-time layout curtain for this browser open. If the user explicitly ended the session from the browser, this refuses to reopen it and returns guidance instead - pass --reopen to force it open when the user asks for further review or something important needs their visual attention. Sessions ended by the agent (\`hilight end\`) reopen normally without the flag.\n`,
     poll: `Usage: hilight poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n\nThis command exclusively long-polls for queued user prompts. Pass --owner <label> to make the active listener visible in session listings; --takeover displaces an existing listener, which receives LISTENER_REPLACED. A second poll without --takeover fails with LISTENER_ACTIVE instead of silently returning waiting.\n\nThis command long-polls indefinitely for queued user prompts. It stays silent while it waits - that is normal, never kill it. Browser-detected layout issues do NOT return this poll: they are filed passively in the user's Layout issues inbox and arrive as an ordinary tag "layout-warnings" prompt only after the user selects them and queues the fixes. Warning lifecycle: an issue stays unresolved and counted while queued, becomes recurring if a newer artifact revision still shows it, and is resolved only after a newer artifact load plus a complete diagnostic pass at the same viewport no longer detects it. A failed or incomplete pass preserves it as unverified rather than clearing it. The only response that arrives without user action is artifact_failures - a fatal failure that made the review surface itself unusable. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. In a Herdr-managed pane, set HILIGHT_HERDR_CHIME=1 to request attention when the poll has entered its waiting state; unset it or use any other value to keep the current silent behavior. Notification failures never interrupt the poll. ${pollExecutionGuidance({ agent })} Use --agent-reply after applying prior feedback to display a concise response in Hilight before waiting again. When you are handing a result back and are not about to long-poll, run \`hilight reply <html-file> --agent-reply "..."\` instead: that command exits 0 only after the server accepts the reply, so the board stops showing Working without this poll staying open. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_HELP_POINTER} Do not combine --agent-reply with --agent-reply-file. If comments arrived after the batch you are answering, the reply is not posted: the response has status held and carries them, so answer them too in the same reply file and re-run. Pass --full for the page snapshot and every prompt field; \`hilight catch-up <html-file>\` summarizes the review for an agent without the earlier context.\n\nExamples:\n  hilight poll report.html --agent-reply "Renamed the payment step."\n  hilight poll report.html --agent-reply-file reply.md\n  hilight poll report.html --agent-reply-file -\n\n${POLL_SEND_AND_END_RULE}\n`,
-    reply: `Usage: hilight reply <html-file> (--agent-reply "..." | --agent-reply-file <path>)\n\nPost an agent reply to the open Hilight session and exit once the server confirms it was accepted. Exit 0 only when the server answers that the reply was sent, which is when the board stops showing Working. If that answer does not arrive within ${AGENT_REPLY_RECEIPT_TIMEOUT_MS / 1000} seconds, exit non-zero with a timeout error. Use this when you are handing a result back and are not about to wait for more feedback. A reply also marks every note the poll delivered to you as Replied in the reviewer's comment threads, so reply once you have handled them.\n\nUse \`hilight poll <html-file> --agent-reply "..."\` instead when the reply should be followed by a long-poll. That command posts the reply and then keeps waiting, so it does not exit when the reply is accepted.\n\nPass exactly one of --agent-reply or --agent-reply-file. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_HELP_POINTER} Do not combine the two flags. An empty reply is refused. If comments arrived after the batch you are answering, nothing is posted: the response has status held and carries them, so answer them too in the same reply file and re-run.\n\nExamples:\n  hilight reply report.html --agent-reply "Renamed the payment step."\n  hilight reply report.html --agent-reply-file reply.md\n  hilight reply report.html --agent-reply-file -\n`,
+    reply: `Usage: hilight reply <html-file> (--agent-reply "..." | --agent-reply-file <path>)\n\nPost an agent reply to the open Hilight session and exit once the server confirms it was accepted. Exit 0 once the server accepts it: \`status: sent\` means it was posted and the board stops showing Working; \`status: held\` means newer comments came back instead and nothing was posted. If that answer does not arrive within ${AGENT_REPLY_RECEIPT_TIMEOUT_MS / 1000} seconds, exit non-zero with a timeout error. Use this when you are handing a result back and are not about to wait for more feedback. A reply also marks every note the poll delivered to you as Replied in the reviewer's comment threads, so reply once you have handled them.\n\nUse \`hilight poll <html-file> --agent-reply "..."\` instead when the reply should be followed by a long-poll. That command posts the reply and then keeps waiting, so it does not exit when the reply is accepted.\n\nPass exactly one of --agent-reply or --agent-reply-file. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_HELP_POINTER} Do not combine the two flags. An empty reply is refused. If comments arrived after the batch you are answering, nothing is posted: the response has status held and carries them, so answer them too in the same reply file and re-run.\n\nExamples:\n  hilight reply report.html --agent-reply "Renamed the payment step."\n  hilight reply report.html --agent-reply-file reply.md\n  hilight reply report.html --agent-reply-file -\n`,
     end: `Usage: hilight end <html-file>\n\nEnd a Hilight session as the agent. A session ended this way still reopens normally on the next \`hilight <html-file>\`, unlike a user ending it from the browser, which requires --reopen.\n`,
     export: `Usage: hilight export <html-file> [--out <path>]\n\nWrite a portable copy of an artifact: one HTML file with its LOCAL assets inlined (relative-path stylesheets, scripts, images, and fonts become inline <style>/<script> blocks and data URIs). Remote CDN/font references (https URLs) are left as links for the browser to load, so the file needs network to render those. Hilight makes no outbound requests - it only reads local files, confined to the artifact's directory. Defaults to writing <name>.export.html next to the source; pass --out to choose a path. The Hilight annotation SDK is never included in an export.\n`,
     share: `Usage:\n  hilight share <html-file> [--private | --password <pw>] [--token <t>]\n  hilight share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  hilight share --unpublish --site <site_id> --update-key <key>\n\nPublish the artifact on ht-ml.app (https://ht-ml.app), a third-party hosting service not part of Hilight, and print a visitable URL. Shares are PUBLIC by default: anyone with the link can open the page, and it may be indexed or scraped. Pass --private to publish a PRIVATE page behind a generated password, returned once in the output - give it to the user with the URL and tell them it is a shared secret. Pass --password <pw> instead when the user chose the password; it is never echoed back. Builds the same local-inlined HTML as 'export' (local assets inlined; remote CDN/font URLs left as links and are not blocked by CSP on ht-ml.app, but still load over the viewer's network), then POSTs it to ht-ml.app's /v1 API. Creating a site needs no account or API key. The response includes the url plus a secret update_key (shown once) for changing the page later.\n\n--site <site_id> with --update-key <key> republishes an existing page in place: same URL, new HTML. On a republish the password is left alone unless you pass --private (rotate to a new generated one) or --password <pw> (set one). There is no way to make a private page public again: ht-ml.app accepts a request to clear a password and silently ignores it, so Hilight does not offer one rather than reporting a page as public while it is still gated. Locking a page that was PUBLIC is also not instant at ht-ml.app's CDN: it was observed still answering uncredentialed requests for minutes after the password was set, so do not tell the user a newly gated page is unreachable right away (a page that was already private has no such cached copy).\n\n--unpublish takes the same credentials and no file. ht-ml.app has NO delete endpoint, so this replaces the page with a short placeholder and locks it behind a random password that is immediately discarded; the URL still resolves and the host still holds what was published. Say that to the user rather than calling it deleted. The update_key still works, so republishing with --private brings the page back behind a new password.\n\nA value flag given an empty or whitespace-only value is REFUSED rather than acted on: an unquoted shell variable that is unset makes \`--password $PW\` an empty password, which the host treats as none and would publish a PUBLIC page while you believed it was gated. Quote the value, or pass --private to have Hilight generate one.\n\nSet HILIGHT_HTML_APP_TOKEN (or pass --token) to attach an optional bearer token when CREATING a page; it is never required. A republish (--site/--update-key) or --unpublish rejects --token, because the update_key is what the Authorization header carries there. The annotation SDK is never included.\n`,

@@ -6,7 +6,7 @@ import { eventLogText, readEvents } from "./event-log.js";
 const LOG_LINES_IN_ERRORS = 5;
 
 /**
- * `--since` as an epoch ms: an ISO time, a clock time today (`23:05`), or an age (`30m`, `2h`, `1d`).
+ * `--since` as an epoch ms: an ISO time, the last time the clock read `23:05`, or an age (`30m`, `2h`, `1d`).
  * @param {string | undefined} value
  * @param {number} [now]
  * @returns {number}
@@ -23,7 +23,8 @@ export function parseSince(value, now = Date.now()) {
   if (clock) {
     const today = new Date(now);
     today.setHours(Number(clock[1]), Number(clock[2]), 0, 0);
-    return today.getTime();
+    // A clock time still ahead today means the last time it was that time: yesterday.
+    return today.getTime() > now ? today.getTime() - 86_400_000 : today.getTime();
   }
   const parsed = Date.parse(text);
   return Number.isFinite(parsed) ? parsed : NaN;
@@ -40,19 +41,30 @@ export function recentLogLines(logFile, session = "") {
 }
 
 /**
- * Why the server went away, from its last stop or crash line since `since` (or its silence).
+ * Why the server went away, from its last stop or crash line since `since` (or its silence), and
+ * what a reconnecting poll should do about it:
+ * - `none`: it was stopped on purpose (`hilight stop`), so bringing it back would undo that;
+ * - `wait`: a signal from its supervisor (systemd, a terminal), which owns restarting it, so the
+ *   poll waits for that server and never starts its own on the supervisor's port;
+ * - `restart`: replaced by a newer Hilight, crashed, or left no line, so the poll may start one.
  * @param {string} logFile
  * @param {number} since
+ * @returns {{ why: string, reconnect: "none" | "wait" | "restart" }}
  */
-export function serverExitCause(logFile, since) {
+export function serverExit(logFile, since) {
   const events = readEvents(logFile, { since });
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-    if (!event.session && (event.event === "server-stop" || event.event === "server-crash")) {
-      return `the server ${event.event === "server-crash" ? "crashed" : "stopped"} at ${event.at}: ${event.cause}`;
-    }
+    if (event.session || (event.event !== "server-stop" && event.event !== "server-crash")) continue;
+    const why = `the server ${event.event === "server-crash" ? "crashed" : "stopped"} at ${event.at}: ${event.cause}`;
+    if (event.event === "server-stop" && /\(reason=stop\)/.test(event.cause)) return { why, reconnect: "none" };
+    if (event.event === "server-stop" && /^SIG[A-Z]+\b/.test(event.cause)) return { why, reconnect: "wait" };
+    return { why, reconnect: "restart" };
   }
-  return "the server went away without logging why (killed with SIGKILL, crashed hard, or the machine restarted)";
+  return {
+    why: "the server went away without logging why (killed with SIGKILL, crashed hard, or the machine restarted)",
+    reconnect: "restart",
+  };
 }
 
 /**

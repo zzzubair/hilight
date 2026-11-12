@@ -741,7 +741,7 @@ export class SessionStore {
       session.prompts = [];
       session.artifact_failures = [];
       session.pending_prompts = 0;
-      // Kept for `hilight show <file> --full`: the page snapshot is no longer in every poll.
+      // Kept for `hilight catch-up <file> --full`: the page snapshot is no longer in every poll.
       if (session.dom_snapshot) session.last_dom_snapshot = session.dom_snapshot;
       session.dom_snapshot = "";
       if (!alreadyEnded) {

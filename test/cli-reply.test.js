@@ -176,7 +176,10 @@ test("reply help and top-level help say when to prefer reply over poll --agent-r
     assert.match(reply.stdout, /status: held/);
 
     const fullReply = await runCli(["reply", "--help", "--full"], { env });
-    assert.match(fullReply.stdout, /Exit 0 only when the server answers that the reply was sent/);
+    assert.match(
+      fullReply.stdout,
+      /Exit 0 once the server accepts it: `status: sent` means it was posted[^;]*; `status: held` means [^.]*nothing was posted/,
+    );
     assert.match(fullReply.stdout, /does not exit when the reply is accepted/);
 
     const poll = await runCli(["poll", "--help"], { env });

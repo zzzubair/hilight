@@ -146,6 +146,12 @@ const ATTACHMENT_SWEEP_INTERVAL_MS = 60 * 60_000;
 // in the chrome's outdated banner, so an unknown value is dropped rather than passed through to
 // text the user would read as a fact.
 const SHUTDOWN_REASONS = new Set(["upgrade", "local-build", "stop"]);
+// The words server.log and the pages use for each requested shutdown.
+const SHUTDOWN_CAUSES = {
+  upgrade: "replaced by a newer Hilight",
+  "local-build": "restarted to load a local build",
+  stop: "stopped with `hilight stop`",
+};
 const AGENT_LISTENER_LABEL = "agent-listener";
 
 // Live-reload coalescing. A normal save is one reload after a short debounce. While a queued
@@ -584,10 +590,19 @@ export async function serve({
   // What the agent receives. `delivery_seq` is the store's own bookkeeping for undoing a take's Seen
   // stamps on a closed poll; it means nothing to an agent and stays off the wire.
   function agentFacingFeedback(result) {
-    if (!result || result.status !== "feedback" || !("delivery_seq" in result)) return result;
+    if (!result || result.status !== "feedback") return result;
+    if (!("delivery_seq" in result) && !("code_status_previous" in result)) return result;
     const rest = { ...result };
     delete rest.delivery_seq;
+    delete rest.code_status_previous;
     return rest;
+  }
+
+  // A prepared delivery that never reached the agent (its poll closed while code-card changes were
+  // computed) gives the code-card baseline back, so the redelivery names the same changes.
+  async function undoCodeStatus(key, prepared) {
+    if (!prepared || !("code_status_previous" in prepared)) return;
+    await store.exchangeAgentCodeStatus(key, prepared.code_status_previous).catch(() => {});
   }
 
   // On a board, what happened to the code cards since the agent's last turn: the cards whose
@@ -613,6 +628,7 @@ export async function serve({
       return {
         ...result,
         code_cards: { total: Object.keys(now).length, changed, since: previous ? "last_turn" : "pinned" },
+        code_status_previous: previous,
       };
     } catch {
       return result;
@@ -625,7 +641,8 @@ export async function serve({
   async function holdReplyForPending(key) {
     const taken = await store.takeFeedback(key, { onlyPrompts: true });
     if (taken.status !== "feedback") return null;
-    return { taken, response: { ...agentFacingFeedback(await withCodeCardChanges(key, taken)), status: "held" } };
+    const prepared = await withCodeCardChanges(key, taken);
+    return { taken, prepared, response: { ...agentFacingFeedback(prepared), status: "held" } };
   }
 
   // `takeFeedback` is destructive: it clears the batch from `state.json` before anything is
@@ -884,7 +901,7 @@ export async function serve({
     const reason = SHUTDOWN_REASONS.has(String(req.body?.reason || "")) ? String(req.body.reason) : "";
     res.json({ status: "shutting-down" });
     // Defer until after the response flushes so the client gets confirmation.
-    setImmediate(() => shutdown(reloadKey, reason, "shutdown-request"));
+    setImmediate(() => shutdown(reloadKey, reason, SHUTDOWN_CAUSES[reason] || "shutdown requested"));
   });
 
   app.post("/api/sessions", async (req, res, next) => {
@@ -1029,10 +1046,13 @@ export async function serve({
           return;
         }
         // Comments that arrived while the agent worked are answered in this same turn.
-        const held = existing && !takeover ? await holdReplyForPending(key) : null;
+        // Only for the listener that owns this session (or nobody): another agent's poll must not
+        // take the owner's comments; it gets LISTENER_ACTIVE below, before anything is taken.
+        const held = existing && !takeover && !activePolls.has(key) ? await holdReplyForPending(key) : null;
         if (held) {
           detachRequestClose();
           if (requestClosed || res.writableEnded) {
+            await undoCodeStatus(key, held.prepared);
             await restoreClosedFeedback(key, held.taken);
             return;
           }
@@ -1098,17 +1118,24 @@ export async function serve({
           releasePollListener(holder, activePolls, deliveredFeedback, events);
           return;
         }
-        if (requestClosed || res.writableEnded) {
+        // Everything that awaits runs before the closed check, so a poll that dies meanwhile gets
+        // its batch put back instead of written into a dead socket.
+        const prepared = await withCodeCardChanges(key, immediate);
+        if (holder.replaced || requestClosed || res.writableEnded) {
+          await undoCodeStatus(key, prepared);
           await restoreClosedFeedback(key, immediate);
-          releasePollListener(holder, activePolls, deliveredFeedback, events);
           detachRequestClose();
+          if (holder.replaced && !requestClosed && !res.writableEnded) {
+            res.json(listenerConflict(holder, "LISTENER_REPLACED"));
+          }
+          releasePollListener(holder, activePolls, deliveredFeedback, events);
           return;
         }
         finishFeedbackDelivery(key, immediate);
         releasePollListener(holder, activePolls, deliveredFeedback, events);
         if (immediate.session_ended) clearFeedbackDelivery(key, activePolls, deliveredFeedback, events);
         detachRequestClose();
-        res.json(agentFacingFeedback(await withCodeCardChanges(key, immediate)));
+        res.json(agentFacingFeedback(prepared));
         return;
       }
       if (holder.replaced) {
@@ -1192,7 +1219,11 @@ export async function serve({
           const responseResult = forcedResult && result.status === "waiting" ? forcedResult : result;
           finalSessionEnded = responseResult?.session_ended === true;
           holder.endReason ||= pollEndReason(responseResult, requestClosed || res.writableEnded);
+          // Code-card changes are computed before the checks below, so nothing awaits between the
+          // last closed check and the write.
+          const prepared = await withCodeCardChanges(key, responseResult);
           if (holder.replaced) {
+            await undoCodeStatus(key, prepared);
             if (responseResult.status !== "waiting") await restoreClosedFeedback(key, responseResult);
             if (!requestClosed && !res.writableEnded) {
               if (streamHeartbeat) res.end(JSON.stringify(listenerConflict(holder, "LISTENER_REPLACED")));
@@ -1201,11 +1232,12 @@ export async function serve({
             return;
           }
           if (requestClosed || res.writableEnded) {
+            await undoCodeStatus(key, prepared);
             await restoreClosedFeedback(key, responseResult);
             return;
           }
           finishFeedbackDelivery(key, responseResult);
-          const agentResponse = agentFacingFeedback(await withCodeCardChanges(key, responseResult));
+          const agentResponse = agentFacingFeedback(prepared);
           if (streamHeartbeat) {
             res.end(JSON.stringify(agentResponse));
           } else {
@@ -1482,9 +1514,6 @@ export async function serve({
     }
   });
 
-  // What `hilight catch-up` prints: everything an agent without the earlier context needs once -
-  // the board, every comment thread, the page messages, what is still waiting, and the last page
-  // snapshot an agent was sent. Read-only; a foreign Origin is refused like the poll's.
   // The session's history from server.log for the page's Activity list: what reached the agent,
   // when it listened and why it stopped. Read-only, and refused to a foreign page like /review.
   app.get("/api/:key/history", (req, res) => {
@@ -1502,6 +1531,9 @@ export async function serve({
     res.json({ presence, stopped: presence === "waiting" ? listenEnded.get(key) || null : null, events });
   });
 
+  // What `hilight catch-up` prints: everything an agent without the earlier context needs once -
+  // the board, every comment thread, the page messages, what is still waiting, and the last page
+  // snapshot an agent was sent. Read-only; a foreign Origin is refused like the poll's.
   app.get("/api/:key/review", async (req, res, next) => {
     try {
       if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
@@ -1543,6 +1575,12 @@ export async function serve({
   });
 
   app.post("/api/:key/agent-reply", async (req, res, next) => {
+    // After the body is parsed `req.aborted` stays false on a disconnect; the response's close is
+    // the signal (as in handlePoll), so a held batch is put back when the CLI gave up waiting.
+    let clientGone = false;
+    res.on("close", () => {
+      if (!res.writableEnded) clientGone = true;
+    });
     try {
       const text = String(req.body?.text || "");
       const existing = await store.findByKey(req.params.key);
@@ -1551,7 +1589,8 @@ export async function serve({
         planThreadReply(existing.threads, text);
         const held = await holdReplyForPending(req.params.key);
         if (held) {
-          if (req.aborted || res.writableEnded) {
+          if (clientGone || req.aborted || res.writableEnded) {
+            await undoCodeStatus(req.params.key, held.prepared);
             await restoreClosedFeedback(req.params.key, held.taken);
             return;
           }

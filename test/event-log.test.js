@@ -33,6 +33,13 @@ test("server.log appends across restarts and rotates into a few bounded files, n
     await assert.rejects(readFile(`${file}.3`), "only three files are kept");
     const events = readEvents(file, { session: KEY, files: 3 });
     assert.equal(events.at(-1)?.cause, "1 comment (c39)", "readers see the newest events across rotated files");
+    assert.ok(events.length > 10, "and the rotated files' events before them");
+    const lastThree = readEvents(file, { session: KEY, files: 3, limit: 3 });
+    assert.deepEqual(
+      lastThree.map((event) => event.cause),
+      events.slice(-3).map((event) => event.cause),
+      "a limit keeps the newest events, oldest first",
+    );
     assert.ok(events.every((event) => event.session === KEY || event.session === ""));
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -96,6 +103,11 @@ test("--since takes an age, a clock time today, or an ISO time", () => {
   const clock = new Date(parseSince("09:15", now));
   assert.equal(clock.getHours(), 9);
   assert.equal(clock.getMinutes(), 15);
+  const ahead = new Date(now);
+  ahead.setHours(ahead.getHours() + 1, 0, 0, 0);
+  const label = `${String(ahead.getHours()).padStart(2, "0")}:00`;
+  assert.ok(parseSince(label, now) <= now, "a clock time still ahead today means yesterday's");
+  assert.ok(now - parseSince(label, now) < 86_400_000);
   assert.ok(Number.isNaN(parseSince("soon", now)));
   assert.equal(parseSince(undefined, now), 0);
 });
