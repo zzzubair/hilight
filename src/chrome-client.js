@@ -161,6 +161,11 @@ const attachImagesButton = /** @type {HTMLButtonElement} */ (document.getElement
 const sendButton = /** @type {HTMLButtonElement} */ (document.getElementById("send"));
 const sendAndEndButton = /** @type {HTMLButtonElement} */ (document.getElementById("sendAndEnd"));
 const annotationSwitch = /** @type {HTMLButtonElement} */ (document.getElementById("annotation"));
+const commentsToggle = /** @type {HTMLButtonElement | null} */ (document.getElementById("commentsToggle"));
+const commentsToggleCount = document.getElementById("commentsToggleCount");
+// Desktop only: the reviewer can fold the comments margin away so the artifact
+// (a board canvas especially) gets the full width. Remembered per session.
+const commentsCollapsedKey = "lavish-axi:comments-collapsed:" + key;
 const moreWrap = /** @type {HTMLDivElement} */ (document.getElementById("moreWrap"));
 const moreButton = /** @type {HTMLButtonElement} */ (document.getElementById("moreButton"));
 const moreMenu = /** @type {HTMLDivElement} */ (document.getElementById("moreMenu"));
@@ -647,6 +652,10 @@ function updateSendState() {
   frame.inert = ended || terminalReserved;
   const count = draftCount();
   sendButton.textContent = count ? "Send to agent (" + count + ")" : "Send to agent";
+  if (commentsToggleCount) {
+    commentsToggleCount.textContent = String(count);
+    commentsToggleCount.hidden = !(count && document.body.classList.contains("comments-collapsed"));
+  }
   sendButton.classList.toggle("has-drafts", count > 0);
   sendButton.disabled = ended || terminalReserved;
   sendAndEndButton.disabled = ended || Boolean(terminalSubmission?.inFlight);
@@ -1224,6 +1233,7 @@ function isCommentsHidden() {
 
 function revealComments() {
   if (isMobileSheet()) setSheetOpen(true);
+  else unfoldComments();
 }
 
 function noteAgentReply(text) {
@@ -1498,6 +1508,7 @@ function enqueuePrompt(rawPrompt, /** @type {FeedbackPreparation | null} */ prep
   }
   persistQueuedPrompts();
   render();
+  unfoldComments();
   return true;
 }
 
@@ -4335,6 +4346,12 @@ function toggleAnnotationMode() {
 }
 
 annotationSwitch.onclick = toggleAnnotationMode;
+if (commentsToggle) commentsToggle.onclick = () => setCommentsCollapsed(!commentsCollapsed());
+try {
+  if (localStorage.getItem(commentsCollapsedKey) === "1" && !isMobileSheet()) setCommentsCollapsed(true);
+} catch {
+  // Without storage the margin starts open.
+}
 
 sendButton.onclick = () => sendQueued(false);
 sendAndEndButton.onclick = () => sendQueued(true);
@@ -4696,7 +4713,40 @@ function pendingThreadPrompt(id) {
 
 // Open = the card shows every message and its reply box. One card is open at a time, as in a
 // shared document. A comment that was never sent opens straight into editing its words.
+function commentsCollapsed() {
+  return document.body.classList.contains("comments-collapsed");
+}
+
+/** @param {boolean} collapsed */
+function setCommentsCollapsed(collapsed) {
+  document.body.classList.toggle("comments-collapsed", collapsed);
+  const comments = document.getElementById("comments");
+  if (comments) comments.inert = collapsed && !isMobileSheet();
+  if (commentsToggle) {
+    const label = collapsed ? "Show comments" : "Hide comments";
+    commentsToggle.setAttribute("aria-expanded", String(!collapsed));
+    commentsToggle.setAttribute("aria-label", label);
+    commentsToggle.title = label;
+  }
+  try {
+    if (collapsed) localStorage.setItem(commentsCollapsedKey, "1");
+    else localStorage.removeItem(commentsCollapsedKey);
+  } catch {
+    // The choice still applies to this page without storage.
+  }
+  updateSendState();
+  if (!collapsed) window.requestAnimationFrame(positionThreads);
+}
+
+// Folded comments open again whenever something needs them (a new comment, a
+// thread the reviewer opens), so Send to agent is never out of reach. Desktop
+// only: the phone sheet keeps its own open and closed rules.
+function unfoldComments() {
+  if (!isMobileSheet() && commentsCollapsed()) setCommentsCollapsed(false);
+}
+
 function openThread(id, { focus = true } = {}) {
+  unfoldComments();
   if (!id || ended) return;
   const pending = pendingThreadPrompt(id);
   if (openThreadId !== id) {

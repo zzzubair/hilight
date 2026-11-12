@@ -494,6 +494,58 @@ body {
   position: relative;
   flex-shrink: 0;
 }
+/* Folds the comments margin away (desktop only); shows the unsent count while folded. */
+.comments-toggle {
+  height: 34px;
+  min-width: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: 9px;
+  cursor: pointer;
+  padding: 0 8px;
+  font: inherit;
+}
+.comments-toggle:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.comments-toggle[aria-expanded="false"] {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.comments-toggle-count {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg-bar);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.comments-toggle-count[hidden] {
+  display: none;
+}
+@media (min-width: 861px) {
+  body.comments-collapsed .layout {
+    grid-template-columns: minmax(0, 1fr) 0;
+  }
+  body.comments-collapsed .comments {
+    visibility: hidden;
+    border-left: 0;
+  }
+}
+@media (max-width: 860px) {
+  .comments-toggle {
+    display: none;
+  }
+}
 .more-button {
   width: 34px;
   height: 34px;
