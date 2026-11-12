@@ -2234,6 +2234,17 @@ function revealLayoutGate() {
   clearLayoutGateTimer();
   layoutGateEscape?.reveal?.();
   setLayoutGateActive(false);
+  announceArtifactShown();
+}
+
+// The gate keeps the artifact at opacity 0 (and the browser throttles its frames) until the
+// layout pass, so the artifact cannot tell on its own when the reviewer first sees it. A board
+// waits for this before moving its camera to what is new. Once per load token.
+let artifactShownToken = "";
+function announceArtifactShown() {
+  if (layoutGateVisible || !artifactSpokeToken || artifactShownToken === artifactSpokeToken) return;
+  artifactShownToken = artifactSpokeToken;
+  postToFrame({ type: "lavish:artifactShown" });
 }
 
 function forceRevealLayoutGate(reason) {
@@ -4112,6 +4123,7 @@ window.addEventListener("message", (event) => {
   const messageSequence = ++artifactMessageSequence;
   artifactSpokeToken = messageToken;
   clearTimeout(artifactSilenceTimer);
+  announceArtifactShown();
   if (msg.type === "lavish:layoutDiagnostics") {
     const diagnosticSequence = ++layoutDiagnosticSequence;
     const complete = msg.complete !== false;

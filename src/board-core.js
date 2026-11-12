@@ -175,7 +175,7 @@ export function isLinkElement(element) {
 
 // Flow colours: one accent per flow, distinct from the reviewer's blue ink, the
 // amber of stale code, and the grey card chrome.
-export const FLOW_COLORS = Object.freeze(["#7048e8", "#0c8599", "#c2255c", "#2b8a3e", "#d9480f", "#5f3dc4"]);
+export const FLOW_COLORS = Object.freeze(["#7048e8", "#2f9e44", "#d6336c", "#1098ad", "#9c6644", "#ae3ec9"]);
 
 /** The colour of the n-th flow of a board. */
 export function flowColor(index) {
@@ -271,13 +271,64 @@ export function codeLineSpan(card, span) {
   };
 }
 
+/**
+ * A step's identity across edits of the board file: its flow's name and both
+ * ends. Step keys are positional, so they cannot tell a new step from a moved
+ * one.
+ */
+export function stepSignature(step) {
+  const end = (point) => `${point?.card || ""}:${point?.lines ? `${point.lines.start}-${point.lines.end}` : ""}`;
+  return `${step?.flowName || ""}|${end(step?.from)}>${end(step?.to)}`;
+}
+
+/**
+ * What the agent added since the reviewer last looked: the cards and flow
+ * steps a saved `known` list does not name. With no `known` (a first open, or
+ * a scene saved before this existed) nothing is new.
+ * @param {{ cards: { id: string }[], flows?: any[] }} model
+ * @param {unknown} known `{ cards: string[], steps: string[] }` from the saved scene
+ */
+export function freshSince(model, known) {
+  const cards = new Set();
+  const steps = new Set();
+  const record = /** @type {any} */ (known);
+  if (!record || !Array.isArray(record.cards) || !Array.isArray(record.steps)) return { cards, steps };
+  const knownCards = new Set(record.cards.map(String));
+  const knownSteps = new Set(record.steps.map(String));
+  for (const card of model.cards) if (!knownCards.has(card.id)) cards.add(card.id);
+  for (const step of flowSteps(model.flows)) {
+    const signature = stepSignature(step);
+    if (!knownSteps.has(signature)) steps.add(signature);
+  }
+  return { cards, steps };
+}
+
+/**
+ * The `known` list to save: everything on the board except what is still new,
+ * so an unacknowledged addition is new again after a reload.
+ * @param {{ cards: { id: string }[], flows?: any[] }} model
+ * @param {{ cards: Set<string>, steps: Set<string> }} fresh
+ */
+export function knownAfter(model, fresh) {
+  return {
+    cards: model.cards.map((card) => card.id).filter((id) => !fresh.cards.has(id)),
+    steps: [...new Set(flowSteps(model.flows).map(stepSignature))].filter((signature) => !fresh.steps.has(signature)),
+  };
+}
+
 /** Every step of the given flows, flattened, each with its flow's colour. */
 export function flowSteps(flows) {
   const steps = [];
   for (const flow of Array.isArray(flows) ? flows : []) {
     (Array.isArray(flow.steps) ? flow.steps : []).forEach((step, index) => {
       if (!step?.from?.card || !step?.to?.card) return;
-      steps.push({ ...step, flow: flow.id, color: flow.color || flowColor(0), key: `${flow.id}.${index + 1}` });
+      steps.push({
+        ...step,
+        flow: flow.id,
+        flowName: String(flow.name || ""),
+        color: flow.color || flowColor(0),
+        key: `${flow.id}.${index + 1}`,
+      });
     });
   }
   return steps;
@@ -629,11 +680,14 @@ function elementRect(element) {
   return { x: element.x, y: element.y, w: element.width, h: element.height };
 }
 
-function lineY(element, card, span) {
+function lineY(element, card, span, scrollTop = 0) {
   const info = card && span ? codeLineSpan(card, span) : null;
   if (!info) return null;
-  // A reviewer can shrink a card; stop at its last visible row.
-  return element.y + Math.min((info.top + info.bottom) / 2, element.height - 10);
+  // A reviewer can shrink a card and scroll its code; a line scrolled out of
+  // sight pins the arrow to the edge of the code it went past.
+  const top = codeBodyTop(card) + 10;
+  const y = (info.top + info.bottom) / 2 - (Number(scrollTop) || 0);
+  return element.y + Math.max(Math.min(top, element.height - 10), Math.min(y, element.height - 10));
 }
 
 /**
@@ -644,8 +698,10 @@ function lineY(element, card, span) {
  * @param {any[]} cards the level's cards
  * @param {any[]} cardElements their scene elements
  * @param {any[]} flows the board's flows (other levels' steps are skipped)
+ * @param {{ scrollOf?: (cardId: string) => number, emphasis?: Set<string> }} [options]
+ *   how far each code card is scrolled, and the step signatures to draw heavier
  */
-export function createLinkElements(cards, cardElements, flows = []) {
+export function createLinkElements(cards, cardElements, flows = [], { scrollOf = () => 0, emphasis = new Set() } = {}) {
   const byCard = new Map(
     cardElements.filter((element) => !element.isDeleted).map((element) => [cardIdOfElement(element), element]),
   );
@@ -663,8 +719,8 @@ export function createLinkElements(cards, cardElements, flows = []) {
     seen.add(id);
     const a = elementRect(fromElement);
     const b = elementRect(toElement);
-    const fromY = lineY(fromElement, models.get(step.from.card), step.from.lines);
-    const toY = lineY(toElement, models.get(step.to.card), step.to.lines);
+    const fromY = lineY(fromElement, models.get(step.from.card), step.from.lines, scrollOf(step.from.card));
+    const toY = lineY(toElement, models.get(step.to.card), step.to.lines, scrollOf(step.to.card));
     const route =
       routeAround(cardPorts(a, fromY, b), cardPorts(b, toY, a), obstacles) || connectorPoints(a, b, { fromY, toY });
     routes.push(route.map((point) => [...point]));
@@ -689,7 +745,9 @@ export function createLinkElements(cards, cardElements, flows = []) {
       strokeColor: step.color,
       backgroundColor: "transparent",
       fillStyle: "solid",
-      strokeWidth: 2,
+      // Thick enough to read the flow's colour on a zoomed-out board; a step the
+      // reviewer has not seen yet is heavier still.
+      strokeWidth: emphasis.has(stepSignature(step)) ? 6 : 3,
       strokeStyle: "solid",
       roughness: 0,
       opacity: 100,
@@ -1161,4 +1219,70 @@ export function normalizeBoardCardTarget(target) {
       : "unpinned";
   }
   return normalized;
+}
+
+// ---------------------------------------------------------------------------
+// Trackpad and wheel: one intent per wheel event, so a precision trackpad, a
+// mouse wheel and a pinch all move the canvas the same way in every browser.
+
+export const WHEEL = Object.freeze({
+  line: 16, // px per line when a browser reports wheel deltas in lines
+  maxPan: 400, // px per event: a wheel-delta spike never jumps the board
+  maxZoomDelta: 25, // a pinch or ctrl+wheel step, clamped the same way
+  zoomRate: 0.01, // zoom changes by e^(-delta * rate), so steps feel the same at any zoom
+  minZoom: 0.1,
+  maxZoom: 30,
+});
+
+const clampAbs = (value, max) => Math.max(-max, Math.min(max, Number.isFinite(value) ? value : 0));
+
+/**
+ * What one wheel event means for the canvas. Pinch (ctrlKey on every desktop
+ * browser) and ctrl or cmd + wheel zoom; everything else pans, with shift
+ * turning a vertical mouse wheel sideways.
+ * @param {{ deltaX?: number, deltaY?: number, deltaMode?: number, ctrlKey?: boolean, metaKey?: boolean, shiftKey?: boolean }} event
+ * @param {{ pageHeight?: number }} [options]
+ * @returns {{ kind: "zoom", factor: number } | { kind: "pan", dx: number, dy: number }}
+ */
+export function wheelIntent(event, { pageHeight = 800 } = {}) {
+  const unit = event.deltaMode === 1 ? WHEEL.line : event.deltaMode === 2 ? Math.max(1, pageHeight) : 1;
+  let dx = (Number(event.deltaX) || 0) * unit;
+  let dy = (Number(event.deltaY) || 0) * unit;
+  if (event.ctrlKey || event.metaKey) {
+    const delta = clampAbs(dy || dx, WHEEL.maxZoomDelta);
+    return { kind: "zoom", factor: Math.exp(-delta * WHEEL.zoomRate) };
+  }
+  if (event.shiftKey && !dx) [dx, dy] = [dy, 0];
+  return { kind: "pan", dx: clampAbs(dx, WHEEL.maxPan), dy: clampAbs(dy, WHEEL.maxPan) };
+}
+
+/**
+ * The view after zooming by `factor` around a viewport point, keeping the
+ * scene point under it still. Views are Excalidraw's: a scene point (x, y)
+ * shows at ((x + scrollX) * zoom, (y + scrollY) * zoom).
+ * @param {{ zoom: number, scrollX: number, scrollY: number }} view
+ * @param {number} factor
+ * @param {{ x: number, y: number }} point viewport coordinates inside the canvas
+ */
+export function zoomAround(view, factor, point) {
+  const zoom = Math.max(WHEEL.minZoom, Math.min(WHEEL.maxZoom, view.zoom * factor));
+  return {
+    zoom,
+    scrollX: point.x / zoom - (point.x / view.zoom - view.scrollX),
+    scrollY: point.y / zoom - (point.y / view.zoom - view.scrollY),
+  };
+}
+
+/**
+ * Whether a scroll container can still move by (dx, dy): the board pans only
+ * once the code under the pointer has nothing left to scroll that way.
+ * @param {{ scrollTop: number, scrollLeft: number, scrollHeight: number, scrollWidth: number, clientHeight: number, clientWidth: number }} box
+ */
+export function canScrollBy(box, dx, dy) {
+  const room = (offset, size, view, delta) =>
+    delta < 0 ? offset > 0.5 : delta > 0 ? offset + view < size - 0.5 : false;
+  return (
+    (Math.abs(dy) >= Math.abs(dx) && room(box.scrollTop, box.scrollHeight, box.clientHeight, dy)) ||
+    (Math.abs(dx) > Math.abs(dy) && room(box.scrollLeft, box.scrollWidth, box.clientWidth, dx))
+  );
 }

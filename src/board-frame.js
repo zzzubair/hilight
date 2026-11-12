@@ -1,4 +1,4 @@
-/* global document, window, location, FileReader */
+/* global document, window, location, FileReader, CSS, HTMLElement */
 
 // Board canvas inside the whiteboard frame. The artifact SDK mounts this frame
 // over a board file (`[data-hilight-board]`) with diagramIndex
@@ -40,20 +40,29 @@ import {
   codeRows,
   cardElementId,
   cardIdOfElement,
+  canScrollBy,
   createLinkElements,
   diffCodeLines,
   elementLevel,
+  flowSteps,
+  freshSince,
   isCardElement,
   isLinkElement,
+  knownAfter,
   linkLandings,
   reconcileLevelElements,
+  stepSignature,
   summarizeBoardMarks,
   tagLevel,
+  wheelIntent,
+  zoomAround,
 } from "./board-core.js";
 import { sanitizeSceneLink } from "./whiteboard-core.js";
 
 const h = React.createElement;
 const SAVE_DEBOUNCE_MS = 800;
+const AUTO_REVEAL_DELAY_MS = 1500;
+const AUTO_REVEAL_FALLBACK_MS = 15000;
 const INK = "#1f6fe0";
 const EXCALIFONT = 5;
 
@@ -161,6 +170,22 @@ export function startBoard(init, { post }) {
     switching: false,
     linkStripPending: false,
     admittedCards: new Set(),
+    // How far each code card's code is scrolled, so its arrows follow.
+    codeScroll: /** @type {Map<string, number>} */ (new Map()),
+    // Cards and flow steps the agent added since the reviewer last looked.
+    fresh: { cards: /** @type {Set<string>} */ (new Set()), steps: /** @type {Set<string>} */ (new Set()) },
+    // Where the reviewer was before the camera went to new cards.
+    revealFrom: /** @type {null | { level: string, zoom: number, scrollX: number, scrollY: number }} */ (null),
+    // The last view Hilight chose (Fit or the opening view), so a resize can redo it.
+    autoView: /** @type {null | { kind: "fit" | "opening", zoom: number, scrollX: number, scrollY: number }} */ (null),
+    lastSize: { width: 0, height: 0 },
+    // The chrome has shown the page, and where the automatic move to new cards is.
+    shown: false,
+    autoReveal: /** @type {"" | "armed" | "started"} */ (""),
+    wheelFrame: 0,
+    wheelPending: /** @type {null | { dx: number, dy: number, factor: number, point: { x: number, y: number } }} */ (
+      null
+    ),
   };
   const listeners = new Set();
   let version = 0;
@@ -199,6 +224,39 @@ export function startBoard(init, { post }) {
   const fit = el("button", { className: "bd-button bd-icon", type: "button", title: "Fit the board to the screen" });
   fit.innerHTML =
     '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg>';
+  // Zoom and undo live in the bar, outside the canvas, so no floating control
+  // ever sits on top of code.
+  const iconButton = (title, path) => {
+    const button = el("button", { className: "bd-button bd-icon", type: "button", title });
+    button.setAttribute("aria-label", title);
+    button.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+    return button;
+  };
+  const undoButton = iconButton(
+    "Undo (Ctrl+Z)",
+    '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  );
+  const redoButton = iconButton(
+    "Redo (Ctrl+Shift+Z)",
+    '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+  );
+  const zoomOutButton = iconButton("Zoom out", '<path d="M5 12h14"/>');
+  const zoomInButton = iconButton("Zoom in", '<path d="M12 5v14M5 12h14"/>');
+  const zoomLabel = el("button", { className: "bd-button bd-zoom", type: "button", title: "Reset zoom to 100%" });
+  zoomLabel.textContent = "100%";
+  const zoomGroup = el(
+    "div",
+    { className: "bd-group", role: "group", ariaLabel: "Zoom" },
+    zoomOutButton,
+    zoomLabel,
+    zoomInButton,
+  );
+  const historyGroup = el(
+    "div",
+    { className: "bd-group", role: "group", ariaLabel: "History" },
+    undoButton,
+    redoButton,
+  );
   const queue = el("button", { className: "bd-button bd-primary", type: "button", textContent: "Queue marks" });
   queue.title = "Describe your arrows, notes and marks to the agent as a page comment";
   const bar = el(
@@ -209,6 +267,8 @@ export function startBoard(init, { post }) {
     problemsChip,
     el("div", { className: "bd-spacer" }),
     note,
+    historyGroup,
+    zoomGroup,
     fit,
     queue,
   );
@@ -226,7 +286,14 @@ export function startBoard(init, { post }) {
   const openButton = el("button", { type: "button", className: "bd-chip", textContent: "Open board →" });
   toolbar.append(commentButton, openButton);
   const status = el("div", { className: "bd-status", hidden: true, role: "status" });
-  const shell = el("div", { className: "bd-shell" }, bar, lede, editor, toolbar, status);
+  // Shown when the agent added cards or arrows since the reviewer last looked.
+  const reveal = el("div", { className: "bd-reveal", hidden: true, role: "status" });
+  const revealText = el("p", { className: "bd-reveal-text" });
+  const revealShow = el("button", { className: "bd-button bd-primary", type: "button", textContent: "Show me" });
+  const revealBack = el("button", { className: "bd-button", type: "button", textContent: "Back to where I was" });
+  const revealDone = el("button", { className: "bd-button", type: "button", textContent: "Got it" });
+  reveal.append(revealText, revealShow, revealBack, revealDone);
+  const shell = el("div", { className: "bd-shell" }, bar, lede, reveal, editor, toolbar, status);
   document.body.append(shell);
 
   let statusTimer = 0;
@@ -457,6 +524,7 @@ export function startBoard(init, { post }) {
           `bd-card k-${card.kind}` +
           (code ? ` is-${code.status}` : "") +
           (active ? " is-active" : "") +
+          (s.fresh.cards.has(id) ? " is-new" : "") +
           (s.selectedCard === id ? " is-selected" : ""),
         "data-card": id,
       },
@@ -470,6 +538,7 @@ export function startBoard(init, { post }) {
           "div",
           { className: "bd-title-row" },
           h("span", { className: "bd-title" }, card.title || card.id),
+          s.fresh.cards.has(id) ? h("span", { className: "bd-new-pill" }, "New") : null,
           h(ThreadBadge, { id }),
         ),
         meta,
@@ -536,6 +605,12 @@ export function startBoard(init, { post }) {
     s.level = savedBoardState.level;
   }
 
+  // New since the reviewer last looked: cards and flow steps the saved scene
+  // did not know about. Unacknowledged items stay new across reloads.
+  s.fresh = freshSince(s.model, savedBoardState.known);
+
+  const knownState = () => knownAfter(s.model, s.fresh);
+
   function restored(elements) {
     return restore({ elements, appState: null, files: s.files }, null, null, { repairBindings: true }).elements;
   }
@@ -566,7 +641,7 @@ export function startBoard(init, { post }) {
       textMetricsVersion: 0,
       scene: {
         elements,
-        appState: { ...view, hilightBoard: { level: s.level, views } },
+        appState: { ...view, hilightBoard: { level: s.level, views, known: knownState() } },
         files: s.api?.getFiles() || s.files,
       },
       baseline: null,
@@ -654,10 +729,22 @@ export function startBoard(init, { post }) {
     const rects = cardRects();
     placeToolbar(rects);
     pinHeads(rects);
-    const serialized = JSON.stringify(rects);
+    // The page only sees the part of each card inside the canvas, so a thread
+    // highlight or the comment card never paints over the bar or summary.
+    const box = editor.getBoundingClientRect();
+    /** @type {Record<string, number[]>} */
+    const visible = {};
+    for (const [id, [x, y, w, h]] of Object.entries(rects)) {
+      const left = Math.max(x, Math.round(box.left));
+      const top = Math.max(y, Math.round(box.top));
+      const right = Math.min(x + w, Math.round(box.right));
+      const bottom = Math.min(y + h, Math.round(box.bottom));
+      visible[id] = [left, top, Math.max(0, right - left), Math.max(0, bottom - top)];
+    }
+    const serialized = JSON.stringify(visible);
     if (serialized === s.lastGeometry) return;
     s.lastGeometry = serialized;
-    postParent({ type: "hilight-board:geometry", cards: rects });
+    postParent({ type: "hilight-board:geometry", cards: visible });
   }
 
   function placeToolbar(rects) {
@@ -744,13 +831,17 @@ export function startBoard(init, { post }) {
     if (!s.api || s.switching) return;
     const elements = s.api.getSceneElementsIncludingDeleted();
     const cardElements = elements.filter((element) => isCardElement(element) && elementLevel(element) === s.level);
-    const key = `${s.level}#${s.modelVersion}#${cardGeometryKey(cardElements)}`;
+    const scrolls = [...s.codeScroll].filter(([, top]) => top).join(",");
+    const key = `${s.level}#${s.modelVersion}#${s.fresh.steps.size}#${scrolls}#${cardGeometryKey(cardElements)}`;
     if (key === s.linkKey) return;
     s.linkKey = key;
     const cards = s.model.cards.filter((card) => card.level === s.level);
     s.linkVersion = (s.linkVersion || 1) + 1;
     const links = restoreElements(
-      createLinkElements(cards, cardElements, s.model.flows).map((link) => ({ ...link, version: s.linkVersion })),
+      createLinkElements(cards, cardElements, s.model.flows, {
+        scrollOf: (id) => s.codeScroll.get(id) || 0,
+        emphasis: s.fresh.steps,
+      }).map((link) => ({ ...link, version: s.linkVersion })),
       null,
     );
     s.api.updateScene({
@@ -813,7 +904,7 @@ export function startBoard(init, { post }) {
   function controlInsets() {
     const box = editor.getBoundingClientRect();
     let top = 64;
-    let bottom = 56;
+    let bottom = 8;
     for (const node of editor.querySelectorAll(TOP_CONTROLS)) {
       const rect = node.getBoundingClientRect();
       if (rect.height && rect.top < box.top + box.height / 2) top = Math.max(top, rect.bottom - box.top);
@@ -825,8 +916,14 @@ export function startBoard(init, { post }) {
     return { top: top + VIEW_MARGIN, bottom: bottom + VIEW_MARGIN, left: VIEW_MARGIN + 4, right: VIEW_MARGIN + 4 };
   }
 
+  // The canvas's own box, read live: Excalidraw's appState size lags a resize.
+  function canvasSize() {
+    const box = editor.getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  }
+
   function fitZoom([minX, minY, maxX, maxY], insets = controlInsets()) {
-    const { width, height } = s.api.getAppState();
+    const { width, height } = canvasSize();
     return Math.max(
       0.1,
       Math.min(
@@ -842,6 +939,66 @@ export function startBoard(init, { post }) {
       appState: { zoom: { value: zoom }, scrollX, scrollY },
       captureUpdate: CaptureUpdateAction.NEVER,
     });
+    renderZoom(zoom);
+  }
+
+  function currentView() {
+    const appState = s.api.getAppState();
+    return { zoom: appState.zoom.value, scrollX: appState.scrollX, scrollY: appState.scrollY };
+  }
+
+  function rememberAutoView(kind) {
+    s.autoView = { kind, ...currentView() };
+  }
+
+  // Whether the reviewer is still looking at the view Hilight picked.
+  function onAutoView() {
+    if (!s.autoView || !s.api) return false;
+    const view = currentView();
+    return (
+      Math.abs(view.zoom - s.autoView.zoom) < 1e-4 &&
+      Math.abs(view.scrollX - s.autoView.scrollX) < 0.5 &&
+      Math.abs(view.scrollY - s.autoView.scrollY) < 0.5
+    );
+  }
+
+  function renderZoom(zoom = s.api ? s.api.getAppState().zoom.value : 1) {
+    const text = `${Math.round(zoom * 100)}%`;
+    if (zoomLabel.textContent !== text) zoomLabel.textContent = text;
+  }
+
+  // Glide the camera to a view; a reviewer who prefers reduced motion jumps.
+  function animateView(target, duration = 650) {
+    if (!s.api) return Promise.resolve();
+    window.cancelAnimationFrame(s.cameraFrame || 0);
+    const from = currentView();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || duration <= 0) {
+      setView(target.zoom, target.scrollX, target.scrollY);
+      return Promise.resolve();
+    }
+    const { width, height } = canvasSize();
+    // Interpolate the scene point at the centre, so the camera moves in a straight line.
+    const centre = (view) => ({ x: width / 2 / view.zoom - view.scrollX, y: height / 2 / view.zoom - view.scrollY });
+    const a = centre(from);
+    const b = centre(target);
+    const start = window.performance.now();
+    return new Promise((resolve) => {
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / duration);
+        const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const zoom = Math.exp(Math.log(from.zoom) + (Math.log(target.zoom) - Math.log(from.zoom)) * ease);
+        const x = a.x + (b.x - a.x) * ease;
+        const y = a.y + (b.y - a.y) * ease;
+        setView(zoom, width / 2 / zoom - x, height / 2 / zoom - y);
+        if (t < 1) s.cameraFrame = window.requestAnimationFrame(step);
+        else {
+          s.cameraFrame = 0;
+          scheduleGeometry();
+          resolve(undefined);
+        }
+      };
+      s.cameraFrame = window.requestAnimationFrame(step);
+    });
   }
 
   // Fit the whole level inside the area the floating controls leave free, never
@@ -853,12 +1010,13 @@ export function startBoard(init, { post }) {
     if (!elements.length) return;
     const bounds = getCommonBounds(elements);
     const [minX, minY, maxX, maxY] = bounds;
-    const { width, height } = s.api.getAppState();
+    const { width, height } = canvasSize();
     const insets = controlInsets();
     const zoom = fitZoom(bounds, insets);
     const centerX = insets.left + (width - insets.left - insets.right) / 2;
     const centerY = insets.top + (height - insets.top - insets.bottom) / 2;
     setView(zoom, centerX / zoom - (minX + maxX) / 2, centerY / zoom - (minY + maxY) / 2);
+    rememberAutoView("fit");
   }
 
   // The first view of a level is one a person can read: the whole level when it
@@ -871,17 +1029,19 @@ export function startBoard(init, { post }) {
     const insets = controlInsets();
     if (!cards.length || fitZoom(getCommonBounds(elements), insets) >= READABLE_ZOOM) {
       fitAll();
+      rememberAutoView("opening");
       return;
     }
     const top = Math.min(...cards.map((card) => card.y));
     const row = cards.filter((card) => card.y < top + 80);
     const [minX, minY, maxX] = getCommonBounds(row);
-    const { width } = s.api.getAppState();
+    const { width } = canvasSize();
     const room = width - insets.left - insets.right;
     const zoom = Math.min(1, Math.max(READABLE_ZOOM, room / Math.max(1, maxX - minX)));
     const scrollX =
       (maxX - minX) * zoom <= room ? (insets.left + room / 2) / zoom - (minX + maxX) / 2 : insets.left / zoom - minX;
     setView(zoom, scrollX, insets.top / zoom - minY);
+    rememberAutoView("opening");
   }
 
   async function revealCard(cardId) {
@@ -896,6 +1056,229 @@ export function startBoard(init, { post }) {
     });
     s.api.scrollToContent(element, { fitToViewport: true, viewportZoomFactor: 0.55, animate: true, duration: 360 });
   }
+
+  // ---------------------------------------------------------------------------
+  // New cards: when the agent adds cards or flow steps, the camera goes to them,
+  // they are marked New, and the reviewer can go back to where they were.
+
+  const hasFresh = () => s.fresh.cards.size > 0 || s.fresh.steps.size > 0;
+  const freshSteps = () => flowSteps(s.model.flows).filter((step) => s.fresh.steps.has(stepSignature(step)));
+
+  function freshLevel() {
+    const first = [...s.fresh.cards][0] || freshSteps()[0]?.to.card;
+    return s.cardsById.get(first)?.level ?? s.level;
+  }
+
+  // The new cards plus both ends of every new step, so a new arrow is seen
+  // with the card it comes from.
+  function freshFocus() {
+    const ids = new Set(s.fresh.cards);
+    for (const step of freshSteps()) ids.add(step.from.card).add(step.to.card);
+    const cards = s.api
+      .getSceneElements()
+      .filter((element) => isCardElement(element) && ids.has(cardIdOfElement(element)));
+    const fresh = cards.filter((element) => s.fresh.cards.has(cardIdOfElement(element)));
+    return { all: cards, fresh: fresh.length ? fresh : cards };
+  }
+
+  function revealSummary() {
+    const cards = [...s.fresh.cards].map((id) => s.cardsById.get(id)).filter(Boolean);
+    const steps = freshSteps();
+    const parts = [];
+    if (cards.length === 1) parts.push(`a card, “${cards[0].title || cards[0].id}”`);
+    else if (cards.length) parts.push(`${cards.length} cards`);
+    const flows = [...new Set(steps.map((step) => step.flowName).filter(Boolean))];
+    if (steps.length) {
+      const arrows = steps.length === 1 ? "an arrow" : `${steps.length} arrows`;
+      parts.push(flows.length === 1 ? `${arrows} in ${flows[0]}` : arrows);
+    }
+    return `The agent added ${parts.join(" and ")}.`;
+  }
+
+  // Let the reviewer see where they were for a moment, then go to what is new. The moment starts
+  // when the chrome reports the page shown, not at mount: its layout gate can cover the board for
+  // seconds, and a camera move behind it would be missed.
+  function startAutoReveal() {
+    if (s.autoReveal !== "armed") return;
+    s.autoReveal = "started";
+    window.setTimeout(() => {
+      if (reveal.dataset.stage === "pending") showFresh({ duration: 900 });
+    }, AUTO_REVEAL_DELAY_MS);
+  }
+
+  function renderReveal(stage) {
+    reveal.hidden = !hasFresh();
+    if (reveal.hidden) return;
+    reveal.dataset.stage = stage;
+    revealText.replaceChildren(el("strong", { textContent: "New " }), document.createTextNode(revealSummary()));
+    revealShow.hidden = stage === "shown";
+    revealShow.textContent = stage === "back" ? "Show the new card again" : "Show me";
+    revealBack.hidden = stage !== "shown" || !s.revealFrom;
+  }
+
+  async function showFresh({ duration = 650 } = {}) {
+    if (!s.api || !hasFresh()) return;
+    if (!s.revealFrom) s.revealFrom = { level: s.level, ...currentView() };
+    const level = freshLevel();
+    if (level !== s.level) await openLevel(level, { animate: false });
+    const focus = freshFocus();
+    if (!focus.all.length) return;
+    const insets = controlInsets();
+    let bounds = getCommonBounds(focus.all);
+    let zoom = Math.min(1, fitZoom(bounds, insets));
+    // Too far apart to read together: frame the new cards alone.
+    if (zoom < 0.5) {
+      bounds = getCommonBounds(focus.fresh);
+      zoom = Math.min(1, fitZoom(bounds, insets));
+    }
+    const [minX, minY, maxX, maxY] = bounds;
+    const { width, height } = canvasSize();
+    const centreX = insets.left + (width - insets.left - insets.right) / 2;
+    const centreY = insets.top + (height - insets.top - insets.bottom) / 2;
+    renderReveal("shown");
+    await animateView(
+      { zoom, scrollX: centreX / zoom - (minX + maxX) / 2, scrollY: centreY / zoom - (minY + maxY) / 2 },
+      duration,
+    );
+  }
+
+  async function backToWhereIWas() {
+    const from = s.revealFrom;
+    if (!from || !s.api) return;
+    if (from.level !== s.level) await openLevel(from.level, { animate: false });
+    renderReveal("back");
+    await animateView(from);
+  }
+
+  function acknowledgeFresh() {
+    s.fresh.cards.clear();
+    s.fresh.steps.clear();
+    s.revealFrom = null;
+    renderReveal("done");
+    notifyCards();
+    scheduleLinks();
+    scheduleSave();
+  }
+
+  revealShow.onclick = () => showFresh();
+  revealBack.onclick = () => backToWhereIWas();
+  revealDone.onclick = () => acknowledgeFresh();
+
+  // ---------------------------------------------------------------------------
+  // Trackpad and wheel. One handler for every input: two-finger scroll pans,
+  // pinch (and ctrl or cmd + wheel) zooms around the pointer, spikes are
+  // clamped, and events are applied once per frame so momentum stays smooth.
+  // Scrolling over code that can still scroll moves the code instead.
+
+  function codeScrollerAt(x, y, dx, dy) {
+    const card = cardAtPoint(x, y);
+    if (card?.kind !== "code") return null;
+    const code = editor.querySelector(`.bd-card[data-card="${CSS.escape(card.id)}"] .bd-code`);
+    if (!(code instanceof HTMLElement)) return null;
+    const box = code.getBoundingClientRect();
+    if (x < box.left || x > box.right || y < box.top || y > box.bottom) return null;
+    return canScrollBy(code, dx, dy) ? code : null;
+  }
+
+  function applyWheel() {
+    s.wheelFrame = 0;
+    const pending = s.wheelPending;
+    s.wheelPending = null;
+    if (!pending || !s.api) return;
+    let view = currentView();
+    if (pending.factor !== 1) view = zoomAround(view, pending.factor, pending.point);
+    setView(view.zoom, view.scrollX - pending.dx / view.zoom, view.scrollY - pending.dy / view.zoom);
+    scheduleGeometry();
+  }
+
+  function onWheel(event) {
+    if (!s.api || s.switching) return;
+    const box = editor.getBoundingClientRect();
+    if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom)
+      return;
+    const target = /** @type {Element | null} */ (event.target);
+    // Excalidraw's own text editor and dialogs keep their wheel.
+    if (target?.closest?.(".excalidraw-wysiwyg, .Modal, .Island, .dropdown-menu, .sidebar")) return;
+    const intent = wheelIntent(event, { pageHeight: box.height });
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    window.cancelAnimationFrame(s.cameraFrame || 0);
+    if (intent.kind === "pan") {
+      const code = codeScrollerAt(event.clientX, event.clientY, intent.dx, intent.dy);
+      if (code) {
+        const zoom = s.api.getAppState().zoom.value;
+        code.scrollTop += intent.dy / zoom;
+        code.scrollLeft += intent.dx / zoom;
+        return;
+      }
+    }
+    const pending = (s.wheelPending ||= { dx: 0, dy: 0, factor: 1, point: { x: 0, y: 0 } });
+    if (intent.kind === "zoom") {
+      pending.factor *= intent.factor;
+      pending.point = { x: event.clientX - box.left, y: event.clientY - box.top };
+    } else {
+      pending.dx += intent.dx;
+      pending.dy += intent.dy;
+    }
+    if (!s.wheelFrame) s.wheelFrame = window.requestAnimationFrame(applyWheel);
+  }
+  window.addEventListener("wheel", onWheel, { capture: true, passive: false });
+
+  // Code that scrolls carries its arrows' ends with it.
+  editor.addEventListener(
+    "scroll",
+    (event) => {
+      const code = /** @type {Element | null} */ (event.target);
+      if (!(code instanceof HTMLElement) || !code.classList.contains("bd-code")) return;
+      const id = code.closest(".bd-card")?.getAttribute("data-card");
+      if (!id) return;
+      s.codeScroll.set(id, code.scrollTop);
+      scheduleLinks();
+    },
+    true,
+  );
+
+  // A resize (the comments margin opening or folding, a window resize) redoes
+  // the view Hilight picked, or keeps the centre of a view the reviewer chose,
+  // so cards near the right edge do not slide under the margin.
+  function onResize() {
+    window.requestAnimationFrame(() => {
+      if (!s.api) return;
+      const size = canvasSize();
+      const before = s.lastSize;
+      s.lastSize = size;
+      if (!before.width || (before.width === size.width && before.height === size.height)) return;
+      if (onAutoView()) {
+        if (s.autoView?.kind === "fit") fitAll();
+        else openingView();
+      } else {
+        const view = currentView();
+        setView(
+          view.zoom,
+          view.scrollX + (size.width - before.width) / 2 / view.zoom,
+          view.scrollY + (size.height - before.height) / 2 / view.zoom,
+        );
+      }
+      scheduleGeometry();
+    });
+  }
+
+  function zoomBy(factor) {
+    if (!s.api) return;
+    const { width, height } = canvasSize();
+    const view = zoomAround(currentView(), factor, { x: width / 2, y: height / 2 });
+    setView(view.zoom, view.scrollX, view.scrollY);
+    scheduleGeometry();
+  }
+
+  // Undo and redo stay Excalidraw's own (its history knows the reviewer's
+  // marks); the bar buttons press its hidden ones.
+  const pressHidden = (selector) => /** @type {HTMLElement | null} */ (editor.querySelector(selector))?.click();
+  undoButton.onclick = () => pressHidden(".undo-button-container button");
+  redoButton.onclick = () => pressHidden(".redo-button-container button");
+  zoomInButton.onclick = () => zoomBy(1.25);
+  zoomOutButton.onclick = () => zoomBy(1 / 1.25);
+  zoomLabel.onclick = () => zoomBy(1 / (s.api ? s.api.getAppState().zoom.value : 1));
 
   // ---------------------------------------------------------------------------
   // Feedback: the marks, in words, as one page comment.
@@ -1057,7 +1440,10 @@ export function startBoard(init, { post }) {
       },
       theme: s.theme,
       onChange,
-      onScrollChange: scheduleGeometry,
+      onScrollChange: (_x, _y, zoom) => {
+        renderZoom(zoom?.value);
+        scheduleGeometry();
+      },
       onLinkOpen,
       validateEmbeddable: (link) => (String(link).startsWith(CARD_LINK_PREFIX) ? true : undefined),
       renderEmbeddable,
@@ -1077,7 +1463,16 @@ export function startBoard(init, { post }) {
         window.setTimeout(() => {
           syncLinks();
           scheduleGeometry();
+          renderZoom();
+          s.lastSize = canvasSize();
         }, 50);
+        if (hasFresh()) {
+          renderReveal("pending");
+          s.autoReveal = "armed";
+          // A chrome that never says the page is shown must not leave the reveal waiting forever.
+          window.setTimeout(() => startAutoReveal(), AUTO_REVEAL_FALLBACK_MS);
+          if (s.shown) startAutoReveal();
+        }
       },
       UIOptions: {
         canvasActions: {
@@ -1095,7 +1490,10 @@ export function startBoard(init, { post }) {
   createRoot(editor).render(h(BoardApp));
   renderCrumbs();
   renderHealth();
-  window.addEventListener("resize", scheduleGeometry);
+  window.addEventListener("resize", () => {
+    scheduleGeometry();
+    onResize();
+  });
 
   // ---------------------------------------------------------------------------
   // Messages
@@ -1159,6 +1557,10 @@ export function startBoard(init, { post }) {
 
   function onParentMessage(message) {
     if (message.type === "hilight-board:reveal") revealCard(String(message.card || ""));
+    if (message.type === "hilight-board:shown") {
+      s.shown = true;
+      startAutoReveal();
+    }
     if (message.type === "hilight-board:threads") {
       const counts = message.counts && typeof message.counts === "object" ? message.counts : {};
       s.threadCounts = Object.fromEntries(

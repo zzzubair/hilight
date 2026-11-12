@@ -1084,6 +1084,10 @@ export function createArtifactSdk(
       if (target) target.iframe.src = whiteboardFrameSrc(target);
     }
     if (msg.type === "lavish:requestLayoutDiagnostics") scheduleLayoutAudit(true);
+    if (msg.type === "lavish:artifactShown") {
+      artifactShown = true;
+      postToBoard({ type: "hilight-board:shown" });
+    }
   });
 
   // Board canvas. A board file (`[data-hilight-board]` holding `[data-card]`
@@ -1099,6 +1103,9 @@ export function createArtifactSdk(
   // layout and the annotation card.
   /** @type {{ root: Element, iframe: HTMLIFrameElement, ids: Map<Element, string>, rects: Map<string, number[]>, lastThreads: string, live: boolean } | null} */
   let board = null;
+  // Set once the chrome has taken its layout gate off this document. The board frame may start
+  // listening after that message, so its first geometry gets it again.
+  let artifactShown = false;
 
   // Mirrors parseBoardHtml's card and id rules (src/board-source.js): a card
   // is any <section> or [data-card] inside the board; its id is the id
@@ -1133,6 +1140,8 @@ export function createArtifactSdk(
       "position:fixed;inset:0;width:100%;height:100%;margin:0;border:0;z-index:2147483646;background:#efeeea;color-scheme:normal";
     /** @type {HTMLElement} */ (root).style.display = "none";
     document.documentElement.style.overflow = "hidden";
+    // A sideways trackpad swipe over the canvas never becomes browser back or forward.
+    document.documentElement.style.overscrollBehavior = "none";
     (document.body || document.documentElement).appendChild(iframe);
     board = { root, iframe, ids: boardCardIds(root), rects: new Map(), lastThreads: "", live: false };
   }
@@ -1207,6 +1216,7 @@ export function createArtifactSdk(
       if (!board.live) {
         board.live = true;
         board.lastThreads = "";
+        if (artifactShown) postToBoard({ type: "hilight-board:shown" });
       }
       scheduleThreadLayout();
     }

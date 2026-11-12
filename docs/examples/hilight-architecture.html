@@ -135,13 +135,15 @@
   }</code></pre>
         </section>
 
-        <section id="route-arrows" data-code="src/board-core.js:648-673" data-hash="e53425677058">
+        <section id="route-arrows" data-code="src/board-core.js:704-729" data-hash="bf49b25931b6">
           <h3>Arrows go around cards</h3>
           <p>
             Each step is routed from its source lines to its target lines through the gaps between cards, then
             overlapping segments of different flows are pushed apart so both stay visible.
           </p>
-          <pre data-snapshot><code>export function createLinkElements(cards, cardElements, flows = []) {
+          <pre
+            data-snapshot
+          ><code>export function createLinkElements(cards, cardElements, flows = [], { scrollOf = () =&gt; 0, emphasis = new Set() } = {}) {
   const byCard = new Map(
     cardElements.filter((element) =&gt; !element.isDeleted).map((element) =&gt; [cardIdOfElement(element), element]),
   );
@@ -159,8 +161,8 @@
     seen.add(id);
     const a = elementRect(fromElement);
     const b = elementRect(toElement);
-    const fromY = lineY(fromElement, models.get(step.from.card), step.from.lines);
-    const toY = lineY(toElement, models.get(step.to.card), step.to.lines);
+    const fromY = lineY(fromElement, models.get(step.from.card), step.from.lines, scrollOf(step.from.card));
+    const toY = lineY(toElement, models.get(step.to.card), step.to.lines, scrollOf(step.to.card));
     const route =
       routeAround(cardPorts(a, fromY, b), cardPorts(b, toY, a), obstacles) || connectorPoints(a, b, { fromY, toY });
     routes.push(route.map((point) =&gt; [...point]));
@@ -210,7 +212,7 @@
 
         <ol data-flow="File to canvas">
           <li>read-flows:352 -> place-cards:614-615 the parsed steps decide each card's band and column</li>
-          <li>place-cards:615-616 -> route-arrows:668-669 the placed cards become the obstacles every arrow avoids</li>
+          <li>place-cards:615-616 -> route-arrows:724-725 the placed cards become the obstacles every arrow avoids</li>
         </ol>
       </section>
 
@@ -260,7 +262,7 @@
       res.type("html").send(injectLavishSdk(html, key, verified.artifact_revision, verified.artifact_load_token));</code></pre>
       </section>
 
-      <section id="mount" data-code="src/artifact-sdk.js:1122-1138" data-hash="f752b6164047">
+      <section id="mount" data-code="src/artifact-sdk.js:1129-1147" data-hash="a4b77d1af605">
         <h2>The SDK turns a board into a canvas</h2>
         <p>
           Finds the board element, hides it, and covers the page with one sandboxed canvas frame. The file itself is
@@ -280,6 +282,8 @@
       "position:fixed;inset:0;width:100%;height:100%;margin:0;border:0;z-index:2147483646;background:#efeeea;color-scheme:normal";
     /** @type {HTMLElement} */ (root).style.display = "none";
     document.documentElement.style.overflow = "hidden";
+    // A sideways trackpad swipe over the canvas never becomes browser back or forward.
+    document.documentElement.style.overscrollBehavior = "none";
     (document.body || document.documentElement).appendChild(iframe);
     board = { root, iframe, ids: boardCardIds(root), rects: new Map(), lastThreads: "", live: false };
   }</code></pre>
@@ -306,7 +310,7 @@
   });</code></pre>
       </section>
 
-      <section id="queue-marks" data-code="src/chrome-client.js:3716-3735" data-hash="e3d207c37814">
+      <section id="queue-marks" data-code="src/chrome-client.js:3727-3746" data-hash="e3d207c37814">
         <h2>Queue marks becomes one prompt</h2>
         <p>
           The canvas describes your arrows, circles and notes in words, and the review page holds them as one
@@ -450,7 +454,7 @@
       </ol>
 
       <ol data-flow="Marks reach the agent">
-        <li>queue-marks:3722-3729 -> send:1975 your marks wait as one board prompt until Send collects them</li>
+        <li>queue-marks:3733-3740 -> send:1975 your marks wait as one board prompt until Send collects them</li>
         <li>send:1979-1983 -> prompts-route:1168-1171 the batch is posted, and other origins are refused first</li>
         <li>prompts-route:1176 -> poll:1081 storing the batch wakes the agent's waiting poll</li>
         <li>poll:1081 -> store:678-693 the poll drains every pending prompt in one locked read</li>

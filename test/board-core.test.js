@@ -22,7 +22,14 @@ import {
   parseEndpoint,
   parseLinkToken,
   reconcileLevelElements,
+  canScrollBy,
+  freshSince,
+  knownAfter,
+  stepSignature,
   summarizeBoardMarks,
+  WHEEL,
+  wheelIntent,
+  zoomAround,
 } from "../src/board-core.js";
 
 const cli = { id: "cli", level: "", kind: "html", title: "CLI", x: 0, y: 0, w: 300, h: 200 };
@@ -405,4 +412,108 @@ test("codeLinesUnder maps wrapped rows back to their source line", () => {
       path: "src/a.js",
     },
   );
+});
+
+test("an arrow follows scrolled code and stops at the edge of the code when its line scrolls away", () => {
+  const source = { ...server, id: "src", x: 0 };
+  const target = { ...server, id: "dst", x: 700 };
+  const flows = [flow([["src:104", "dst:110"]])];
+  const elements = [source, target].map(createCardElement);
+  const row = (n) => codeBodyTop(server) + n * CODE_CARD_LAYOUT.line + CODE_CARD_LAYOUT.line / 2;
+  const scrolled = (scrollOf) => absolute(createLinkElements([source, target], elements, flows, { scrollOf })[0]);
+  assert.equal(scrolled(() => 0)[0][1], row(4));
+  assert.equal(scrolled((id) => (id === "src" ? 40 : 0))[0][1], row(4) - 40, "two rows up with the code");
+  assert.equal(
+    scrolled((id) => (id === "src" ? 400 : 0))[0][1],
+    codeBodyTop(server) + 10,
+    "pinned to the top of the code",
+  );
+  assert.equal(scrolled((id) => (id === "src" ? 400 : 0)).at(-1)[1], row(10), "the other end does not move");
+});
+
+test("a step the reviewer has not seen is drawn heavier, and keeps its identity across edits", () => {
+  const flows = [flow([["cli", "server"]])];
+  const [step] = flows[0].steps.map((item) => ({ ...item, flowName: "Request" }));
+  const signature = stepSignature(step);
+  assert.equal(signature, "Request|cli:>server:");
+  assert.equal(stepSignature({ ...step, from: end("cli:3-4") }), "Request|cli:3-4>server:");
+  const elements = [cli, server].map(createCardElement);
+  const [plain] = createLinkElements([cli, server], elements, flows);
+  const [heavy] = createLinkElements([cli, server], elements, flows, { emphasis: new Set([signature]) });
+  assert.ok(heavy.strokeWidth > plain.strokeWidth);
+});
+
+test("wheel intent: two-finger scroll pans, pinch and ctrl or cmd + wheel zoom, spikes are clamped", () => {
+  // macOS / Windows precision trackpad two-finger scroll: pixel deltas, no modifier.
+  assert.deepEqual(wheelIntent({ deltaX: 12, deltaY: -30, deltaMode: 0 }), { kind: "pan", dx: 12, dy: -30 });
+  // A momentum or wheel-delta spike never jumps the board.
+  assert.deepEqual(wheelIntent({ deltaX: 0, deltaY: 5000, deltaMode: 0 }), { kind: "pan", dx: 0, dy: WHEEL.maxPan });
+  // Firefox reports lines; a page delta is one page.
+  assert.deepEqual(wheelIntent({ deltaY: 3, deltaMode: 1 }), { kind: "pan", dx: 0, dy: 48 });
+  assert.deepEqual(wheelIntent({ deltaY: 1, deltaMode: 2 }, { pageHeight: 300 }), { kind: "pan", dx: 0, dy: 300 });
+  // Shift turns a mouse wheel sideways; a trackpad's own sideways delta is kept.
+  assert.deepEqual(wheelIntent({ deltaY: 100, shiftKey: true }), { kind: "pan", dx: 100, dy: 0 });
+  assert.deepEqual(wheelIntent({ deltaX: 20, deltaY: 4, shiftKey: true }), { kind: "pan", dx: 20, dy: 4 });
+  // Pinch arrives as ctrl + wheel in Chrome, Edge and Firefox on macOS and Windows.
+  const pinchIn = wheelIntent({ deltaY: -4, ctrlKey: true });
+  assert.equal(pinchIn.kind, "zoom");
+  assert.ok(pinchIn.kind === "zoom" && pinchIn.factor > 1 && pinchIn.factor < 1.05, "a small pinch is a small zoom");
+  const cmd = wheelIntent({ deltaY: 4, metaKey: true });
+  assert.ok(cmd.kind === "zoom" && cmd.factor < 1);
+  // A mouse notch with ctrl (deltaY 100) and a spike zoom the same bounded step.
+  const notch = wheelIntent({ deltaY: 100, ctrlKey: true });
+  const spike = wheelIntent({ deltaY: 4000, ctrlKey: true });
+  assert.ok(notch.kind === "zoom" && spike.kind === "zoom");
+  assert.equal(notch.factor, spike.factor);
+  assert.ok(notch.factor > 0.75, "one step never more than a quarter");
+  // Zoom steps are proportional: the same pinch is the same feel at 20% and 200%.
+  const at = (zoom) => zoomAround({ zoom, scrollX: 0, scrollY: 0 }, pinchIn.factor, { x: 0, y: 0 }).zoom / zoom;
+  assert.ok(Math.abs(at(0.2) - at(2)) < 1e-9);
+  // Garbage deltas do nothing.
+  assert.deepEqual(wheelIntent({ deltaX: Number.NaN, deltaY: undefined }), { kind: "pan", dx: 0, dy: 0 });
+});
+
+test("zoomAround keeps the scene point under the pointer still and stays within the zoom limits", () => {
+  const view = { zoom: 0.5, scrollX: -100, scrollY: 40 };
+  const point = { x: 300, y: 200 };
+  const scene = (v) => [point.x / v.zoom - v.scrollX, point.y / v.zoom - v.scrollY];
+  const next = zoomAround(view, 1.6, point);
+  assert.equal(next.zoom, 0.8);
+  assert.deepEqual(scene(next).map(Math.round), scene(view).map(Math.round));
+  assert.equal(zoomAround(view, 0.0001, point).zoom, WHEEL.minZoom);
+  assert.equal(zoomAround(view, 1e6, point).zoom, WHEEL.maxZoom);
+});
+
+test("canScrollBy lets code scroll only while it has room in that direction", () => {
+  const box = { scrollTop: 0, scrollLeft: 0, scrollHeight: 600, scrollWidth: 300, clientHeight: 200, clientWidth: 300 };
+  assert.equal(canScrollBy(box, 0, 30), true, "down: room below");
+  assert.equal(canScrollBy(box, 0, -30), false, "up: already at the top, so the board pans");
+  assert.equal(canScrollBy({ ...box, scrollTop: 400 }, 0, 30), false, "down: at the bottom");
+  assert.equal(canScrollBy(box, 30, 2), false, "sideways: nothing to scroll");
+  const fits = { ...box, scrollHeight: 200 };
+  assert.equal(canScrollBy(fits, 0, 30), false, "a card sized to its lines never scrolls");
+});
+
+test("freshSince finds the cards and steps the agent added since the reviewer last looked", () => {
+  const before = { cards: [cli, server], flows: [flow([["cli", "server"]])] };
+  const after = {
+    cards: [cli, server, { ...cli, id: "restore" }],
+    flows: [
+      flow([
+        ["cli", "server"],
+        ["server", "restore"],
+      ]),
+    ],
+  };
+  // A first open, or a scene saved before this existed, has nothing new.
+  assert.deepEqual(freshSince(after, undefined), { cards: new Set(), steps: new Set() });
+  const known = knownAfter(before, freshSince(before, undefined));
+  const fresh = freshSince(after, known);
+  assert.deepEqual([...fresh.cards], ["restore"]);
+  assert.deepEqual([...fresh.steps], ["Request|server:>restore:"]);
+  // Until the reviewer acknowledges it, it is saved as not known, so it is new again after a reload.
+  assert.deepEqual(freshSince(after, knownAfter(after, fresh)), fresh);
+  // Acknowledged: nothing is new.
+  const seen = knownAfter(after, { cards: new Set(), steps: new Set() });
+  assert.deepEqual(freshSince(after, seen), { cards: new Set(), steps: new Set() });
 });

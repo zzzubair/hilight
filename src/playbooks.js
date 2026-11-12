@@ -418,6 +418,7 @@ export const PLAYBOOKS = [
     checking: [
       "`hilight board check <file>` lists every problem as one sentence that says what to fix: an unknown card, lines outside a card's range, a malformed step. It also shows code cards that went stale.",
       "`hilight board stamp <file>` pins each code card so it turns Stale when its lines change. After editing code cards, run it again; add `--repin` for cards whose code you changed on purpose, after updating what they say.",
+      'Answering a thread by changing the board: edit the same file in place. Hilight marks the cards and steps you add as New and takes the reviewer to them. Also put `data-lavish-revision="r2"` on each added card, list `r2` in the page\'s revisions registry (`hilight design`), and answer `## c1 reveal=r2` so the thread offers Reveal change.',
     ],
     pitfalls: [
       "Do not paste code into a text card when it lives in the repository; use a code card.",

@@ -72,6 +72,7 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] {
 
 .bd-crumbs {
   display: flex;
+  flex: 0 0.4 auto;
   align-items: center;
   gap: 2px;
   min-width: 0;
@@ -147,7 +148,9 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] {
 }
 
 .bd-note {
-  width: min(320px, 32vw);
+  flex: 0 1 300px;
+  width: 300px;
+  min-width: 110px;
   height: 30px;
   box-sizing: border-box;
   border: 1px solid var(--bd-line);
@@ -164,6 +167,8 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] {
 }
 
 .bd-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
   height: 30px;
   border: 1px solid var(--bd-line);
   border-radius: 8px;
@@ -198,6 +203,11 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  /* Cards are positioned DOM, not canvas pixels: clip them to the canvas and
+     keep their stacking inside it, so a card above the top edge (or one the
+     reviewer is using) never draws over the bar, summary or banner. */
+  overflow: hidden;
+  isolation: isolate;
   background-color: var(--bd-table);
   background-image: radial-gradient(var(--bd-dots) 1px, transparent 1px);
   background-size: 22px 22px;
@@ -705,4 +715,107 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] .bd-src .tn {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--bd-line);
   box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.25);
+}
+
+/* No browser back or forward swipe and no scroll chaining from the canvas: a
+   sideways two-finger scroll pans the board and stops there. */
+html:has(body[data-hilight-board]),
+body[data-hilight-board] {
+  overscroll-behavior: none;
+}
+
+/* Zoom and undo moved into the bar, so Excalidraw's own corner controls and
+   help button never sit on top of code. Its buttons stay in the page for the
+   bar to press. */
+body[data-hilight-board] .layer-ui__wrapper__footer-left,
+body[data-hilight-board] .layer-ui__wrapper__footer-right,
+body[data-hilight-board] .help-icon {
+  display: none !important;
+}
+
+.bd-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+}
+
+.bd-button.bd-zoom {
+  min-width: 52px;
+  padding: 0 6px;
+  font: 600 12.5px/1 var(--bd-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--bd-ink-2);
+}
+
+.bd-button.bd-icon:hover,
+.bd-button.bd-zoom:hover {
+  color: var(--bd-ink);
+  border-color: var(--bd-line-strong);
+}
+
+/* Code a reviewer shrinks its card over scrolls; a card sized to its lines
+   never does. */
+.bd-code {
+  overflow: auto;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+
+/* Cards the agent added since the reviewer last looked. */
+.bd-card.is-new {
+  border-color: var(--bd-accent);
+  box-shadow:
+    inset 0 0 0 2px var(--bd-accent),
+    0 0 0 6px color-mix(in srgb, var(--bd-accent) 22%, transparent),
+    0 10px 30px -18px rgba(28, 28, 26, 0.35);
+}
+
+.bd-new-pill {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bd-accent);
+  color: #fff;
+  font: 700 11.5px/16px var(--bd-font);
+  letter-spacing: 0.01em;
+}
+
+.bd-reveal {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 8px 16px;
+  background: color-mix(in srgb, var(--bd-accent) 10%, var(--bd-card));
+  border-bottom: 1px solid color-mix(in srgb, var(--bd-accent) 35%, var(--bd-line));
+  position: relative;
+  z-index: 4;
+}
+
+.bd-reveal[hidden] {
+  display: none;
+}
+
+.bd-reveal-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font: 14px/1.4 var(--bd-font);
+  color: var(--bd-ink);
+}
+
+.bd-reveal-text strong {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bd-accent);
+  color: #fff;
+  font: 700 11.5px/18px var(--bd-font);
+}
+
+.bd-reveal .bd-button[hidden] {
+  display: none;
 }
