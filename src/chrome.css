@@ -1219,6 +1219,20 @@ body {
 .ended-action {
   margin-top: var(--space-8);
 }
+/* A normal load is revealed within CHROME_LAYOUT_GATE_CHECK_MS, so the checking gate shows only
+   the empty frame: no scrim and no card unless the wait outlasts that hold. */
+.layout-gate-overlay[data-state="checking"] {
+  background: transparent;
+}
+.layout-gate-overlay[data-state="checking"] .ended-card {
+  visibility: hidden;
+  animation: layout-gate-card-late 0s linear 1.5s forwards;
+}
+@keyframes layout-gate-card-late {
+  to {
+    visibility: visible;
+  }
+}
 .layout-gate-bypass {
   margin-left: var(--space-4);
 }
@@ -1230,8 +1244,10 @@ iframe {
   opacity: 1;
   transition: opacity var(--dur-fast) var(--ease);
 }
+/* Not 0: Chromium throttles a cross-origin frame at opacity 0 to about one animation frame a
+   second, which stretched the layout pass behind the gate to several seconds. */
 body.layout-gate-active iframe#artifact {
-  opacity: 0;
+  opacity: 0.001;
 }
 /* Narrow chrome: the drawer stops hanging off the button and spans the viewport instead, so the
    list never overflows horizontally on a phone-width window. */

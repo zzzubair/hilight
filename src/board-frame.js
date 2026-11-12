@@ -178,6 +178,7 @@ export function startBoard(init, { post }) {
     revealFrom: /** @type {null | { level: string, zoom: number, scrollX: number, scrollY: number }} */ (null),
     // The last view Hilight chose (Fit or the opening view), so a resize can redo it.
     autoView: /** @type {null | { kind: "fit" | "opening", zoom: number, scrollX: number, scrollY: number }} */ (null),
+    lastSetView: /** @type {null | { zoom: number, scrollX: number, scrollY: number }} */ (null),
     lastSize: { width: 0, height: 0 },
     // The chrome has shown the page, and where the automatic move to new cards is.
     shown: false,
@@ -623,6 +624,12 @@ export function startBoard(init, { post }) {
       .map((element) => JSON.parse(JSON.stringify(element)))
       .map((element) => (isCardElement(element) ? { ...element, link: cardLink(element) } : element));
     s.elementsByLevel.set(s.level, tagLevel(current, s.level));
+    // The opening view is not saved: it depends on the window, so the next load works it out
+    // again for whatever size that window is. A view the reviewer chose (or Fit) is kept.
+    if (s.autoView?.kind === "opening" && onAutoView()) {
+      s.viewByLevel.delete(s.level);
+      return;
+    }
     const appState = s.api.getAppState();
     s.viewByLevel.set(s.level, { scrollX: appState.scrollX, scrollY: appState.scrollY, zoom: appState.zoom });
   }
@@ -894,6 +901,9 @@ export function startBoard(init, { post }) {
   // The smallest zoom where card text stays readable (13px body text renders at
   // about 12px), used for the first view of a level.
   const READABLE_ZOOM = 0.93;
+  // Below this canvas size (a half-screen laptop, a preview pane) the opening view goes straight to
+  // where to start at a readable zoom instead of trying to show a whole row.
+  const SMALL_CANVAS = { width: 900, height: 620 };
   const VIEW_MARGIN = 20;
 
   // Excalidraw's floating controls (tools, menu, library, zoom and undo, help),
@@ -906,6 +916,8 @@ export function startBoard(init, { post }) {
     let top = 64;
     let bottom = 8;
     for (const node of editor.querySelectorAll(TOP_CONTROLS)) {
+      // The small-screen side column (library, lock, hand) runs down the right edge, not across.
+      if (node.closest(".mobile-misc-tools-container")) continue;
       const rect = node.getBoundingClientRect();
       if (rect.height && rect.top < box.top + box.height / 2) top = Math.max(top, rect.bottom - box.top);
     }
@@ -935,6 +947,7 @@ export function startBoard(init, { post }) {
   }
 
   function setView(zoom, scrollX, scrollY) {
+    s.lastSetView = { zoom, scrollX, scrollY };
     s.api.updateScene({
       appState: { zoom: { value: zoom }, scrollX, scrollY },
       captureUpdate: CaptureUpdateAction.NEVER,
@@ -947,8 +960,10 @@ export function startBoard(init, { post }) {
     return { zoom: appState.zoom.value, scrollX: appState.scrollX, scrollY: appState.scrollY };
   }
 
+  // Records the view setView just asked for: Excalidraw's appState still holds the previous view
+  // until React commits the update, so reading it back here would remember the wrong one.
   function rememberAutoView(kind) {
-    s.autoView = { kind, ...currentView() };
+    s.autoView = { kind, ...(s.lastSetView || currentView()) };
   }
 
   // Whether the reviewer is still looking at the view Hilight picked.
@@ -1022,11 +1037,52 @@ export function startBoard(init, { post }) {
   // The first view of a level is one a person can read: the whole level when it
   // fits at a readable zoom, otherwise its top row of cards at a readable zoom,
   // starting from the left. Fit still shows everything.
+  // Where a reviewer should start on this level: the first card of its first flow, else the
+  // top-left card (the intro, in the usual layout).
+  function startCard(cards) {
+    const ids = new Set(cards.map((card) => card.id));
+    for (const flow of (s.model.flows || []).filter((item) => item.level === s.level)) {
+      const first = flowSteps([flow])[0];
+      if (first && ids.has(cardElementId(first.from.card)))
+        return cards.find((card) => card.id === cardElementId(first.from.card));
+    }
+    return [...cards].sort((a, b) => a.y - b.y || a.x - b.x)[0];
+  }
+
+  function startView(cards, insets) {
+    const view = cardView(startCard(cards), insets);
+    setView(view.zoom, view.scrollX, view.scrollY);
+  }
+
+  // One card at a readable zoom: centred when it fits, otherwise its top-left corner in view so its
+  // title and first lines can be read.
+  function cardView(card, insets) {
+    const { width, height } = canvasSize();
+    const room = width - insets.left - insets.right;
+    const zoom = Math.min(READABLE_ZOOM, Math.max(0.6, room / card.width));
+    const scrollX =
+      card.width * zoom <= room
+        ? (insets.left + room / 2) / zoom - (card.x + card.width / 2)
+        : insets.left / zoom - card.x;
+    const roomY = height - insets.top - insets.bottom;
+    const scrollY =
+      card.height * zoom <= roomY
+        ? (insets.top + roomY / 2) / zoom - (card.y + card.height / 2)
+        : insets.top / zoom - card.y;
+    return { zoom, scrollX, scrollY };
+  }
+
   function openingView() {
     if (!s.api) return;
     const elements = s.api.getSceneElements();
     const cards = elements.filter(isCardElement);
     const insets = controlInsets();
+    const size = canvasSize();
+    if (cards.length && (size.width < SMALL_CANVAS.width || size.height < SMALL_CANVAS.height)) {
+      startView(cards, insets);
+      rememberAutoView("opening");
+      return;
+    }
     if (!cards.length || fitZoom(getCommonBounds(elements), insets) >= READABLE_ZOOM) {
       fitAll();
       rememberAutoView("opening");
@@ -1136,10 +1192,12 @@ export function startBoard(init, { post }) {
     const centreX = insets.left + (width - insets.left - insets.right) / 2;
     const centreY = insets.top + (height - insets.top - insets.bottom) / 2;
     renderReveal("shown");
-    await animateView(
-      { zoom, scrollX: centreX / zoom - (minX + maxX) / 2, scrollY: centreY / zoom - (minY + maxY) / 2 },
-      duration,
-    );
+    // Still unreadable (a small window, a tall card): go to the first new card at a readable zoom.
+    const target =
+      zoom < 0.5
+        ? cardView(focus.fresh[0], insets)
+        : { zoom, scrollX: centreX / zoom - (minX + maxX) / 2, scrollY: centreY / zoom - (minY + maxY) / 2 };
+    await animateView(target, duration);
   }
 
   async function backToWhereIWas() {

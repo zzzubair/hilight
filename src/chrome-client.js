@@ -241,6 +241,12 @@ const layoutGateMaxHoldMs =
   Number.isFinite(configuredLayoutGateMaxHoldMs) && configuredLayoutGateMaxHoldMs > 0
     ? Math.min(configuredLayoutGateMaxHoldMs, 60_000)
     : 12_000;
+// The plain checking gate gets a much shorter hold than a failure card (CHROME_LAYOUT_GATE_CHECK_MS).
+const configuredLayoutGateCheckMs = Number(sessionData.layoutGateCheckMs);
+const layoutGateCheckMs =
+  Number.isFinite(configuredLayoutGateCheckMs) && configuredLayoutGateCheckMs > 0
+    ? Math.min(configuredLayoutGateCheckMs, layoutGateMaxHoldMs)
+    : layoutGateMaxHoldMs;
 let chromeOutdatedReason = "";
 let chromeOutdatedGeneration = 0;
 let outdatedReloadInFlight = false;
@@ -1159,8 +1165,11 @@ function readSheetOpen() {
   }
 }
 
+// A board keeps the desktop layout at every width (see isBoardPage in src/server.js).
+const boardPage = sessionData.boardPage === true;
+
 function isMobileSheet() {
-  return Boolean(sheetMedia && sheetMedia.matches);
+  return !boardPage && Boolean(sheetMedia && sheetMedia.matches);
 }
 
 function setSheetOpen(open) {
@@ -2123,6 +2132,7 @@ function clearLayoutGateTimer() {
 }
 
 function setLayoutGateCard(state) {
+  if (layoutGateOverlay) layoutGateOverlay.dataset.state = state;
   if (!layoutGateTitle || !layoutGateCopy) return;
 
   if (state === "held") {
@@ -2156,6 +2166,7 @@ function setLayoutGateFailure(title, copy, actionLabel = "Reload", onAction, { s
   if (layoutGateFailureActive && layoutGateFailureSticky && !sticky) return;
   layoutGateFailureActive = true;
   layoutGateFailureSticky = sticky;
+  if (layoutGateOverlay) layoutGateOverlay.dataset.state = "failure";
   layoutGateCycle += 1;
   // Failure copy must not disable the visual gate's own recovery paths. Keep a fresh hold timer
   // over the card so a server replacement or any other failure cannot strand the artifact behind
@@ -2256,17 +2267,17 @@ function forceRevealLayoutGate(reason) {
   revealLayoutGate();
 }
 
-function armLayoutGateTimer() {
+function armLayoutGateTimer(holdMs = layoutGateMaxHoldMs) {
   clearLayoutGateTimer();
   if (layoutGateEscape?.arm) {
-    layoutGateEscape.arm(layoutGateMaxHoldMs, () => forceRevealLayoutGate("timeout"));
+    layoutGateEscape.arm(holdMs, () => forceRevealLayoutGate("timeout"));
     return;
   }
   const cycle = layoutGateCycle;
   layoutGateTimer = setTimeout(() => {
     if (cycle !== layoutGateCycle || !layoutGateVisible || ended) return;
     forceRevealLayoutGate("timeout");
-  }, layoutGateMaxHoldMs);
+  }, holdMs);
   layoutGateTimer?.unref?.();
 }
 
@@ -2279,7 +2290,7 @@ function startLayoutGateCycle() {
   // A sticky failure owns the card copy, but never the reveal. Do not repaint it as a checking
   // card, and do arm a fresh timer for reloads that happen while the sticky card is present.
   if (!layoutGateFailureSticky) setLayoutGateCard("checking");
-  armLayoutGateTimer();
+  armLayoutGateTimer(layoutGateFailureSticky ? layoutGateMaxHoldMs : layoutGateCheckMs);
 }
 
 // The gate only waits for fonts and final geometry now. It never holds the artifact hostage
@@ -4359,10 +4370,18 @@ function toggleAnnotationMode() {
 
 annotationSwitch.onclick = toggleAnnotationMode;
 if (commentsToggle) commentsToggle.onclick = () => setCommentsCollapsed(!commentsCollapsed());
-try {
-  if (localStorage.getItem(commentsCollapsedKey) === "1" && !isMobileSheet()) setCommentsCollapsed(true);
-} catch {
-  // Without storage the margin starts open.
+// A board in a narrow window (a half-screen laptop, a preview pane) starts with the margin folded
+// so the canvas gets the width, unless the reviewer chose otherwise for this session.
+const BOARD_FOLD_COMMENTS_BELOW_PX = 1000;
+{
+  let stored = null;
+  try {
+    stored = localStorage.getItem(commentsCollapsedKey);
+  } catch {
+    // Without storage the margin starts by the window rule alone.
+  }
+  const narrowBoard = boardPage && window.innerWidth < BOARD_FOLD_COMMENTS_BELOW_PX;
+  if (!isMobileSheet() && (stored === "1" || (stored === null && narrowBoard))) setCommentsCollapsed(true, false);
 }
 
 sendButton.onclick = () => sendQueued(false);
@@ -4730,7 +4749,7 @@ function commentsCollapsed() {
 }
 
 /** @param {boolean} collapsed */
-function setCommentsCollapsed(collapsed) {
+function setCommentsCollapsed(collapsed, remember = true) {
   document.body.classList.toggle("comments-collapsed", collapsed);
   const comments = document.getElementById("comments");
   if (comments) comments.inert = collapsed && !isMobileSheet();
@@ -4741,8 +4760,8 @@ function setCommentsCollapsed(collapsed) {
     commentsToggle.title = label;
   }
   try {
-    if (collapsed) localStorage.setItem(commentsCollapsedKey, "1");
-    else localStorage.removeItem(commentsCollapsedKey);
+    // "0" records an explicit open, so a narrow board window does not fold it again.
+    if (remember) localStorage.setItem(commentsCollapsedKey, collapsed ? "1" : "0");
   } catch {
     // The choice still applies to this page without storage.
   }

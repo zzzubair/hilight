@@ -819,3 +819,54 @@ body[data-hilight-board] .help-icon {
 .bd-reveal .bd-button[hidden] {
   display: none;
 }
+
+/* Small windows (a half-screen laptop, a preview pane). The canvas keeps working at any size:
+   the bar sheds the optional note and lets the health chip shorten, the summary strip drops to one
+   line when height is short, and Excalidraw's small-screen bottom bar (menu, undo, redo) is hidden
+   because the board bar already has undo and redo and the bottom bar sat over the cards. */
+.excalidraw .App-bottom-bar {
+  display: none !important;
+}
+
+.bd-health {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 860px) {
+  .bd-bar {
+    gap: 6px;
+    padding: 0 8px 0 10px;
+  }
+  .bd-note {
+    display: none;
+  }
+  .bd-health {
+    margin-left: 0;
+  }
+}
+
+@media (max-height: 560px) {
+  .bd-lede {
+    padding: 5px 12px;
+    gap: 12px;
+  }
+  .bd-lede-text {
+    -webkit-line-clamp: 1;
+  }
+  .bd-legend {
+    flex: 0 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow: hidden;
+  }
+}
+
+/* Excalidraw's small-screen side tools sit on the right edge, where the review page keeps the
+   folded comments tab. */
+.excalidraw .mobile-misc-tools-container {
+  margin-right: 30px;
+}

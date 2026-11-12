@@ -19,7 +19,7 @@ const servedChromeIds = new Set(
 
 const SERVED_TAB_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>";
 
-/** @typedef {{ key: string, file: string, layoutGateEnabled?: boolean, layoutGateMaxHoldMs?: number, modeToggleHotkeyKey?: string, initialChat?: any[], initialChatAckIds?: string[], initialChatRevision?: number, initialLayoutWarnings?: any[], chromeLoadToken?: string, initialArtifactRevision?: number, initialArtifactLoadToken?: string, initialArtifactLoadSequence?: number, attachmentMaxBytes?: number, attachmentMaxCount?: number, attachmentAcceptedMime?: string[], initialEnded?: boolean, initialEndedBy?: string | null, revisionPalette?: { hex: string, borderStyle: string, pattern: string }[] }} HarnessSessionData */
+/** @typedef {{ key: string, file: string, layoutGateEnabled?: boolean, layoutGateMaxHoldMs?: number, layoutGateCheckMs?: number, boardPage?: boolean, modeToggleHotkeyKey?: string, initialChat?: any[], initialChatAckIds?: string[], initialChatRevision?: number, initialLayoutWarnings?: any[], chromeLoadToken?: string, initialArtifactRevision?: number, initialArtifactLoadToken?: string, initialArtifactLoadSequence?: number, attachmentMaxBytes?: number, attachmentMaxCount?: number, attachmentAcceptedMime?: string[], initialEnded?: boolean, initialEndedBy?: string | null, revisionPalette?: { hex: string, borderStyle: string, pattern: string }[] }} HarnessSessionData */
 /** @type {HarnessSessionData} */
 const defaultSessionData = {
   key: "abc",
@@ -4222,6 +4222,19 @@ test("layout gate timeout fails open when no result arrives", async () => {
   });
 
   chrome.runTimers(25);
+
+  assert.equal(chrome.element("layoutGateOverlay").hidden, true);
+  assert.equal(chrome.element("body").classList.contains("layout-gate-active"), false);
+});
+
+test("the checking gate releases on its short hold, well before the failure-card hold", async () => {
+  const chrome = await createChromeHarness({
+    sessionData: { key: "abc", file: "/tmp/artifact.html", layoutGateCheckMs: 20, layoutGateMaxHoldMs: 500 },
+  });
+
+  chrome.eventSource().listeners.get("reload")();
+  assert.equal(chrome.element("layoutGateOverlay").hidden, false);
+  chrome.runTimers(20);
 
   assert.equal(chrome.element("layoutGateOverlay").hidden, true);
   assert.equal(chrome.element("body").classList.contains("layout-gate-active"), false);
@@ -9417,4 +9430,13 @@ test("thread anchor messages never expose reviewer writing to the artifact", asy
   assert.notEqual(message.anchors[0].id, "forged-thread");
   assert.ok(!JSON.stringify(message).includes("Private reviewer question"));
   assert.equal(chrome.queued()[0].thread_id, undefined, "the iframe cannot route a note into another thread");
+});
+
+test("a board page never docks its comments into the phone sheet", async () => {
+  const phone = await createChromeHarness({ mobile: true });
+  assert.equal(phone.element("commentsBody").inert, true, "an ordinary page docks the sheet at phone width");
+
+  const board = await createChromeHarness({ mobile: true, sessionData: { ...defaultSessionData, boardPage: true } });
+  assert.equal(board.element("commentsBody").inert, false);
+  assert.equal(board.element("commentsFoot").inert, false);
 });

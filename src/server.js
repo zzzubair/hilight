@@ -39,7 +39,7 @@ import {
 import * as artifactRevisions from "./artifact-revisions.js";
 import * as mermaidNode from "./mermaid-node.js";
 import * as tableCellHelpers from "./table-cell.js";
-import { readBoard } from "./board-source.js";
+import { BOARD_ATTRIBUTE, readBoard } from "./board-source.js";
 import { extractMermaidSources, whiteboardSourceHash } from "./mermaid-source.js";
 import { createExcalidrawLibraryCache, excalidrawLibrariesDir } from "./whiteboard-library-store.js";
 import { parseLibraryIconDirectives } from "./whiteboard-libraries.js";
@@ -1534,6 +1534,7 @@ export async function serve({
       await watchSession(session, watchers, events, logEvent, reloadDebounceMs);
       const artifactHtml = await readFile(session.file, "utf8").catch(() => "");
       const { faviconTag, title } = extractArtifactHead(artifactHtml);
+      const boardPage = isBoardPage(artifactHtml);
       // Nothing legitimately frames the review chrome - it is the top-level
       // page, and shares/exports ship standalone HTML rather than embedding it.
       // Refusing to be framed denies an attacker page both a window handle to
@@ -1546,6 +1547,7 @@ export async function serve({
       res.type("html").send(
         createChromeHtml(session, {
           layoutGateEnabled: shouldEnableLayoutGate(req.query || {}),
+          boardPage,
           faviconTag,
           title: title ? `${title} · Hilight` : "Hilight",
           artifactRevision: chromeLoad.artifact_revision,
@@ -1688,7 +1690,8 @@ export async function serve({
 
   app.get("/chrome.css", async (req, res, next) => {
     try {
-      res.type("text/css").send(await readFile(chromeCssUrl, "utf8"));
+      const css = await readFile(chromeCssUrl, "utf8");
+      res.type("text/css").send(req.query.layout === "desktop" ? desktopOnlyChromeCss(css) : css);
     } catch (error) {
       next(error);
     }
@@ -3104,6 +3107,10 @@ export function extractArtifactHead(html) {
 // gate escape for every later overlay state.
 export const CHROME_BOOT_FAILSAFE_MS = 15000;
 export const CHROME_LAYOUT_GATE_MAX_HOLD_MS = 12000;
+// How long the plain "Checking layout" gate may hold a load. A failure card keeps the longer hold
+// above; an ordinary load is revealed by this point whether or not the layout pass has finished,
+// so nobody waits on the gate for more than a moment.
+export const CHROME_LAYOUT_GATE_CHECK_MS = 1500;
 // The failsafe's button is the only control on a page whose client script is dead, so its own
 // probe is bounded too: a port that accepts and never answers must not disable it for good.
 const CHROME_BOOT_FAILSAFE_PROBE_TIMEOUT_MS = 4000;
@@ -3120,7 +3127,7 @@ window.__lavishLayoutGateEscape={arm:armGate,cancel:cancelGate,reveal:reveal,man
 a=document.getElementById("layoutGateAction");
 if(ended){reveal();b=document.getElementById("endedOverlay");if(b)b.hidden=false;}
 if(a&&!ended)a.onclick=manualReveal;
-if(o&&!o.hidden&&!ended)armGate(${CHROME_LAYOUT_GATE_MAX_HOLD_MS});
+if(o&&!o.hidden&&!ended)armGate(${CHROME_LAYOUT_GATE_CHECK_MS});
 window.__lavishCancelChromeBootFailsafe=function(){clearTimeout(t);};
 window.__lavishChromeBootFailed=function(){clearTimeout(t);fail();};
 function fail(){
@@ -3131,6 +3138,7 @@ a=document.getElementById("layoutGateAction");
 if(h)h.textContent="Hilight could not finish loading.";
 if(c)c.textContent="The Hilight editor script did not load. The server usually restarted while this page was opening. Check and reload to reconnect.";
 if(a){a.textContent="Check and reload";a.disabled=false;a.onclick=check;}
+if(o)o.dataset.state="failure";
 showBypass();
 if(o)o.hidden=false;
 if(document.body)document.body.classList.add("layout-gate-active");
@@ -3149,10 +3157,24 @@ if(c)c.textContent=outcome==="no-answer"?"Hilight did not answer the check, so t
 }
 })();`;
 
+// A board is a canvas at every window size: its chrome never switches to the phone layout (the
+// bottom comments sheet), which left a narrow window with an empty canvas area. The page asks for
+// a desktop-only stylesheet, and the client's phone controller stays off (`boardPage`).
+export function isBoardPage(html) {
+  return new RegExp(`<[a-zA-Z][^>]*\\s${BOARD_ATTRIBUTE}(?=[\\s=/>])`).test(String(html || ""));
+}
+
+// chrome.css with its phone breakpoint switched off: phone-only blocks never match and
+// desktop-only blocks always do.
+export function desktopOnlyChromeCss(css) {
+  return css.replaceAll("(max-width: 860px)", "(max-width: 0px)").replaceAll("(min-width: 861px)", "(min-width: 0px)");
+}
+
 export function createChromeHtml(
   session,
   {
     layoutGateEnabled = true,
+    boardPage = false,
     faviconTag = HILIGHT_DEFAULT_FAVICON,
     title = "Hilight",
     artifactRevision = 0,
@@ -3186,6 +3208,8 @@ export function createChromeHtml(
     initialArtifactLoadSequence: artifactLoadSequence,
     chromeLoadToken,
     layoutGateEnabled,
+    layoutGateCheckMs: CHROME_LAYOUT_GATE_CHECK_MS,
+    boardPage,
     modeToggleHotkeyKey: MODE_TOGGLE_HOTKEY_KEY,
     attachmentMaxBytes,
     attachmentMaxCount,
@@ -3197,7 +3221,7 @@ export function createChromeHtml(
     revisionPalette: artifactRevisions.revisionPalette(),
   });
   const { head: pathHead, tail: pathTail } = displayPathParts(session.file);
-  const bodyClass = layoutGateEnabled ? "lavish layout-gate-active" : "lavish";
+  const bodyClass = (layoutGateEnabled ? "lavish layout-gate-active" : "lavish") + (boardPage ? " board-page" : "");
   const layoutGateHidden = layoutGateEnabled ? "" : " hidden";
   const modeHotkeyUpper = MODE_TOGGLE_HOTKEY_KEY.toUpperCase();
   const modeToggleHint = `Toggle annotate/explore mode (⌘${modeHotkeyUpper} / Ctrl+${modeHotkeyUpper})`;
@@ -3208,14 +3232,14 @@ export function createChromeHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>${escapeHtml(title)}</title>
 ${faviconTag}
-<link rel="stylesheet" href="/chrome.css">
+<link rel="stylesheet" href="/chrome.css${boardPage ? "?layout=desktop" : ""}">
 </head>
 <body class="${bodyClass}">
 <div class="bar"><div class="brand"><span class="brand-mark">${HILIGHT_BRAND_MARK}</span><span class="brand-file" title="${escapeHtml(session.file)}">${escapeHtml(pathTail)}</span></div><div class="spacer" aria-hidden="true"></div><span class="agent-status" id="agentStatus" role="status" aria-live="polite" data-state="waiting" title="No agent is polling this review. Ask your agent to run hilight poll.">Not listening</span><div class="warnings-wrap" id="warningsWrap" hidden><button class="warnings-button" id="warningsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="warningsDrawer">${chromeIcons.warning}<span class="warnings-count" id="warningsCount">0</span></button><div class="menu warnings-drawer" id="warningsDrawer" role="dialog" aria-labelledby="warningsTitle" aria-describedby="warningsSummary" hidden><div class="warnings-head"><h2 class="warnings-title" id="warningsTitle">Layout issues</h2><p class="warnings-summary" id="warningsSummary"></p></div><div class="warnings-toolbar"><label class="warnings-selectall"><input type="checkbox" id="warningsSelectAll"><span>Select all</span></label><span class="warnings-selected" id="warningsSelected" role="status" aria-live="polite"></span></div><div class="warnings-list" id="warningsList"></div><div class="warnings-foot"><p class="warnings-note">Queueing adds a repair request to your unsent comments. An issue is marked resolved only after a newer artifact load and a complete check at the same viewport no longer finds it.</p><button class="button" id="warningsQueueButton" type="button" disabled>Queue selected fixes</button></div></div></div><div class="resolved-wrap" id="resolvedWrap" hidden><button class="resolved-button" id="resolvedButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="resolvedDrawer"><span id="resolvedCount">0 resolved</span></button><div class="menu resolved-drawer" id="resolvedDrawer" role="dialog" aria-labelledby="resolvedTitle" hidden><div class="resolved-head"><h2 class="resolved-title" id="resolvedTitle">Resolved and off-page comments</h2></div><div class="resolved-list" id="resolvedList"></div></div></div><button class="annotate-switch" id="annotation" type="button" aria-pressed="true" title="${escapeHtml(modeToggleHint)}"><span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span><span>Annotate</span></button><div class="more-wrap" id="moreWrap"><button class="more-button" id="moreButton" type="button" title="More" aria-haspopup="menu" aria-expanded="false">${chromeIcons.more}</button><div class="menu more-menu" id="moreMenu" hidden><div class="menu-head"><div class="menu-label">Editing</div><button class="menu-file" id="copyPath" type="button" title="Copy path · ${escapeHtml(session.file)}">${chromeIcons.file}<span class="menu-file-text"><span class="path-head">${escapeHtml(pathHead)}</span><span class="path-tail">${escapeHtml(pathTail)}</span></span><span class="copy-hint" id="copyHint"><span class="icon-copy">${chromeIcons.copy}</span><span class="icon-check">${chromeIcons.check}</span><span id="copyHintText">Copy</span></span></button></div><div class="menu-rule"></div><button class="menu-item" id="attachImages" type="button">${chromeIcons.image}<span>Attach images to a page comment</span></button><button class="menu-item" id="reloadArtifact" type="button">${chromeIcons.refresh}<span>Reload artifact</span></button><button class="menu-item" id="copySnapshot" type="button">${chromeIcons.camera}<span>Copy DOM snapshot</span></button><button class="menu-item" id="exportArtifact" type="button">${chromeIcons.download}<span>Export standalone HTML</span></button><button class="menu-item" id="shareArtifact" type="button">${chromeIcons.globe}<span>Publish link</span></button><div class="menu-rule"></div><button class="menu-item" id="sendAndEnd" type="button">${chromeIcons.exit}<span>Send all and end session</span></button><button class="menu-item danger" id="end" type="button">${chromeIcons.exit}<span>End session</span></button></div></div></div>
 <div class="notices"><div class="notice" id="handoffBanner" hidden><span>This review is open in another Hilight tab. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</span><button class="notice-action" id="handoffTakeover" type="button">Take over here</button></div><div class="notice" id="outdatedBanner" hidden><span id="outdatedText">The Hilight server this page was connected to is no longer running. Reloading will work once it is running again.</span><span class="notice-actions"><button class="notice-action" id="outdatedReload" type="button">Check and reload</button><button class="notice-action" id="outdatedDismiss" type="button">Dismiss</button></span></div></div>
 <div class="layout"><button class="comments-toggle" id="commentsToggle" type="button" aria-controls="comments" aria-expanded="true" aria-label="Hide comments" title="Hide comments">${chromeIcons.chevron}<span class="comments-toggle-count" id="commentsToggleCount" hidden></span></button><div class="frame"><iframe id="artifact" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" data-artifact-src="/artifact/${session.key}/index.html"></iframe></div><div class="sheet-scrim" id="sheetScrim"></div><aside class="comments" id="comments" aria-label="Comments"><div class="sheet-head" id="sheetHead"><span class="sheet-handle" aria-hidden="true"></span><div class="sheet-head-row"><h2>Comments</h2><span class="sheet-summary" id="sheetSummary" role="status" aria-live="polite"></span><button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="comments" aria-label="Show comments">${chromeIcons.chevronUp}</button></div></div><div class="comments-body" id="commentsBody"><section class="comment-thread page-thread" id="pageThread" data-thread-id="page" tabindex="0" aria-label="Comments on the whole page"><header class="thread-head"><span class="thread-quote">Whole page</span><span class="thread-status" id="pageThreadStatus"></span></header><ol class="thread-messages" id="pageMessages"></ol><div class="thread-reply" id="chatComposer"><textarea id="chatInput" rows="1" aria-label="Comment on the whole page" placeholder="Comment on the whole page"></textarea><div class="chat-attachments" id="chatAttachments"></div><div class="thread-reply-row"><button class="text-button chat-attach" id="chatAttach" type="button">Attach images</button><input id="chatAttachInput" type="file" accept="${escapeHtml(acceptedMime.join(","))}" multiple hidden><span class="chat-attachment-notice" id="chatAttachmentNotice" role="status"></span><span class="thread-hint">Enter saves · Esc closes</span></div></div></section><div id="marginThreads" class="margin-threads"><div id="marginThreadCanvas" class="margin-canvas"></div></div></div><div class="comments-foot" id="commentsFoot"><div class="resolve-toast" id="resolveToast" role="status" hidden><span id="resolveToastText">Resolved</span><button class="text-button" id="resolveUndo" type="button">Undo</button></div><div class="send-hint" id="sendHint" hidden>Nothing to send yet. Unsent comments stay in the tab or window where you wrote them; taking over in another window does not bring them along.</div><button class="button send-button" id="send" type="button">Send to agent</button></div></aside></div>
 <div class="share-overlay" id="shareDialog" role="dialog" aria-modal="true" aria-labelledby="shareTitleText" hidden><form class="share-card" id="shareForm"><div class="share-head"><div><div class="share-kicker">Publish to <a class="share-link" href="https://ht-ml.app" target="_blank" rel="noopener noreferrer">ht-ml.app</a></div><h2 id="shareTitleText">Publish artifact</h2></div><button class="share-close" id="shareClose" type="button" aria-label="Close publish dialog"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><p class="share-note">ht-ml.app is a separate, third-party hosting service, not part of Hilight. Publishing sends this artifact to its servers.</p><p class="share-copy">This uploads this artifact to ht-ml.app with local assets inlined. Without a password, the page is PUBLIC and anyone with the link can open it. With a password, the page is PRIVATE and viewers must supply the password to view.</p><p class="share-note">Do not publish secrets. The Hilight annotation SDK is not included.</p><div class="share-grid"><label class="share-check"><input id="shareGenerate" type="checkbox"><span>Generate a password (makes this page private)</span></label><label>Password (optional)<input id="sharePassword" name="password" type="password" autocomplete="new-password" placeholder="Leave blank for a public page"></label></div><div class="share-status" id="shareStatus" role="status"></div><div class="share-result" id="shareResult" hidden><label id="shareUrlResult">Share URL<div class="share-copy-row"><input id="shareUrl" readonly><button class="share-copy-btn" id="copyShareUrl" type="button">Copy URL</button></div></label><label id="sharePasswordResult" hidden>Password (shared secret)<div class="share-copy-row"><input id="sharePasswordOut" readonly><button class="share-copy-btn" id="copySharePassword" type="button">Copy password</button></div></label><label id="shareSiteIdResult" hidden>Site ID<div class="share-copy-row"><input id="shareSiteId" readonly><button class="share-copy-btn" id="copyShareSiteId" type="button">Copy site ID</button></div></label><label id="shareUpdateKeyResult">Update key (secret)<div class="share-copy-row"><input id="shareUpdateKey" readonly><button class="share-copy-btn" id="copyUpdateKey" type="button">Copy key</button></div></label><p class="share-note" id="shareUpdateKeyNote">Keep the update key private. ht-ml.app returns it once and it is the only way to update this page later; the service has no delete. Republish this page&#39;s HTML with <code>hilight share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;</code>, and add <code>--private</code> to also lock it behind a new generated password.</p></div><div class="share-actions"><button class="share-cancel" id="shareCancel" type="button">Cancel</button><button class="button" id="sharePublish" type="submit">Publish</button></div></form></div>
-<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Hilight is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
+<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay" data-state="checking"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Hilight is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
 <div class="ended-overlay" id="endedOverlay" hidden><div class="ended-card"><div class="ended-title">Session ended.<br>Return to your agent to continue.</div><p class="ended-copy">${escapeHtml(session.file)}</p></div></div>
 <div class="whiteboard-overlay" id="whiteboardOverlay" hidden><div class="whiteboard-shell"><div class="whiteboard-error" id="whiteboardError" hidden></div><button class="whiteboard-close" id="whiteboardClose" type="button" aria-label="Close whiteboard"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button><iframe id="whiteboardFrame" title="Excalidraw whiteboard" sandbox="allow-scripts allow-popups"></iframe></div></div>
 <script id="lavish-session" type="application/json">${sessionJson}</script>

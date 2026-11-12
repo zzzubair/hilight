@@ -1106,6 +1106,21 @@ export function createArtifactSdk(
   // Set once the chrome has taken its layout gate off this document. The board frame may start
   // listening after that message, so its first geometry gets it again.
   let artifactShown = false;
+  /** @type {Set<() => void>} */
+  const boardLiveWaiters = new Set();
+
+  function waitForBoardLive(maxMs) {
+    if (!board || board.live) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        window.clearTimeout(timer);
+        boardLiveWaiters.delete(done);
+        resolve(undefined);
+      };
+      const timer = window.setTimeout(done, maxMs);
+      boardLiveWaiters.add(done);
+    });
+  }
 
   // Mirrors parseBoardHtml's card and id rules (src/board-source.js): a card
   // is any <section> or [data-card] inside the board; its id is the id
@@ -1217,6 +1232,7 @@ export function createArtifactSdk(
         board.live = true;
         board.lastThreads = "";
         if (artifactShown) postToBoard({ type: "hilight-board:shown" });
+        for (const done of [...boardLiveWaiters]) done();
       }
       scheduleThreadLayout();
     }
@@ -1436,6 +1452,7 @@ export function createArtifactSdk(
   }
 
   const layoutAuditSettleMs = 180;
+  const boardAuditWaitMs = 1200;
   const layoutAuditMaxWaitMs = 2000;
   const layoutAuditAnimationMaxWaitMs = 4000;
   const layoutAuditStableSampleMs = 120;
@@ -2175,6 +2192,16 @@ export function createArtifactSdk(
   }
 
   async function runLayoutAudit(runId) {
+    if (board) {
+      // A board's page is hidden under its canvas, and diagram surfaces are never audited, so
+      // there is nothing to check: release the gate once the canvas has drawn its cards. The
+      // ordinary pass below would also be slow here, because the gate's opacity 0 makes the
+      // browser throttle this hidden frame to about one animation frame a second.
+      await waitForBoardLive(boardAuditWaitMs);
+      if (runId !== layoutAuditRun) return;
+      publishLayoutAudit([], true, document.readyState === "complete");
+      return;
+    }
     await waitForDocumentFontsReady();
     await waitForResizeObserverSettle();
     const animationsSettled = await waitForFiniteAnimationsSettle();

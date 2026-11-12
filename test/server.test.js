@@ -17,8 +17,11 @@ import {
   allowsAllHosts,
   buildAllowedHostnames,
   CHROME_BOOT_FAILSAFE_MS,
+  CHROME_LAYOUT_GATE_CHECK_MS,
   CHROME_LAYOUT_GATE_MAX_HOLD_MS,
   createChromeHtml,
+  desktopOnlyChromeCss,
+  isBoardPage,
   createSdkJs,
   displayPathParts,
   exportContentDisposition,
@@ -155,8 +158,10 @@ function parseChromeElements(html) {
     const id = attributes.match(/\sid="([^"]*)"/);
     if (!id) continue;
     const text = html.match(new RegExp(`\\sid="${id[1]}"(?:"[^"]*"|[^">])*>([^<]*)`));
+    const state = attributes.match(/\sdata-state="([^"]*)"/);
     elements.set(id[1], {
       id: id[1],
+      dataset: state ? { state: state[1] } : {},
       hidden: /\shidden(?=[\s>=]|$)/.test(attributes),
       textContent: text ? text[1] : "",
       onclick: null,
@@ -261,13 +266,15 @@ test("the chrome boot failsafe turns the layout gate into a reloadable failure w
 
   assert.deepEqual(
     boot.pendingDelays().sort((left, right) => left - right),
-    [CHROME_LAYOUT_GATE_MAX_HOLD_MS, CHROME_BOOT_FAILSAFE_MS],
+    [CHROME_LAYOUT_GATE_CHECK_MS, CHROME_BOOT_FAILSAFE_MS],
   );
   assert.match(boot.element("layoutGateTitle").textContent, /Checking layout/);
+  assert.equal(boot.element("layoutGateOverlay").dataset.state, "checking");
 
   boot.runTimers();
 
   assert.equal(boot.element("layoutGateOverlay").hidden, false);
+  assert.equal(boot.element("layoutGateOverlay").dataset.state, "failure");
   assert.match(boot.element("layoutGateTitle").textContent, /could not finish loading/);
   assert.match(boot.element("layoutGateCopy").textContent, /did not load/);
   assert.equal(boot.element("layoutGateAction").textContent, "Check and reload");
@@ -334,7 +341,7 @@ test("the chrome client cancels the boot failsafe once it has run", () => {
   boot.context.window.__lavishChromeReady = true;
   boot.context.window.__lavishCancelChromeBootFailsafe();
 
-  assert.deepEqual(boot.pendingDelays(), [CHROME_LAYOUT_GATE_MAX_HOLD_MS]);
+  assert.deepEqual(boot.pendingDelays(), [CHROME_LAYOUT_GATE_CHECK_MS]);
   boot.runTimers();
   assert.equal(boot.element("layoutGateAction").textContent, "Show anyway");
   assert.equal(boot.element("layoutGateCopy").textContent, gateCopy);
@@ -1635,7 +1642,7 @@ test("session URLs can disable the layout gate for one open", async () => {
     assert.match(body.url, /[?&]no-gate=1/);
     const chrome = await (await fetch(body.url)).text();
     assert.match(chrome, /<body class="lavish">/);
-    assert.match(chrome, /id="layoutGateOverlay" hidden/);
+    assert.match(chrome, /id="layoutGateOverlay" data-state="checking" hidden/);
     assert.match(chrome, /"layoutGateEnabled":false/);
   } finally {
     await server.close();
@@ -6457,11 +6464,12 @@ test("layout gate curtain reuses the ended overlay card styling", async () => {
   assert.match(html, /<div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout/);
   assert.match(html, /class="ended-copy" id="layoutGateCopy"/);
   assert.match(html, /class="button ended-action" id="layoutGateAction" type="button">Show anyway/);
-  assert.match(css, /body\.layout-gate-active iframe#artifact\{[^}]*opacity:0/);
+  // Never 0: the browser throttles a fully transparent cross-origin frame (see chrome.css).
+  assert.match(css, /body\.layout-gate-active iframe#artifact\{[^}]*opacity:0?\.001/);
   assert.match(css, /\.ended-action\{[^}]*margin-top:var\(--space-8\)/);
   assert.match(js, /layoutGateAction\.onclick = \(\) => forceRevealLayoutGate\("manual"\)/);
   assert.match(noGateHtml, /<body class="lavish">/);
-  assert.match(noGateHtml, /id="layoutGateOverlay" hidden/);
+  assert.match(noGateHtml, /id="layoutGateOverlay" data-state="checking" hidden/);
   assert.match(noGateHtml, /"layoutGateEnabled":false/);
 });
 
@@ -6853,4 +6861,25 @@ test("chat-sync stamps a note seen when a poll takes it, working when the artifa
     await server.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("a board page keeps the desktop chrome at every width", async () => {
+  assert.equal(isBoardPage('<main class="x" data-hilight-board>'), true);
+  assert.equal(isBoardPage('<main data-hilight-board="1">'), true);
+  assert.equal(isBoardPage("<p>data-hilight-board in prose</p>"), false);
+  assert.equal(isBoardPage("<main data-hilight-boards>"), false);
+
+  const board = createChromeHtml({ key: "abc", file: "/tmp/board.html" }, { boardPage: true });
+  assert.match(board, /<link rel="stylesheet" href="\/chrome\.css\?layout=desktop">/);
+  assert.match(board, /<body class="[^"]*\bboard-page\b/);
+  assert.match(board, /"boardPage":true/);
+  const page = createChromeHtml({ key: "abc", file: "/tmp/page.html" });
+  assert.match(page, /<link rel="stylesheet" href="\/chrome\.css">/);
+  assert.match(page, /"boardPage":false/);
+
+  const css = await readFile(new URL("../src/chrome.css", import.meta.url), "utf8");
+  assert.match(css, /\(max-width: 860px\)/, "the phone layout this test switches off must exist");
+  const desktop = desktopOnlyChromeCss(css);
+  assert.doesNotMatch(desktop, /\(max-width: 860px\)|\(min-width: 861px\)/);
+  assert.equal(desktop.length > 0, true);
 });

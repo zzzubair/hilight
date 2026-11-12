@@ -242,7 +242,7 @@
 }</code></pre>
       </section>
 
-      <section id="artifact-route" data-code="src/server.js:1632-1643" data-hash="f7b465853113">
+      <section id="artifact-route" data-code="src/server.js:1634-1645" data-hash="f7b465853113">
         <h2>Server serves the file as it is on disk</h2>
         <p>
           Reads the HTML fresh on every load and adds exactly one SDK script tag. A stale load token gets 409, so an old
@@ -262,7 +262,7 @@
       res.type("html").send(injectLavishSdk(html, key, verified.artifact_revision, verified.artifact_load_token));</code></pre>
       </section>
 
-      <section id="mount" data-code="src/artifact-sdk.js:1129-1147" data-hash="a4b77d1af605">
+      <section id="mount" data-code="src/artifact-sdk.js:1144-1162" data-hash="a4b77d1af605">
         <h2>The SDK turns a board into a canvas</h2>
         <p>
           Finds the board element, hides it, and covers the page with one sandboxed canvas frame. The file itself is
@@ -289,7 +289,7 @@
   }</code></pre>
       </section>
 
-      <section id="frame-route" data-code="src/server.js:1742-1754" data-hash="77757180673b">
+      <section id="frame-route" data-code="src/server.js:1745-1757" data-hash="77757180673b">
         <h2>The canvas frame gets a session token</h2>
         <p>
           The frame must name its session; the token it receives is signed for that session only, so a frame cannot read
@@ -310,7 +310,7 @@
   });</code></pre>
       </section>
 
-      <section id="queue-marks" data-code="src/chrome-client.js:3727-3746" data-hash="e3d207c37814">
+      <section id="queue-marks" data-code="src/chrome-client.js:3738-3757" data-hash="e3d207c37814">
         <h2>Queue marks becomes one prompt</h2>
         <p>
           The canvas describes your arrows, circles and notes in words, and the review page holds them as one
@@ -338,7 +338,7 @@
               stats: message.stats &amp;&amp; typeof message.stats === "object" ? message.stats : {},</code></pre>
       </section>
 
-      <section id="send" data-code="src/chrome-client.js:1975-1994" data-hash="360e2343f2fe">
+      <section id="send" data-code="src/chrome-client.js:1984-2003" data-hash="360e2343f2fe">
         <h2>Send posts every queued comment at once</h2>
         <p>
           One request carries the whole batch, retried once without the page snapshot if it is too large, so your
@@ -448,14 +448,14 @@
       </section>
 
       <ol data-flow="Open a board">
-        <li>cli:2510 -> artifact-route:1643 the spawned server answers the page with the file plus the SDK</li>
-        <li>artifact-route:1643 -> mount:1130-1131 the SDK finds the board and opens the canvas frame</li>
-        <li>mount:1130-1131 -> frame-route:1753 the frame is served with a token for this session only</li>
+        <li>cli:2510 -> artifact-route:1645 the spawned server answers the page with the file plus the SDK</li>
+        <li>artifact-route:1645 -> mount:1145-1146 the SDK finds the board and opens the canvas frame</li>
+        <li>mount:1145-1146 -> frame-route:1756 the frame is served with a token for this session only</li>
       </ol>
 
       <ol data-flow="Marks reach the agent">
-        <li>queue-marks:3733-3740 -> send:1975 your marks wait as one board prompt until Send collects them</li>
-        <li>send:1979-1983 -> prompts-route:1168-1171 the batch is posted, and other origins are refused first</li>
+        <li>queue-marks:3744-3751 -> send:1984 your marks wait as one board prompt until Send collects them</li>
+        <li>send:1988-1992 -> prompts-route:1168-1171 the batch is posted, and other origins are refused first</li>
         <li>prompts-route:1176 -> poll:1081 storing the batch wakes the agent's waiting poll</li>
         <li>poll:1081 -> store:678-693 the poll drains every pending prompt in one locked read</li>
       </ol>
