@@ -762,6 +762,7 @@ export function startPollWaitReporter({
  *   session: { file: string, status: string, session_ended?: boolean, ended_by?: string },
  *   prompts?: any[],
  *   artifact_failures?: any[],
+ *   changes?: Record<string, string>,
  *   next_step?: string,
  *   dom_snapshot?: string,
  * }}
