@@ -19,7 +19,7 @@ const servedChromeIds = new Set(
 
 const SERVED_TAB_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>";
 
-/** @typedef {{ key: string, file: string, layoutGateEnabled?: boolean, layoutGateMaxHoldMs?: number, layoutGateCheckMs?: number, boardPage?: boolean, modeToggleHotkeyKey?: string, initialChat?: any[], initialChatAckIds?: string[], initialChatRevision?: number, initialLayoutWarnings?: any[], chromeLoadToken?: string, initialArtifactRevision?: number, initialArtifactLoadToken?: string, initialArtifactLoadSequence?: number, attachmentMaxBytes?: number, attachmentMaxCount?: number, attachmentAcceptedMime?: string[], initialEnded?: boolean, initialEndedBy?: string | null, revisionPalette?: { hex: string, borderStyle: string, pattern: string }[] }} HarnessSessionData */
+/** @typedef {{ key: string, file: string, layoutGateEnabled?: boolean, layoutGateMaxHoldMs?: number, layoutGateCheckMs?: number, boardPage?: boolean, modeToggleHotkeyKey?: string, initialChat?: any[], initialThreads?: any[], initialChatAckIds?: string[], initialChatRevision?: number, initialLayoutWarnings?: any[], chromeLoadToken?: string, initialArtifactRevision?: number, initialArtifactLoadToken?: string, initialArtifactLoadSequence?: number, attachmentMaxBytes?: number, attachmentMaxCount?: number, attachmentAcceptedMime?: string[], initialEnded?: boolean, initialEndedBy?: string | null, revisionPalette?: { hex: string, borderStyle: string, pattern: string }[] }} HarnessSessionData */
 /** @type {HarnessSessionData} */
 const defaultSessionData = {
   key: "abc",
@@ -8852,6 +8852,44 @@ function typeIntoQueuedEdit(chrome, value) {
 function queueHeadingNote(chrome, prompt = "Make this heading bigger", selector = "main > h2") {
   chrome.sendFrameMessage({ type: "lavish:queuePrompt", prompt: { prompt, selector, tag: "h2", text: "Pricing" } });
 }
+
+test("a resolved comment shows Reopen on its collapsed row, and a board comment names its card", async () => {
+  const at = "2026-11-12T10:00:00.000Z";
+  const chrome = await createChromeHarness({
+    sessionData: {
+      ...defaultSessionData,
+      initialThreads: [
+        {
+          id: "c1",
+          anchor: {
+            selector: '[data-card="poll"]',
+            text: "Poll takes the whole batch",
+            tag: "section",
+            target: { type: "board-card", card: "poll", title: "Poll takes the whole batch" },
+          },
+          resolved: true,
+          messages: [{ role: "user", text: "What does this mean?", at }],
+        },
+        {
+          id: "c2",
+          anchor: { selector: "h2", text: "Pricing", tag: "h2" },
+          resolved: true,
+          messages: [{ role: "user", text: "Bigger", at }],
+        },
+      ],
+    },
+  });
+  const html = subtreeHtml(chrome.element("resolvedList"));
+  // The row says what the comment is on, in plain words, and Reopen is on the row itself.
+  assert.match(html, /class="thread-quote"[^>]*>On card: Poll takes the whole batch<\/button>/);
+  assert.match(
+    html,
+    /<header class="thread-head">(?:(?!<\/header>).)*class="text-button thread-reopen">Reopen<\/button>/s,
+  );
+  // An ordinary page comment keeps its quote as it was.
+  assert.match(html, /class="thread-quote"[^>]*>Pricing<\/button>/);
+  assert.doesNotMatch(html, /thread-actions/, "Reopen is not hidden behind an expand");
+});
 
 test("clicking an unsent note's quote opens it for editing and reveals its anchor", async () => {
   const chrome = await createChromeHarness();

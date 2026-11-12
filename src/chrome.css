@@ -1661,6 +1661,21 @@ body.layout-gate-active iframe#artifact {
 .thread-retry {
   font-size: 11px;
 }
+/* Reopen on a resolved row: always shown, with a 32px target that the negative margin keeps from
+   making the one-line row taller. */
+.thread-head .thread-reopen {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 32px;
+  margin: -8px -6px -8px 0;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-weight: var(--w-semi);
+}
+.thread-head .thread-reopen:hover {
+  background: var(--accent-soft);
+}
 .thread-messages {
   display: grid;
   gap: 8px;
@@ -1747,23 +1762,14 @@ body.layout-gate-active iframe#artifact {
   font-size: 11px;
   font-weight: var(--w-semi);
 }
-.thread-actions {
-  display: none;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
 .thread-reply {
   display: none;
   margin-top: 8px;
 }
-.comment-thread.is-open .thread-reply,
-.comment-thread.is-open .thread-actions {
+.comment-thread.is-open .thread-reply {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.comment-thread.is-open .thread-actions {
-  flex-direction: row;
 }
 .thread-reply textarea,
 .thread-edit-input {

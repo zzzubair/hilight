@@ -5216,12 +5216,20 @@ function buildThreadCard(thread, placement, missing, messages, status) {
   card.tabIndex = 0;
   // A table-cell draft names its row and column, which the raw cell text alone would lose.
   const cell = thread.pending ? promptAnchor(thread.anchor) : null;
+  // A canvas card's title alone reads like a sentence of its own ("Poll takes the whole batch"), so
+  // the row says it is the card the comment is on.
+  const boardCard = thread.anchor?.target?.type === "board-card" ? thread.anchor.target : null;
   const quote = String(
-    (cell?.kind === "cell" && cell.excerpt) || thread.anchor.text || thread.anchor.selector || "Comment",
+    (cell?.kind === "cell" && cell.excerpt) ||
+      boardCard?.title ||
+      thread.anchor.text ||
+      thread.anchor.selector ||
+      "Comment",
   )
     .replace(/\s+/g, " ")
     .trim();
-  card.setAttribute("aria-label", "Comment on " + quote.slice(0, 120));
+  const headline = boardCard ? "On card: " + quote : quote;
+  card.setAttribute("aria-label", (boardCard ? "Comment on card " : "Comment on ") + quote.slice(0, 120));
   // A compact card sits beside its anchor, so its one line says what was last written there.
   const latest = [...messages].reverse().find((message) => message.role === "user" || message.role === "agent");
   const snippet = latest
@@ -5232,12 +5240,15 @@ function buildThreadCard(thread, placement, missing, messages, status) {
     : quote;
   card.innerHTML =
     '<header class="thread-head"><button type="button" class="thread-quote" title="Show in page">' +
-    escapeHtml(quote) +
+    escapeHtml(headline) +
     '</button><span class="thread-snippet" aria-hidden="true">' +
     escapeHtml(snippet.slice(0, 160)) +
     '</span><span class="thread-status">' +
     statusHtml(status) +
-    "</span></header>" +
+    "</span>" +
+    // A resolved comment is a one-line row; Reopen sits on it, never behind an expand.
+    (thread.resolved ? '<button type="button" class="text-button thread-reopen">Reopen</button>' : "") +
+    "</header>" +
     (missing ? '<p class="thread-notice">The text this comment was on is no longer on the page.</p>' : "") +
     '<ol class="thread-messages"></ol><div class="thread-error" role="status"></div>';
   fillThreadMessages(card.querySelector(".thread-messages"), messages);
@@ -5249,14 +5260,10 @@ function buildThreadCard(thread, placement, missing, messages, status) {
     else openThread(thread.id);
   });
   if (thread.resolved) {
-    const actions = document.createElement("div");
-    actions.className = "thread-actions";
-    actions.innerHTML = '<button type="button" class="text-button thread-reopen">Reopen</button>';
-    actions.querySelector(".thread-reopen").addEventListener("click", (event) => {
+    card.querySelector(".thread-reopen").addEventListener("click", (event) => {
       event.stopPropagation();
       setThreadResolved(thread.id, false, card);
     });
-    card.appendChild(actions);
   } else if (!thread.pending && !ended) {
     const form = document.createElement("form");
     form.className = "thread-reply";
