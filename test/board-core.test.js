@@ -29,6 +29,7 @@ import {
   summarizeBoardMarks,
   WHEEL,
   wheelIntent,
+  usableSavedView,
   zoomAround,
 } from "../src/board-core.js";
 
@@ -435,8 +436,10 @@ test("a step the reviewer has not seen is drawn heavier, and keeps its identity 
   const flows = [flow([["cli", "server"]])];
   const [step] = flows[0].steps.map((item) => ({ ...item, flowName: "Request" }));
   const signature = stepSignature(step);
-  assert.equal(signature, "Request|cli:>server:");
-  assert.equal(stepSignature({ ...step, from: end("cli:3-4") }), "Request|cli:3-4>server:");
+  assert.equal(signature, "Request|cli>server");
+  // Re-pinning to moved lines keeps the identity; a different card does not.
+  assert.equal(stepSignature({ ...step, from: end("cli:3-4") }), signature);
+  assert.notEqual(stepSignature({ ...step, to: end("restore") }), signature);
   const elements = [cli, server].map(createCardElement);
   const [plain] = createLinkElements([cli, server], elements, flows);
   const [heavy] = createLinkElements([cli, server], elements, flows, { emphasis: new Set([signature]) });
@@ -510,10 +513,51 @@ test("freshSince finds the cards and steps the agent added since the reviewer la
   const known = knownAfter(before, freshSince(before, undefined));
   const fresh = freshSince(after, known);
   assert.deepEqual([...fresh.cards], ["restore"]);
-  assert.deepEqual([...fresh.steps], ["Request|server:>restore:"]);
+  assert.deepEqual([...fresh.steps], ["Request|server>restore"]);
   // Until the reviewer acknowledges it, it is saved as not known, so it is new again after a reload.
   assert.deepEqual(freshSince(after, knownAfter(after, fresh)), fresh);
   // Acknowledged: nothing is new.
   const seen = knownAfter(after, { cards: new Set(), steps: new Set() });
   assert.deepEqual(freshSince(after, seen), { cards: new Set(), steps: new Set() });
+});
+
+test("freshSince does not call a step re-pinned to moved code a new arrow", () => {
+  const pinned = (from, to) => ({
+    cards: [cli, server],
+    flows: [{ name: "Request", steps: [{ from: { card: "cli", lines: from }, to: { card: "server", lines: to } }] }],
+  });
+  const before = pinned({ start: 10, end: 12 }, { start: 40, end: 41 });
+  const after = pinned({ start: 14, end: 16 }, { start: 44, end: 45 });
+  const known = knownAfter(before, freshSince(before, undefined));
+  assert.deepEqual(freshSince(after, known).steps, new Set());
+  // A scene saved before signatures dropped line spans still knows its steps.
+  assert.deepEqual(
+    freshSince(after, { cards: ["cli", "server"], steps: ["Request|cli:10-12>server:40-41"] }).steps,
+    new Set(),
+  );
+  assert.deepEqual(freshSince(after, { cards: ["cli", "server"], steps: ["Request|cli:>server:"] }).steps, new Set());
+});
+
+test("usableSavedView keeps a saved view only for a window of about the size it was saved in", () => {
+  const big = { width: 1440, height: 780 };
+  const half = { width: 760, height: 330 };
+  const saved = { zoom: { value: 0.26 }, scrollX: 5, scrollY: 7, width: 1880, height: 1900 };
+  // Saved full-screen, opened half-screen: work the opening view out again instead of opening at 26%.
+  assert.equal(usableSavedView(saved, half), null);
+  assert.equal(usableSavedView(saved, big), null);
+  assert.deepEqual(usableSavedView(saved, { width: 1800, height: 1850 }), {
+    zoom: 0.26,
+    scrollX: 5,
+    scrollY: 7,
+    width: 1880,
+    height: 1900,
+  });
+  // A view saved before sizes were kept is trusted only in a window that is not small.
+  const legacy = { zoom: { value: 0.93 }, scrollX: 1, scrollY: 2 };
+  assert.equal(usableSavedView(legacy, half), null);
+  assert.deepEqual(usableSavedView(legacy, big), { zoom: 0.93, scrollX: 1, scrollY: 2, width: 1440, height: 780 });
+  // Nothing usable.
+  assert.equal(usableSavedView(undefined, big), null);
+  assert.equal(usableSavedView({ zoom: { value: 0 }, scrollX: 0, scrollY: 0 }, big), null);
+  assert.equal(usableSavedView({ zoom: 1, scrollX: Number.NaN, scrollY: 0 }, big), null);
 });

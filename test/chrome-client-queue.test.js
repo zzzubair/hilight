@@ -106,8 +106,11 @@ async function createChromeHarness({
   // chrome's sheet breakpoint, with `setMobile` flipping it the way a resize would. Left off, the
   // window has no matchMedia at all, which is the desktop the other tests run against.
   mobile = false,
+  // The window's CSS width; `resizeWindow` changes it and fires the window's resize listeners.
+  windowWidth = 1440,
 } = {}) {
   const source = await readFile(sourceUrl, "utf8");
+  const performanceMarks = [];
   // Seed sessionStorage before the client boots, to model a tab whose queue was
   // already persisted by an earlier page load.
   if (storedQueue) storage.set(`lavish-axi:queued:${sessionData.key}`, JSON.stringify(storedQueue));
@@ -519,9 +522,16 @@ async function createChromeHarness({
         localStore.delete(key);
       },
     },
+    performance: {
+      mark(name, options) {
+        performanceMarks.push({ name, detail: options?.detail });
+      },
+    },
     window: {
+      innerWidth: windowWidth,
       clearTimeout: fakeClearTimeout,
       setTimeout: fakeSetTimeout,
+      requestAnimationFrame: (callback) => fakeSetTimeout(callback, 16),
       addEventListener(type, handler) {
         if (!windowListeners.has(type)) windowListeners.set(type, []);
         windowListeners.get(type).push(handler);
@@ -556,6 +566,11 @@ async function createChromeHarness({
   return {
     element,
     frame,
+    performanceMarks,
+    resizeWindow(width) {
+      context.window.innerWidth = width;
+      for (const handler of windowListeners.get("resize") || []) handler({ type: "resize" });
+    },
     postedToFrame,
     postedToWhiteboard,
     clipboardWrites,
@@ -4238,6 +4253,8 @@ test("the checking gate releases on its short hold, well before the failure-card
 
   assert.equal(chrome.element("layoutGateOverlay").hidden, true);
   assert.equal(chrome.element("body").classList.contains("layout-gate-active"), false);
+  // Measurable from any browser: when the gate lifted, and why.
+  assert.deepEqual(chrome.performanceMarks.at(-1), { name: "hilight:layout-gate-revealed", detail: "timeout" });
 });
 
 test("layout gate re-arms on reload and still reveals on the next completed pass", async () => {
@@ -9439,4 +9456,32 @@ test("a board page never docks its comments into the phone sheet", async () => {
   const board = await createChromeHarness({ mobile: true, sessionData: { ...defaultSessionData, boardPage: true } });
   assert.equal(board.element("commentsBody").inert, false);
   assert.equal(board.element("commentsFoot").inert, false);
+});
+
+test("a board folds its comments in a narrow window, also after a resize, until the reviewer chooses", async () => {
+  const sessionData = { ...defaultSessionData, boardPage: true };
+  const folded = (chrome) => chrome.element("body").classList.contains("comments-collapsed");
+  const wide = await createChromeHarness({ sessionData, windowWidth: 1440 });
+  assert.equal(folded(wide), false);
+  wide.resizeWindow(780);
+  assert.equal(folded(wide), true, "made narrow after opening wide: the board gets the room");
+  wide.resizeWindow(1300);
+  assert.equal(folded(wide), false);
+
+  const narrow = await createChromeHarness({ sessionData, windowWidth: 780 });
+  assert.equal(folded(narrow), true);
+
+  // The reviewer's own choice wins at every width.
+  const chose = await createChromeHarness({
+    sessionData,
+    windowWidth: 780,
+    localStore: new Map([[`lavish-axi:comments-collapsed:${sessionData.key}`, "0"]]),
+  });
+  assert.equal(folded(chose), false);
+  chose.resizeWindow(700);
+  assert.equal(folded(chose), false);
+
+  // An ordinary page keeps its comments open.
+  const page = await createChromeHarness({ windowWidth: 780 });
+  assert.equal(folded(page), false);
 });

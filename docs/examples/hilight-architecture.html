@@ -135,7 +135,7 @@
   }</code></pre>
         </section>
 
-        <section id="route-arrows" data-code="src/board-core.js:704-729" data-hash="bf49b25931b6">
+        <section id="route-arrows" data-code="src/board-core.js:751-776" data-hash="bf49b25931b6">
           <h3>Arrows go around cards</h3>
           <p>
             Each step is routed from its source lines to its target lines through the gaps between cards, then
@@ -212,7 +212,7 @@
 
         <ol data-flow="File to canvas">
           <li>read-flows:352 -> place-cards:614-615 the parsed steps decide each card's band and column</li>
-          <li>place-cards:615-616 -> route-arrows:724-725 the placed cards become the obstacles every arrow avoids</li>
+          <li>place-cards:615-616 -> route-arrows:771-772 the placed cards become the obstacles every arrow avoids</li>
         </ol>
       </section>
 
@@ -310,7 +310,7 @@
   });</code></pre>
       </section>
 
-      <section id="queue-marks" data-code="src/chrome-client.js:3738-3757" data-hash="e3d207c37814">
+      <section id="queue-marks" data-code="src/chrome-client.js:3748-3767" data-hash="e3d207c37814">
         <h2>Queue marks becomes one prompt</h2>
         <p>
           The canvas describes your arrows, circles and notes in words, and the review page holds them as one
@@ -454,7 +454,7 @@
       </ol>
 
       <ol data-flow="Marks reach the agent">
-        <li>queue-marks:3744-3751 -> send:1984 your marks wait as one board prompt until Send collects them</li>
+        <li>queue-marks:3754-3761 -> send:1984 your marks wait as one board prompt until Send collects them</li>
         <li>send:1988-1992 -> prompts-route:1168-1171 the batch is posted, and other origins are refused first</li>
         <li>prompts-route:1176 -> poll:1081 storing the batch wakes the agent's waiting poll</li>
         <li>poll:1081 -> store:678-693 the poll drains every pending prompt in one locked read</li>

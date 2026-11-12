@@ -48,12 +48,15 @@ import {
   freshSince,
   isCardElement,
   isLinkElement,
+  isSmallCanvas,
   knownAfter,
   linkLandings,
   reconcileLevelElements,
+  similarCanvasSize,
   stepSignature,
   summarizeBoardMarks,
   tagLevel,
+  usableSavedView,
   wheelIntent,
   zoomAround,
 } from "./board-core.js";
@@ -176,9 +179,13 @@ export function startBoard(init, { post }) {
     fresh: { cards: /** @type {Set<string>} */ (new Set()), steps: /** @type {Set<string>} */ (new Set()) },
     // Where the reviewer was before the camera went to new cards.
     revealFrom: /** @type {null | { level: string, zoom: number, scrollX: number, scrollY: number }} */ (null),
-    // The last view Hilight chose (Fit or the opening view), so a resize can redo it.
-    autoView: /** @type {null | { kind: "fit" | "opening", zoom: number, scrollX: number, scrollY: number }} */ (null),
+    // The last view Hilight chose (Fit, the opening view, or a saved view it restored), so a resize can redo it.
+    autoView:
+      /** @type {null | { kind: "fit" | "opening" | "restored", zoom: number, scrollX: number, scrollY: number, width?: number, height?: number }} */ (
+        null
+      ),
     lastSetView: /** @type {null | { zoom: number, scrollX: number, scrollY: number }} */ (null),
+    revealView: /** @type {null | { zoom: number, scrollX: number, scrollY: number }} */ (null),
     lastSize: { width: 0, height: 0 },
     // The chrome has shown the page, and where the automatic move to new cards is.
     shown: false,
@@ -630,8 +637,24 @@ export function startBoard(init, { post }) {
       s.viewByLevel.delete(s.level);
       return;
     }
+    // A restored view the reviewer has not touched keeps the window size it was saved for.
+    if (s.autoView?.kind === "restored" && onAutoView()) return;
     const appState = s.api.getAppState();
-    s.viewByLevel.set(s.level, { scrollX: appState.scrollX, scrollY: appState.scrollY, zoom: appState.zoom });
+    const { width, height } = canvasSize();
+    s.viewByLevel.set(s.level, {
+      scrollX: appState.scrollX,
+      scrollY: appState.scrollY,
+      zoom: appState.zoom,
+      width,
+      height,
+    });
+  }
+
+  const savedViewFor = (levelId) => usableSavedView(s.viewByLevel.get(levelId), canvasSize());
+
+  function restoreView(view) {
+    s.autoView = { kind: "restored", ...view };
+    s.lastSetView = { zoom: view.zoom, scrollX: view.scrollX, scrollY: view.scrollY };
   }
 
   function allElements() {
@@ -879,14 +902,21 @@ export function startBoard(init, { post }) {
     s.level = levelId;
     s.selectedCard = "";
     editor.classList.remove("is-card-selected");
-    const view = s.viewByLevel.get(levelId);
+    const view = savedViewFor(levelId);
     s.api.updateScene({
       elements: restored(s.elementsByLevel.get(levelId) || []),
-      appState: { selectedElementIds: {}, activeEmbeddable: null, ...(view || {}) },
+      appState: {
+        selectedElementIds: {},
+        activeEmbeddable: null,
+        ...(view ? { zoom: { value: view.zoom }, scrollX: view.scrollX, scrollY: view.scrollY } : {}),
+      },
       captureUpdate: CaptureUpdateAction.NEVER,
     });
     s.api.history?.clear?.();
-    if (!view) openingView();
+    if (view) {
+      restoreView(view);
+      renderZoom(view.zoom);
+    } else openingView();
     s.linkKey = "";
     syncLinks();
     renderCrumbs();
@@ -901,9 +931,6 @@ export function startBoard(init, { post }) {
   // The smallest zoom where card text stays readable (13px body text renders at
   // about 12px), used for the first view of a level.
   const READABLE_ZOOM = 0.93;
-  // Below this canvas size (a half-screen laptop, a preview pane) the opening view goes straight to
-  // where to start at a readable zoom instead of trying to show a whole row.
-  const SMALL_CANVAS = { width: 900, height: 620 };
   const VIEW_MARGIN = 20;
 
   // Excalidraw's floating controls (tools, menu, library, zoom and undo, help),
@@ -968,12 +995,17 @@ export function startBoard(init, { post }) {
 
   // Whether the reviewer is still looking at the view Hilight picked.
   function onAutoView() {
-    if (!s.autoView || !s.api) return false;
+    return onView(s.autoView);
+  }
+
+  // Whether the camera is still exactly where Hilight put it (the reviewer has not moved it since).
+  function onView(target) {
+    if (!target || !s.api) return false;
     const view = currentView();
     return (
-      Math.abs(view.zoom - s.autoView.zoom) < 1e-4 &&
-      Math.abs(view.scrollX - s.autoView.scrollX) < 0.5 &&
-      Math.abs(view.scrollY - s.autoView.scrollY) < 0.5
+      Math.abs(view.zoom - target.zoom) < 1e-4 &&
+      Math.abs(view.scrollX - target.scrollX) < 0.5 &&
+      Math.abs(view.scrollY - target.scrollY) < 0.5
     );
   }
 
@@ -1078,7 +1110,7 @@ export function startBoard(init, { post }) {
     const cards = elements.filter(isCardElement);
     const insets = controlInsets();
     const size = canvasSize();
-    if (cards.length && (size.width < SMALL_CANVAS.width || size.height < SMALL_CANVAS.height)) {
+    if (cards.length && isSmallCanvas(size)) {
       startView(cards, insets);
       rememberAutoView("opening");
       return;
@@ -1197,6 +1229,7 @@ export function startBoard(init, { post }) {
       zoom < 0.5
         ? cardView(focus.fresh[0], insets)
         : { zoom, scrollX: centreX / zoom - (minX + maxX) / 2, scrollY: centreY / zoom - (minY + maxY) / 2 };
+    s.revealView = target;
     await animateView(target, duration);
   }
 
@@ -1306,9 +1339,14 @@ export function startBoard(init, { post }) {
       const before = s.lastSize;
       s.lastSize = size;
       if (!before.width || (before.width === size.width && before.height === size.height)) return;
-      if (onAutoView()) {
-        if (s.autoView?.kind === "fit") fitAll();
-        else openingView();
+      const auto = onAutoView() ? s.autoView : null;
+      if (auto?.kind === "fit") fitAll();
+      else if (auto?.kind === "opening" || (auto?.kind === "restored" && !similarCanvasSize(size, auto))) {
+        // A saved view no longer suits a window this different: start again as on a fresh load.
+        openingView();
+      } else if (reveal.dataset.stage === "shown" && onView(s.revealView)) {
+        // Still on the new cards Hilight showed: frame them again for the new size.
+        void showFresh({ duration: 0 });
       } else {
         const view = currentView();
         setView(
@@ -1316,6 +1354,7 @@ export function startBoard(init, { post }) {
           view.scrollX + (size.width - before.width) / 2 / view.zoom,
           view.scrollY + (size.height - before.height) / 2 / view.zoom,
         );
+        if (auto?.kind === "restored") s.autoView = { ...auto, ...s.lastSetView };
       }
       scheduleGeometry();
     });
@@ -1481,7 +1520,7 @@ export function startBoard(init, { post }) {
   // ---------------------------------------------------------------------------
   // Mount
 
-  const view = s.viewByLevel.get(s.level);
+  const view = savedViewFor(s.level);
   function BoardApp() {
     return h(Excalidraw, {
       initialData: {
@@ -1491,7 +1530,7 @@ export function startBoard(init, { post }) {
           currentItemStrokeColor: INK,
           currentItemFontFamily: EXCALIFONT,
           currentItemRoughness: 1,
-          ...(view || {}),
+          ...(view ? { zoom: { value: view.zoom }, scrollX: view.scrollX, scrollY: view.scrollY } : {}),
         },
         files: s.files,
         scrollToContent: !view,
@@ -1507,7 +1546,8 @@ export function startBoard(init, { post }) {
       renderEmbeddable,
       excalidrawAPI: (api) => {
         s.api = api;
-        if (!view) {
+        if (view) restoreView(view);
+        else {
           window.setTimeout(() => {
             try {
               openingView();

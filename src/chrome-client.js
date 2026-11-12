@@ -2238,10 +2238,20 @@ function clearLayoutGateFailure() {
     layoutGateAction.onclick = () => forceRevealLayoutGate("manual");
   }
   if (layoutGateBypass) layoutGateBypass.hidden = true;
-  revealLayoutGate();
+  revealLayoutGate("recovered");
 }
 
-function revealLayoutGate() {
+// `reason` is why the gate lifted: "pass" (the layout pass finished), "timeout", "manual",
+// "recovered" or "ended". It is recorded as a performance mark so load time can be measured from
+// any browser (`performance.getEntriesByName("hilight:layout-gate-revealed")`).
+function revealLayoutGate(reason = "pass") {
+  if (layoutGateVisible) {
+    try {
+      performance.mark("hilight:layout-gate-revealed", { detail: reason });
+    } catch {
+      // Measuring is optional.
+    }
+  }
   clearLayoutGateTimer();
   layoutGateEscape?.reveal?.();
   setLayoutGateActive(false);
@@ -2264,7 +2274,7 @@ function forceRevealLayoutGate(reason) {
     layoutGateManuallyBypassed = true;
     layoutGateEscape?.manualReveal?.();
   }
-  revealLayoutGate();
+  revealLayoutGate(reason);
 }
 
 function armLayoutGateTimer(holdMs = layoutGateMaxHoldMs) {
@@ -2298,7 +2308,7 @@ function startLayoutGateCycle() {
 // and hands the result to the passive inbox.
 function handleLayoutGatePass() {
   if (ended || !layoutGateVisible) return;
-  revealLayoutGate();
+  revealLayoutGate("pass");
 }
 
 function initializeLayoutGate() {
@@ -2853,7 +2863,7 @@ function markSessionEnded() {
   if (outdatedBanner) outdatedBanner.hidden = true;
   layoutGateManuallyBypassed = true;
   layoutGateFailureSticky = false;
-  revealLayoutGate();
+  revealLayoutGate("ended");
   layoutGateEscape?.end?.();
   postToFrame({ type: "lavish:setAnnotationMode", enabled: false });
   endedOverlay.hidden = false;
@@ -4370,19 +4380,25 @@ function toggleAnnotationMode() {
 
 annotationSwitch.onclick = toggleAnnotationMode;
 if (commentsToggle) commentsToggle.onclick = () => setCommentsCollapsed(!commentsCollapsed());
-// A board in a narrow window (a half-screen laptop, a preview pane) starts with the margin folded
-// so the canvas gets the width, unless the reviewer chose otherwise for this session.
+// A board in a narrow window (a half-screen laptop, a preview pane) folds the comments margin so
+// the canvas gets the width, at load and when the window is resized, until the reviewer opens or
+// folds it themselves for this session.
 const BOARD_FOLD_COMMENTS_BELOW_PX = 1000;
-{
-  let stored = null;
+function storedCommentsChoice() {
   try {
-    stored = localStorage.getItem(commentsCollapsedKey);
+    return localStorage.getItem(commentsCollapsedKey);
   } catch {
-    // Without storage the margin starts by the window rule alone.
+    return null;
   }
-  const narrowBoard = boardPage && window.innerWidth < BOARD_FOLD_COMMENTS_BELOW_PX;
-  if (!isMobileSheet() && (stored === "1" || (stored === null && narrowBoard))) setCommentsCollapsed(true, false);
 }
+function applyBoardCommentsWidthRule() {
+  if (!boardPage || isMobileSheet() || storedCommentsChoice() !== null) return;
+  const narrow = window.innerWidth < BOARD_FOLD_COMMENTS_BELOW_PX;
+  if (narrow !== commentsCollapsed()) setCommentsCollapsed(narrow, false);
+}
+if (storedCommentsChoice() === "1" && !isMobileSheet()) setCommentsCollapsed(true, false);
+applyBoardCommentsWidthRule();
+if (boardPage) window.addEventListener("resize", applyBoardCommentsWidthRule);
 
 sendButton.onclick = () => sendQueued(false);
 sendAndEndButton.onclick = () => sendQueued(true);

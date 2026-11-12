@@ -272,13 +272,60 @@ export function codeLineSpan(card, span) {
 }
 
 /**
- * A step's identity across edits of the board file: its flow's name and both
- * ends. Step keys are positional, so they cannot tell a new step from a moved
- * one.
+ * A step's identity across edits of the board file: its flow's name and the
+ * cards at both ends. Step keys are positional, so they cannot tell a new step
+ * from a moved one, and line spans are left out because re-pinning a step to
+ * code that moved is not adding an arrow.
  */
 export function stepSignature(step) {
-  const end = (point) => `${point?.card || ""}:${point?.lines ? `${point.lines.start}-${point.lines.end}` : ""}`;
-  return `${step?.flowName || ""}|${end(step?.from)}>${end(step?.to)}`;
+  return `${step?.flowName || ""}|${step?.from?.card || ""}>${step?.to?.card || ""}`;
+}
+
+/** A saved signature in today's form. Older scenes saved `card:start-end` ends. */
+function currentStepSignature(signature) {
+  return String(signature).replace(/:(\d+-\d+)?(?=>|$)/g, "");
+}
+
+// Below this canvas size (a half-screen laptop, a preview pane) a board opens on where to start at a
+// readable zoom instead of trying to show a whole row.
+export const SMALL_CANVAS = Object.freeze({ width: 900, height: 620 });
+
+/** @param {{ width: number, height: number }} size */
+export function isSmallCanvas(size) {
+  return size.width < SMALL_CANVAS.width || size.height < SMALL_CANVAS.height;
+}
+
+/** Within 20% in both directions: the same window, give or take a panel. */
+export function similarCanvasSize(size, other) {
+  return (
+    Math.abs(size.width - other.width) <= other.width * 0.2 &&
+    Math.abs(size.height - other.height) <= other.height * 0.2
+  );
+}
+
+/**
+ * The saved view to open a level at, or null to work the opening view out
+ * again. A saved view belongs to the window size it was saved in: in a window
+ * of a clearly different size, or a small one when the view does not say its
+ * size (saved before sizes were kept), it would open at the wrong zoom, such as
+ * a full-screen fit shown at 26% in a half-screen window.
+ * @param {unknown} saved `{ zoom: { value } | number, scrollX, scrollY, width?, height? }`
+ * @param {{ width: number, height: number }} size the canvas now
+ */
+export function usableSavedView(saved, size) {
+  if (!saved || typeof saved !== "object") return null;
+  const view = /** @type {any} */ (saved);
+  const zoom = typeof view.zoom === "object" ? view.zoom?.value : view.zoom;
+  if (!(zoom > 0) || !Number.isFinite(view.scrollX) || !Number.isFinite(view.scrollY)) return null;
+  const sized = view.width > 0 && view.height > 0;
+  if (sized ? !similarCanvasSize(size, view) : isSmallCanvas(size)) return null;
+  return {
+    zoom,
+    scrollX: view.scrollX,
+    scrollY: view.scrollY,
+    width: sized ? view.width : size.width,
+    height: sized ? view.height : size.height,
+  };
 }
 
 /**
@@ -294,7 +341,7 @@ export function freshSince(model, known) {
   const record = /** @type {any} */ (known);
   if (!record || !Array.isArray(record.cards) || !Array.isArray(record.steps)) return { cards, steps };
   const knownCards = new Set(record.cards.map(String));
-  const knownSteps = new Set(record.steps.map(String));
+  const knownSteps = new Set(record.steps.map(currentStepSignature));
   for (const card of model.cards) if (!knownCards.has(card.id)) cards.add(card.id);
   for (const step of flowSteps(model.flows)) {
     const signature = stepSignature(step);
