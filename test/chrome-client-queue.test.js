@@ -11,10 +11,10 @@ const sourceUrl = new URL("../src/chrome-client.js", import.meta.url);
 // The ids the served chrome page actually declares. The client reaches for these by id, so a page
 // that stopped declaring one would leave the corresponding feature silently dead behind an
 // `if (element)` guard - a harness that invents an element for any id would never notice.
-const servedChromeIds = new Set(
-  [...createChromeHtml({ key: "abc", file: "/tmp/artifact.html" }).matchAll(/\sid="([^"]+)"/g)].map(
-    (match) => match[1],
-  ),
+const servedIds = (html) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
+const servedChromeIds = servedIds(createChromeHtml({ key: "abc", file: "/tmp/artifact.html" }));
+const servedBoardChromeIds = servedIds(
+  createChromeHtml({ key: "abc", file: "/tmp/artifact.html" }, { boardPage: true }),
 );
 
 const SERVED_TAB_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>";
@@ -467,7 +467,8 @@ async function createChromeHarness({
       getElementById(id) {
         // Answer only for ids the served page declares, so an id the client and the page disagree
         // on fails here the way it would go dead in a browser.
-        if (!servedChromeIds.has(id) && !elements.has(id)) return null;
+        const served = sessionData.boardPage ? servedBoardChromeIds : servedChromeIds;
+        if (!served.has(id) && !elements.has(id)) return null;
         return element(id);
       },
       addEventListener(type, handler, capture) {
@@ -531,6 +532,9 @@ async function createChromeHarness({
       innerWidth: windowWidth,
       clearTimeout: fakeClearTimeout,
       setTimeout: fakeSetTimeout,
+      // The board's code re-read runs on an interval no test advances.
+      setInterval: () => 0,
+      clearInterval: () => {},
       requestAnimationFrame: (callback) => fakeSetTimeout(callback, 16),
       addEventListener(type, handler) {
         if (!windowListeners.has(type)) windowListeners.set(type, []);
@@ -9522,4 +9526,71 @@ test("a board folds its comments in a narrow window, also after a resize, until 
   // An ordinary page keeps its comments open.
   const page = await createChromeHarness({ windowWidth: 780 });
   assert.equal(folded(page), false);
+});
+
+test("canvas mode shows the board's title, summary and health in the one top bar, and queues marks from the comments panel", async () => {
+  const chrome = await createChromeHarness({
+    sessionData: { ...defaultSessionData, boardPage: true },
+    fetchImpl: async (url) => {
+      if (String(url).includes("/whiteboard-channel")) return { ok: true };
+      if (String(url).endsWith("/board")) return { ok: true, json: async () => ({ board: { revision: "r1" } }) };
+      return { ok: true, json: async () => ({ whiteboard: null }) };
+    },
+  });
+  const board = chrome.createInlineWhiteboard();
+  chrome.sendInlineWhiteboardMessage(board, {
+    type: "lavish-whiteboard:ready",
+    diagramIndex: 999,
+    diagramId: "",
+    channelToken: "board-channel",
+  });
+  for (let i = 0; i < 4; i++) await flushPromises();
+  assert.equal(board.posted.at(-1)?.type, "lavish-whiteboard:init");
+
+  chrome.sendInlineWhiteboardMessage(board, {
+    type: "hilight-board:header",
+    diagramIndex: 999,
+    channelId: "board-channel",
+    path: [
+      { id: "", title: "How Hilight works" },
+      { id: "canvas", title: "How the canvas is built" },
+    ],
+    summary: "One board file, two views.",
+    health: { text: "1 of 3 code cards changed", detail: "1 of 3 changed.", warn: true, drifted: "cli", problems: [] },
+  });
+  await flushPromises();
+
+  const crumbs = chrome.element("boardTitle").children;
+  assert.deepEqual(
+    crumbs.map((node) => node.textContent),
+    ["How Hilight works", "/", "How the canvas is built"],
+  );
+  assert.equal(chrome.element("boardInfoWrap").hidden, false, "the summary sits behind the info button");
+  assert.equal(chrome.element("boardInfoText").textContent, "One board file, two views.");
+  assert.equal(chrome.element("resolvedWrap").hidden, false);
+  assert.equal(chrome.element("resolvedCount").textContent, "1 of 3 code cards changed");
+  assert.equal(chrome.element("resolvedButton").classList.contains("is-warn"), true);
+
+  // A parent crumb opens that level on the canvas; Show the first changed card reveals it.
+  crumbs[0].onclick();
+  assert.equal(board.posted.at(-1).type, "hilight-board:openLevel");
+  assert.equal(board.posted.at(-1).level, "");
+  chrome.element("boardHealthShow").onclick();
+  assert.equal(board.posted.at(-1).type, "hilight-board:revealCard");
+  assert.equal(board.posted.at(-1).card, "cli");
+
+  // Queue marks lives in the comments panel: it asks the canvas for the marks and waits.
+  chrome.element("boardNote").value = "Look at the red circle";
+  chrome.element("boardMarks").dispatch("submit", { preventDefault() {} });
+  assert.equal(board.posted.at(-1).type, "hilight-board:queueMarks");
+  assert.equal(board.posted.at(-1).note, "Look at the red circle");
+  assert.equal(chrome.element("boardQueue").disabled, true);
+  chrome.sendInlineWhiteboardMessage(board, {
+    type: "hilight-board:queueSkipped",
+    diagramIndex: 999,
+    channelId: "board-channel",
+  });
+  await flushPromises();
+  assert.equal(chrome.element("boardQueue").disabled, false, "nothing to queue settles the button");
+  assert.equal(chrome.element("boardNote").value, "Look at the red circle", "the note survives a skipped queue");
 });

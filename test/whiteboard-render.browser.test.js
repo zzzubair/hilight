@@ -146,11 +146,11 @@ test(
     assert.equal(result.changedLines, 1);
     assert.deepEqual(result.landings, [1, 1], "an arrow highlights the line it starts on and the line it ends on");
     assert.deepEqual(result.legend, ["Add"]);
-    assert.match(result.health, /1 of 2 code cards changed since pinned/);
+    assert.match(result.health, /1 of 2 code cards changed/);
     assert.equal(result.savedCards, 5);
     assert.equal(result.savedLinks, 5, "saved cards keep their link so a reload admits them again");
     assert.equal(result.connectorsSaved, 0, "connectors come from the file, never from the saved scene");
-    assert.match(result.healthAfter, /all match the code/);
+    assert.match(result.healthAfter, /2 code cards match/);
     assert.deepEqual(result.nested, ["deep"]);
     assert.match(result.crumbs, /Math\s*\/\s*Inside/);
   },

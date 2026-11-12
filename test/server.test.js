@@ -6908,3 +6908,20 @@ test("a board page shows a phone note instead of the canvas, decided by touch-on
   // The desktop-only stylesheet a board links keeps the rule.
   assert.match(desktopOnlyChromeCss(css), /\(not \(any-pointer: fine\)\)/);
 });
+
+test("canvas mode has one top bar: the board's title replaces the file name, and the marks row sits beside Send", () => {
+  const board = createChromeHtml({ key: "abc", file: "/tmp/board.html" }, { boardPage: true });
+  assert.match(board, /<nav class="board-title" id="boardTitle"/);
+  assert.match(board, /id="boardInfoButton"[^>]*aria-label="About this board"/);
+  assert.doesNotMatch(board, /class="brand-file"/);
+  assert.match(
+    board,
+    /<h2 class="resolved-title" id="resolvedTitle">Board status<\/h2><\/div><section class="board-health"/,
+  );
+  assert.match(
+    board,
+    /<form class="board-marks" id="boardMarks">.*Queue marks<\/button><\/form><button class="button send-button" id="send"/,
+  );
+  const page = createChromeHtml({ key: "abc", file: "/tmp/page.html" });
+  assert.doesNotMatch(page, /board-title|board-marks|board-health/, "non-canvas pages are unchanged");
+});

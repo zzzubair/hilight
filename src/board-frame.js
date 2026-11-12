@@ -66,6 +66,8 @@ const h = React.createElement;
 const SAVE_DEBOUNCE_MS = 800;
 const AUTO_REVEAL_DELAY_MS = 1500;
 const AUTO_REVEAL_FALLBACK_MS = 15000;
+// Excalidraw tools that only look or point; any other tool means the reviewer is drawing.
+const VIEW_TOOLS = new Set(["selection", "hand", "laser"]);
 const INK = "#1f6fe0";
 const EXCALIFONT = 5;
 
@@ -225,21 +227,19 @@ export function startBoard(init, { post }) {
   // Shell
   document.body.dataset.lavishWhiteboardTheme = s.theme;
   document.body.dataset.hilightBoard = "";
-  const crumbs = el("nav", { className: "bd-crumbs", ariaLabel: "Board levels" });
-  const health = el("button", { className: "bd-health", type: "button", hidden: true });
-  const problemsChip = el("button", { className: "bd-health is-warn bd-problems", type: "button", hidden: true });
-  const note = el("input", { className: "bd-note", placeholder: "Note for the agent (optional)", autocomplete: "off" });
-  const fit = el("button", { className: "bd-button bd-icon", type: "button", title: "Fit the board to the screen" });
-  fit.innerHTML =
-    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg>';
-  // Zoom and undo live in the bar, outside the canvas, so no floating control
-  // ever sits on top of code.
+  // The board has no bar of its own. Its title, summary and code-card health
+  // go up to the review page's one top bar (postHeader), the note and Queue
+  // marks live in the comments panel, and everything else floats on the canvas.
   const iconButton = (title, path) => {
     const button = el("button", { className: "bd-button bd-icon", type: "button", title });
     button.setAttribute("aria-label", title);
     button.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
     return button;
   };
+  const drawButton = el("button", { className: "bd-button bd-draw", type: "button", title: "Show the drawing tools" });
+  drawButton.setAttribute("aria-pressed", "false");
+  drawButton.innerHTML =
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>Draw</span>';
   const undoButton = iconButton(
     "Undo (Ctrl+Z)",
     '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
@@ -252,40 +252,26 @@ export function startBoard(init, { post }) {
   const zoomInButton = iconButton("Zoom in", '<path d="M12 5v14M5 12h14"/>');
   const zoomLabel = el("button", { className: "bd-button bd-zoom", type: "button", title: "Reset zoom to 100%" });
   zoomLabel.textContent = "100%";
-  const zoomGroup = el(
+  const fit = iconButton(
+    "Fit the board to the screen",
+    '<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>',
+  );
+  const dockRule = () => el("span", { className: "bd-dock-rule", ariaHidden: "true" });
+  // One floating cluster in the bottom-left corner, like Figma's and Excalidraw's own.
+  const dock = el(
     "div",
-    { className: "bd-group", role: "group", ariaLabel: "Zoom" },
+    { className: "bd-dock", role: "toolbar", ariaLabel: "Canvas" },
+    drawButton,
+    dockRule(),
+    undoButton,
+    redoButton,
+    dockRule(),
     zoomOutButton,
     zoomLabel,
     zoomInButton,
-  );
-  const historyGroup = el(
-    "div",
-    { className: "bd-group", role: "group", ariaLabel: "History" },
-    undoButton,
-    redoButton,
-  );
-  const queue = el("button", { className: "bd-button bd-primary", type: "button", textContent: "Queue marks" });
-  queue.title = "Describe your arrows, notes and marks to the agent as a page comment";
-  const bar = el(
-    "header",
-    { className: "bd-bar" },
-    crumbs,
-    health,
-    problemsChip,
-    el("div", { className: "bd-spacer" }),
-    note,
-    historyGroup,
-    zoomGroup,
     fit,
-    queue,
   );
-  // The level's summary sits under the bar, outside the canvas, so no floating
-  // control can cover it.
-  const lede = el("div", { className: "bd-lede", hidden: true });
-  const ledeText = el("p", { className: "bd-lede-text" });
-  const legend = el("ul", { className: "bd-legend", ariaLabel: "Flows" });
-  lede.append(ledeText, legend);
+  const legend = el("ul", { className: "bd-legend", ariaLabel: "Flows", hidden: true });
   const editor = el("div", { className: "bd-editor" });
   const toolbar = el("div", { className: "bd-cardbar", hidden: true });
   const commentButton = el("button", { type: "button", className: "bd-chip" });
@@ -294,14 +280,14 @@ export function startBoard(init, { post }) {
   const openButton = el("button", { type: "button", className: "bd-chip", textContent: "Open board →" });
   toolbar.append(commentButton, openButton);
   const status = el("div", { className: "bd-status", hidden: true, role: "status" });
-  // Shown when the agent added cards or arrows since the reviewer last looked.
+  // A small toast on the canvas when the agent added cards or arrows since the reviewer last looked.
   const reveal = el("div", { className: "bd-reveal", hidden: true, role: "status" });
   const revealText = el("p", { className: "bd-reveal-text" });
   const revealShow = el("button", { className: "bd-button bd-primary", type: "button", textContent: "Show me" });
   const revealBack = el("button", { className: "bd-button", type: "button", textContent: "Back to where I was" });
   const revealDone = el("button", { className: "bd-button", type: "button", textContent: "Got it" });
   reveal.append(revealText, revealShow, revealBack, revealDone);
-  const shell = el("div", { className: "bd-shell" }, bar, lede, reveal, editor, toolbar, status);
+  const shell = el("div", { className: "bd-shell" }, editor, reveal, legend, dock, toolbar, status);
   document.body.append(shell);
 
   let statusTimer = 0;
@@ -322,25 +308,37 @@ export function startBoard(init, { post }) {
     return path;
   }
 
-  function renderCrumbs() {
-    crumbs.replaceChildren();
-    const path = levelPath(s.level);
-    path.forEach((level, index) => {
-      if (index > 0) crumbs.append(el("span", { className: "bd-sep", textContent: "/" }));
-      const last = index === path.length - 1;
-      const crumb = el("button", {
-        type: "button",
-        className: "bd-crumb" + (last ? " is-current" : ""),
-        textContent: level.title || "Board",
-        disabled: last,
-      });
-      crumb.onclick = () => openLevel(level.id);
-      crumbs.append(crumb);
-    });
+  // Code-card health in one line, for the review page's status pill.
+  function boardHealth() {
+    const problems = (Array.isArray(s.model.problems) ? s.model.problems : []).map(String);
+    const code = s.model.cards.filter((card) => card.kind === "code" && card.code);
+    const drifted = code.filter((card) => ["stale", "moved", "missing", "invalid"].includes(card.code.status));
+    const unpinned = code.filter((card) => card.code.status === "unpinned");
+    const text = !code.length
+      ? ""
+      : drifted.length
+        ? `${drifted.length} of ${code.length} code cards changed`
+        : unpinned.length
+          ? `${code.length} code cards · ${unpinned.length} unpinned`
+          : `${code.length} code cards match`;
+    const detail = !code.length
+      ? ""
+      : drifted.length
+        ? `${drifted.length} of ${code.length} code cards changed since the agent pinned them.`
+        : unpinned.length
+          ? `${unpinned.length} of ${code.length} code cards show live lines the agent has not pinned yet.`
+          : `All ${code.length} code cards still match the code. Every pinned range was re-read from disk when this board opened.`;
+    return { text, detail, warn: drifted.length > 0, drifted: drifted[0]?.id || "", problems };
+  }
+
+  // The board's title, summary and health live in the review page's top bar.
+  function postHeader() {
+    const path = levelPath(s.level).map((level) => ({ id: level.id, title: String(level.title || "Board") }));
     const summary = String(s.levelsById.get(s.level)?.summary || "").trim();
-    ledeText.textContent = summary;
-    ledeText.title = summary;
-    ledeText.hidden = !summary;
+    post({ type: "hilight-board:header", path, summary, health: boardHealth() });
+  }
+
+  function renderLegend() {
     legend.replaceChildren();
     for (const flow of (s.model.flows || []).filter((item) => item.level === s.level && item.name)) {
       const item = el("li", { className: "bd-legend-item", textContent: flow.name });
@@ -348,35 +346,11 @@ export function startBoard(init, { post }) {
       legend.append(item);
     }
     legend.hidden = !legend.childElementCount;
-    lede.hidden = !summary && legend.hidden;
   }
 
-  function renderHealth() {
-    const problems = Array.isArray(s.model.problems) ? s.model.problems : [];
-    problemsChip.hidden = !problems.length;
-    problemsChip.textContent = `${problems.length} board problem${problems.length === 1 ? "" : "s"}`;
-    problemsChip.title = problems.join("\n");
-    problemsChip.onclick = () => showStatus(problems.slice(0, 3).join(" "), { transient: false });
-    const code = s.model.cards.filter((card) => card.kind === "code" && card.code);
-    if (!code.length) {
-      health.hidden = true;
-      return;
-    }
-    const drifted = code.filter((card) => ["stale", "moved", "missing", "invalid"].includes(card.code.status));
-    const unpinned = code.filter((card) => card.code.status === "unpinned");
-    health.hidden = false;
-    health.className = "bd-health" + (drifted.length ? " is-warn" : "");
-    health.textContent = drifted.length
-      ? `${drifted.length} of ${code.length} code cards changed since pinned`
-      : unpinned.length
-        ? `${code.length} code cards · ${unpinned.length} unpinned`
-        : `${code.length} code cards · all match the code`;
-    health.title = drifted.length
-      ? "Show the first one"
-      : "Every pinned range was re-read from disk when this board opened";
-    health.onclick = () => {
-      if (drifted[0]) revealCard(drifted[0].id);
-    };
+  function renderCrumbs() {
+    renderLegend();
+    postHeader();
   }
 
   // ---------------------------------------------------------------------------
@@ -856,6 +830,8 @@ export function startBoard(init, { post }) {
   function onChange(elements, appState) {
     stripAdmittedLinks(elements);
     if (s.switching) return;
+    // A tool picked by its keyboard shortcut brings the drawing tools out.
+    if (!VIEW_TOOLS.has(appState.activeTool?.type)) setDrawing(true);
     const selected = selectedCardId(appState);
     if (selected !== s.selectedCard) {
       s.selectedCard = selected;
@@ -958,20 +934,21 @@ export function startBoard(init, { post }) {
 
   // Excalidraw's floating controls (tools, menu, library, zoom and undo, help),
   // measured, so views and pinned card headers keep clear of them.
-  const TOP_CONTROLS = ".App-toolbar, .main-menu-trigger, .default-sidebar-trigger, .sidebar-trigger";
-  const BOTTOM_CONTROLS = ".layer-ui__wrapper__footer-left, .layer-ui__wrapper__footer-right, .help-icon";
+  // The drawing tools (only while Draw is on), the new-card toast, and the floating dock and legend.
+  const TOP_CONTROLS = ".App-toolbar, .bd-reveal";
+  const BOTTOM_CONTROLS = ".bd-dock, .bd-legend";
 
   function controlInsets() {
     const box = editor.getBoundingClientRect();
-    let top = 64;
+    let top = 8;
     let bottom = 8;
-    for (const node of editor.querySelectorAll(TOP_CONTROLS)) {
+    for (const node of shell.querySelectorAll(TOP_CONTROLS)) {
       // The small-screen side column (library, lock, hand) runs down the right edge, not across.
       if (node.closest(".mobile-misc-tools-container")) continue;
       const rect = node.getBoundingClientRect();
       if (rect.height && rect.top < box.top + box.height / 2) top = Math.max(top, rect.bottom - box.top);
     }
-    for (const node of editor.querySelectorAll(BOTTOM_CONTROLS)) {
+    for (const node of shell.querySelectorAll(BOTTOM_CONTROLS)) {
       const rect = node.getBoundingClientRect();
       if (rect.height && rect.bottom > box.top + box.height / 2) bottom = Math.max(bottom, box.bottom - rect.top);
     }
@@ -1445,18 +1422,18 @@ export function startBoard(init, { post }) {
     });
   }
 
-  async function queueMarks() {
+  // The note and the Queue marks button live in the review page's comments
+  // panel; it asks for the marks here, where the scene is.
+  async function queueMarks(text) {
     if (!s.api || s.queueBusy) return;
     const payload = persistencePayload();
     const summary = summarizeBoardMarks(s.model, payload.scene.elements);
-    const text = note.value.trim();
     if (!summary.lines.length && !text) {
-      showStatus("Nothing to send yet: draw an arrow, write a note, or circle something first.");
+      post({ type: "hilight-board:queueSkipped" });
+      showStatus("Nothing to send yet: press Draw, then draw an arrow, write a note, or circle something.");
       return;
     }
     s.queueBusy = true;
-    queue.disabled = true;
-    queue.textContent = "Queueing…";
     try {
       const blob = await exportToBlob({
         elements: exportElements(s.elementsByLevel.get(s.level) || []),
@@ -1474,24 +1451,26 @@ export function startBoard(init, { post }) {
         pngDataUrl: await blobToDataUrl(blob),
       });
     } catch (error) {
-      resetQueue();
-      showStatus(`Queue failed: ${error instanceof Error ? error.message : String(error)}`, { transient: false });
+      s.queueBusy = false;
+      const message = `Queue failed: ${error instanceof Error ? error.message : String(error)}`;
+      post({ type: "hilight-board:queueSkipped", error: message });
+      showStatus(message, { transient: false });
     }
   }
 
-  function resetQueue() {
-    s.queueBusy = false;
-    queue.disabled = false;
-    queue.textContent = "Queue marks";
-  }
-
-  queue.onclick = () => queueMarks();
-  note.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229) {
-      event.preventDefault();
-      queueMarks();
+  // Drawing tools stay out of the way until the reviewer asks for them: review comes first.
+  function setDrawing(on) {
+    const drawing = Boolean(on);
+    if (document.body.hasAttribute("data-drawing") === drawing) return;
+    document.body.toggleAttribute("data-drawing", drawing);
+    drawButton.setAttribute("aria-pressed", String(drawing));
+    drawButton.title = drawing ? "Hide the drawing tools" : "Show the drawing tools";
+    if (!drawing && s.api && !VIEW_TOOLS.has(s.api.getAppState().activeTool?.type)) {
+      s.api.setActiveTool({ type: "selection" });
     }
-  });
+  }
+  drawButton.onclick = () => setDrawing(!document.body.hasAttribute("data-drawing"));
+
   fit.onclick = () => fitAll();
   commentButton.onclick = () => {
     const card = s.cardsById.get(s.selectedCard);
@@ -1612,7 +1591,6 @@ export function startBoard(init, { post }) {
   }
   createRoot(editor).render(h(BoardApp));
   renderCrumbs();
-  renderHealth();
   window.addEventListener("resize", () => {
     scheduleGeometry();
     onResize();
@@ -1660,19 +1638,21 @@ export function startBoard(init, { post }) {
     }
     if (message.type === "lavish-whiteboard:saveResult") handleSaveResult(message);
     if (message.type === "lavish-whiteboard:queueResult") {
-      resetQueue();
-      if (message.ok) {
-        note.value = "";
-        showStatus("Queued as a page comment. Press Send to agent in the margin when you are ready.");
-      } else {
-        showStatus(`Queue failed: ${String(message.error || "unknown error")}`, { transient: false });
-      }
+      s.queueBusy = false;
+      if (message.ok) showStatus("Queued as a page comment. Press Send to agent when you are ready.");
+      else showStatus(`Queue failed: ${String(message.error || "unknown error")}`, { transient: false });
     }
+    if (message.type === "hilight-board:queueMarks") void queueMarks(String(message.note || "").trim());
+    if (message.type === "hilight-board:openLevel") {
+      const level = String(message.level || "");
+      if (s.levelsById.has(level) && level !== s.level) void openLevel(level);
+    }
+    if (message.type === "hilight-board:revealCard") revealCard(String(message.card || ""));
     // The chrome re-reads the board (code ranges included) while it is open, so
     // a card flips to stale when its file changes on disk.
     if (message.type === "hilight-board:update" && message.board && message.board.revision === s.model.revision) {
       indexModel(message.board);
-      renderHealth();
+      renderCrumbs();
       notifyCards();
       scheduleLinks();
     }

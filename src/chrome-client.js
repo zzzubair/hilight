@@ -46,6 +46,24 @@ let pageBarHeight = 0;
 let lastThreadAnchors = "[]";
 let pageSignature = "";
 let resolvedDrawerOpen = false;
+// Canvas mode (see renderBoardHeader).
+const boardTitle = document.getElementById("boardTitle");
+const boardInfoWrap = document.getElementById("boardInfoWrap");
+const boardInfoButton = document.getElementById("boardInfoButton");
+const boardInfo = document.getElementById("boardInfo");
+const boardInfoText = document.getElementById("boardInfoText");
+const boardHealthSection = document.getElementById("boardHealth");
+const boardHealthText = document.getElementById("boardHealthText");
+const boardHealthShow = document.getElementById("boardHealthShow");
+const boardProblems = document.getElementById("boardProblems");
+const boardMarks = /** @type {HTMLFormElement | null} */ (document.getElementById("boardMarks"));
+const boardNote = /** @type {HTMLInputElement | null} */ (document.getElementById("boardNote"));
+const boardQueue = /** @type {HTMLButtonElement | null} */ (document.getElementById("boardQueue"));
+const BOARD_QUEUE_TIMEOUT_MS = 20000;
+/** @type {{ text: string, detail: string, warn: boolean, drifted: string, problems: string[] }} */
+let boardHealth = { text: "", detail: "", warn: false, drifted: "", problems: [] };
+let boardQueueTimer = 0;
+let threadCounts = { resolved: 0, offPage: 0 };
 let resolveToastTimer;
 let resolveToastThreadId = "";
 const RESOLVE_TOAST_MS = 6000;
@@ -3367,6 +3385,8 @@ function postToWhiteboardOverlay(message) {
 function postToInlineWhiteboard(index, message) {
   const channel = inlineWhiteboardChannels.get(index);
   if (channel?.window) channel.window.postMessage({ ...message, channelId: channel.channelId }, "*");
+  // Every queue result for the board also settles the comments panel's Queue marks button.
+  if (index === BOARD_SCENE_INDEX && message.type === "lavish-whiteboard:queueResult") finishBoardQueue(message.ok);
 }
 
 function postToWhiteboard(index, placement, message) {
@@ -3478,6 +3498,135 @@ async function refreshBoard() {
   } catch {
     // Best effort; the next tick or reload re-reads it.
   }
+}
+
+// Canvas mode keeps one top bar. The board frame reports its title path,
+// summary and code-card health (hilight-board:header); the bar shows the title,
+// an info popover holds the summary, and the health joins the resolved and
+// off-page counts in one status pill. The note and Queue marks sit in the
+// comments panel beside Send; the frame exports the marks when asked.
+
+const shortText = (value, max) => String(value ?? "").slice(0, max);
+
+function renderBoardHeader(message) {
+  const path = (Array.isArray(message.path) ? message.path : [])
+    .slice(-12)
+    .map((level) => ({ id: shortText(level?.id, 200), title: shortText(level?.title, 200) || "Board" }));
+  if (boardTitle && path.length) {
+    const nodes = [];
+    path.forEach((level, index) => {
+      if (index > 0) {
+        const sep = document.createElement("span");
+        sep.className = "board-sep";
+        sep.textContent = "/";
+        nodes.push(sep);
+      }
+      const last = index === path.length - 1;
+      const crumb = document.createElement(last ? "span" : "button");
+      crumb.className = "board-crumb" + (last ? " is-current" : "");
+      crumb.textContent = level.title;
+      crumb.title = level.title;
+      if (!last) {
+        /** @type {HTMLButtonElement} */ (crumb).type = "button";
+        crumb.onclick = () =>
+          postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:openLevel", level: level.id });
+      }
+      nodes.push(crumb);
+    });
+    boardTitle.replaceChildren(...nodes);
+  }
+  const summary = shortText(message.summary, 2000).trim();
+  if (boardInfoText) boardInfoText.textContent = summary;
+  if (boardInfoWrap) boardInfoWrap.hidden = !summary;
+  if (!summary) setBoardInfoOpen(false);
+  const health = message.health && typeof message.health === "object" ? message.health : {};
+  boardHealth = {
+    text: shortText(health.text, 200),
+    detail: shortText(health.detail, 400),
+    warn: health.warn === true,
+    drifted: shortText(health.drifted, 200),
+    problems: (Array.isArray(health.problems) ? health.problems : []).slice(0, 20).map((item) => shortText(item, 300)),
+  };
+  renderStatusPill();
+}
+
+function setBoardInfoOpen(open) {
+  if (!boardInfo || !boardInfoButton) return;
+  boardInfo.hidden = !open;
+  boardInfoButton.setAttribute("aria-expanded", String(Boolean(open)));
+  if (open) closeMenus();
+}
+
+// The one status pill: code-card health, board problems, then resolved and off-page comments.
+function renderStatusPill() {
+  const { resolved, offPage } = threadCounts;
+  const problems = boardHealth.problems.length;
+  const parts = [
+    boardHealth.text,
+    problems ? `${problems} board problem${problems === 1 ? "" : "s"}` : "",
+    resolved ? resolved + " resolved" : "",
+    offPage ? offPage + " off-page" : "",
+  ].filter(Boolean);
+  resolvedWrap.hidden = !parts.length || ended;
+  resolvedCount.textContent = parts.join(" · ");
+  resolvedButton.classList.toggle("has-health", Boolean(boardHealth.text));
+  resolvedButton.classList.toggle("is-warn", boardHealth.warn || problems > 0);
+  if (boardHealthSection && boardHealthText && boardHealthShow && boardProblems) {
+    boardHealthSection.hidden = !boardHealth.detail && !problems;
+    boardHealthText.textContent = boardHealth.detail;
+    boardHealthText.hidden = !boardHealth.detail;
+    boardHealthShow.hidden = !boardHealth.drifted;
+    boardProblems.replaceChildren(
+      ...boardHealth.problems.map((text) => {
+        const item = document.createElement("li");
+        item.textContent = text;
+        return item;
+      }),
+    );
+    boardProblems.hidden = !problems;
+  }
+  if (resolvedWrap.hidden && resolvedDrawerOpen) setResolvedDrawerOpen(false);
+}
+
+function finishBoardQueue(ok) {
+  if (!boardQueue) return;
+  window.clearTimeout(boardQueueTimer);
+  boardQueue.disabled = false;
+  boardQueue.textContent = "Queue marks";
+  if (ok && boardNote) boardNote.value = "";
+}
+
+if (boardInfoButton) {
+  boardInfoButton.onclick = () => setBoardInfoOpen(Boolean(boardInfo?.hidden));
+  document.addEventListener("mousedown", (event) => {
+    if (boardInfo && !boardInfo.hidden && !boardInfoWrap?.contains(/** @type {Node} */ (event.target))) {
+      setBoardInfoOpen(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && boardInfo && !boardInfo.hidden) {
+      setBoardInfoOpen(false);
+      boardInfoButton.focus();
+    }
+  });
+}
+if (boardHealthShow) {
+  boardHealthShow.onclick = () => {
+    if (!boardHealth.drifted) return;
+    closeResolvedDrawer();
+    postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:revealCard", card: boardHealth.drifted });
+  };
+}
+if (boardMarks && boardQueue && boardNote) {
+  boardMarks.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (boardQueue.disabled || !inlineWhiteboardChannels.get(BOARD_SCENE_INDEX)?.initialized) return;
+    boardQueue.disabled = true;
+    boardQueue.textContent = "Queueing…";
+    // A board that never answers must not leave the button stuck.
+    boardQueueTimer = window.setTimeout(() => finishBoardQueue(false), BOARD_QUEUE_TIMEOUT_MS);
+    postToInlineWhiteboard(BOARD_SCENE_INDEX, { type: "hilight-board:queueMarks", note: boardNote.value });
+  });
 }
 
 function startBoardRefresh() {
@@ -3871,6 +4020,10 @@ function handleAuthenticatedWhiteboardMessage(index, message, mode) {
   if (message.type === "lavish-whiteboard:teardownReady") finishWhiteboardTeardown(index, message, mode);
   if (message.type === "lavish-whiteboard:teardownFailed") failWhiteboardTeardown(index, message, mode);
   if (message.type === "lavish-whiteboard:flushComplete") finishWhiteboardFlush(index, message, mode);
+  if (index === BOARD_SCENE_INDEX && mode === "inline") {
+    if (message.type === "hilight-board:header") renderBoardHeader(message);
+    if (message.type === "hilight-board:queueSkipped") finishBoardQueue(false);
+  }
 }
 
 // Inline whiteboard frames are created by the SDK inside the artifact document,
@@ -5373,13 +5526,8 @@ function renderPageThread() {
 function renderResolvedDrawer(threads, missing) {
   const resolved = threads.filter((thread) => thread.resolved);
   const offPage = threads.filter((thread) => !thread.resolved && missing(thread));
-  const total = resolved.length + offPage.length;
-  resolvedWrap.hidden = total === 0 || ended;
-  resolvedCount.textContent =
-    (resolved.length ? resolved.length + " resolved" : "") +
-    (resolved.length && offPage.length ? " · " : "") +
-    (offPage.length ? offPage.length + " off-page" : "");
-  if (resolvedWrap.hidden && resolvedDrawerOpen) setResolvedDrawerOpen(false);
+  threadCounts = { resolved: resolved.length, offPage: offPage.length };
+  renderStatusPill();
   const nodes = [];
   if (offPage.length) {
     const heading = document.createElement("div");

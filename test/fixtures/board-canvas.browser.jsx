@@ -99,7 +99,9 @@ async function run() {
   document.querySelector("button[title='Fit the board to the screen']").click();
   await until("root cards", () => visibleCards().length === 4);
   const root = visibleCards();
-  const health = document.querySelector(".bd-health")?.textContent || "";
+  // The board has no bar: its title path and code-card health go to the review page's top bar.
+  const header = () => posts.filter((m) => m.type === "hilight-board:header").at(-1);
+  const health = header()?.health?.text || "";
   const changedLines = [...document.querySelectorAll('.bd-card[data-card="stale"] .bd-line.is-changed')].length;
   // Both ends of a flow step highlight the lines the arrow joins, and the legend names the flow.
   const landings = ["fresh", "stale"].map(
@@ -118,15 +120,15 @@ async function run() {
 
   // The chrome re-reads the code: a fixed range turns the card back to fresh.
   board.onTopMessage({ type: "hilight-board:update", board: model("fresh") });
-  await until("refresh", () => document.querySelector(".bd-health")?.textContent.includes("match"));
-  const healthAfter = document.querySelector(".bd-health")?.textContent || "";
+  await until("refresh", () => header()?.health?.text.includes("match"));
+  const healthAfter = header()?.health?.text || "";
 
   // Revealing a nested card opens its board level.
   board.onParentMessage({ type: "hilight-board:reveal", card: "deep" });
   await until("nested level", () => visibleCards().some((item) => item.id === "deep"));
   await sleep(300);
   const nested = visibleCards().map((item) => item.id);
-  const crumbs = document.querySelector(".bd-crumbs")?.textContent || "";
+  const crumbs = (header()?.path || []).map((level) => level.title).join(" / ");
 
   return {
     pass: true,

@@ -2216,3 +2216,186 @@ body.layout-gate-active iframe#artifact {
     box-shadow: 0 0 0 10px transparent;
   }
 }
+
+/* Canvas mode: one top bar. The board's title replaces the file name, its summary sits behind an
+   info button, code-card health joins the status pill, and the board's note and Queue marks sit
+   in the comments panel beside Send. */
+body.board-page {
+  --bar-h: 44px;
+  --board-warn: #f0b04a;
+  --board-warn-line: #5a4316;
+  --board-ok: #4fbf72;
+}
+@media (prefers-color-scheme: light) {
+  body.board-page {
+    --board-warn: #9a5c00;
+    --board-warn-line: #f3d9a6;
+    --board-ok: #2f8a4c;
+  }
+}
+body.board-page .brand {
+  position: relative;
+  align-items: center;
+  gap: 8px;
+}
+.board-title {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.board-crumb {
+  min-width: 0;
+  max-width: 40ch;
+  overflow: hidden;
+  padding: 4px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-label);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.board-crumb {
+  cursor: pointer;
+}
+button.board-crumb:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.board-crumb.is-current {
+  color: var(--fg);
+  font-weight: var(--w-semi);
+}
+.board-sep {
+  color: var(--fg-label);
+}
+.board-info-wrap[hidden] {
+  display: none;
+}
+.board-info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--fg-label);
+  cursor: pointer;
+}
+.board-info-button:hover,
+.board-info-button[aria-expanded="true"] {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.board-info {
+  top: 38px;
+  left: 0;
+  width: min(420px, calc(100vw - 24px));
+  padding: var(--space-6) var(--space-8);
+  white-space: normal;
+}
+.board-info-text {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.board-info-file {
+  margin: var(--space-4) 0 0;
+  color: var(--fg-label);
+  font-size: var(--text-xs);
+}
+.resolved-button.has-health::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--board-ok);
+  vertical-align: 1px;
+}
+.resolved-button.is-warn {
+  border-color: var(--board-warn-line);
+  color: var(--board-warn);
+}
+.resolved-button.is-warn::before {
+  background: var(--board-warn);
+}
+.board-health {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  margin: 0 var(--space-4) var(--space-6);
+  padding: var(--space-5) var(--space-6);
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.board-health[hidden],
+.board-health [hidden] {
+  display: none;
+}
+.board-health-text {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.board-health-show {
+  min-height: 28px;
+  color: var(--accent);
+  font-weight: var(--w-semi);
+}
+.board-problems {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--board-warn);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.board-marks {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.board-note {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.board-note:focus {
+  border-color: var(--border-strong);
+  outline: none;
+}
+.board-queue {
+  flex: 0 0 auto;
+  height: 36px;
+  padding: 0 12px;
+  border: var(--hairline);
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+.board-queue:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.board-queue:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
