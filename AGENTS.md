@@ -39,6 +39,7 @@ Seven-tab pool regression: `HILIGHT_BROWSER_E2E=1 node --test test/event-transpo
 - A test that runs a pre-rename build must pass `LAVISH_AXI_*` env names. That build ignores `HILIGHT_*` and falls back to the real `~/.lavish-axi` and port 4387.
 - `canonicalFile` runs `realpath`. Two paths to the same file are one session.
 - `normalizeArgv` must let AXI `RESERVED_COMMANDS` (including `update`) pass through. A bare `hilight update` must not become `open update`.
+- A new command flag goes into `COMMAND_FLAGS` (`src/cli.js`), or the command refuses it with exit 2.
 
 ## Safety and correctness
 
@@ -72,7 +73,7 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - Every poll exit path undoes the presence it set and cancels the disconnect grace timer. `/api/poll` subscribes to closure before its first `await`. [Request flow](docs/invariants.md#request-flow).
 - Poll stdout is reserved for the final JSON/TOON response. Recurring wait ticks go to stderr only on a TTY, and notification failure never affects the poll. [Request flow](docs/invariants.md#request-flow).
 - The chrome never promotes presence to `working` on send. It renders only the state the live stream reports. [Request flow](docs/invariants.md#request-flow).
-- Poll feedback field order is `prompts`, `artifact_failures`, `next_step`, then `dom_snapshot`. Never move `next_step` after the snapshot. [Request flow](docs/invariants.md#request-flow).
+- Poll feedback field order is `prompts`, `artifact_failures`, `changes`, `next_step`, then `dom_snapshot` (only with `--full`). Never move `next_step` after the snapshot. Polls send only what is new; context comes from `hilight catch-up`, never a guess. [Request flow](docs/invariants.md#request-flow).
 - `takeFeedback` is destructive. A disconnected poll restores through `queuePrompts` `restore`: prepend, do not re-plan, re-emit `feedback`, and exempt only the request-wide attachment-ref cap. [Request flow](docs/invariants.md#request-flow).
 - A disconnected-poll restore never overwrites a newer `dom_snapshot` or `artifact_failures` recorded after the take. [Request flow](docs/invariants.md#request-flow).
 - A layout warning clears only on a newer artifact revision plus a complete pass at the same viewport class. Do not emit `feedback` for a detection. [Passive layout-warning inbox](docs/invariants.md#passive-layout-warning-inbox).

@@ -26,7 +26,6 @@ test("createSkillMarkdown emits Hermes Agent metadata as string-valued frontmatt
   const { frontmatter } = parseSkillFrontmatter(createSkillMarkdown());
 
   assert.deepEqual(frontmatter.metadata, {
-    author: "Zubair Shaik (zzzubair), based on Lavish by Kun Chen (kunchenguid)",
     "argument-hint": "<what the artifact should show>",
     "hermes-tags": "html, review, artifacts, visualization",
     "hermes-category": "productivity",
@@ -81,15 +80,16 @@ test("createSkillMarkdown handles explicit /hilight invocation arguments", () =>
 
 test("createSkillMarkdown stays a short stub that defers to the CLI", () => {
   const md = createSkillMarkdown();
+  const body = md.slice(md.indexOf("\n---\n", 4) + 5);
 
   assert.ok(md.length <= MAX_SKILL_MARKDOWN_CHARS, "the generated skill stays drastically smaller than CLI guidance");
-  assert.match(md, /Hilight/);
-  assert.match(md, /`hilight --help`/);
-  assert.match(md, /`hilight reply --help`/);
-  assert.match(md, /not about to long-poll/);
-  assert.match(md, /`hilight design`/);
-  assert.match(md, /`hilight playbook <id>`/);
+  assert.ok(body.length < 1000, `the skill body stays under 1 KB (${body.length})`);
+  assert.match(md, /Run `hilight --help` first: the CLI is the source of truth/);
   assert.match(md, /stale/i);
+  // Credit lives in LICENSE and the README fork note; the skill is loaded into agent context.
+  assert.doesNotMatch(md, /author:|Kun Chen/);
+  // The CLI owns the per-command list, the one-page rule, and the page reference.
+  assert.doesNotMatch(md, /hilight reply --help|One page per topic|using-the-page/);
 });
 
 test("createSkillMarkdown does not bake CLI-owned guidance into the skill", () => {

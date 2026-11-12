@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import { AxiError, installSessionStartHooks, RESERVED_COMMANDS, runAxiCli } from "axi-sdk-js";
 
-import { splitThreadReply } from "./comment-threads.js";
+import { splitThreadReply, threadAnchorLine } from "./comment-threads.js";
 import { createDesignOutput, DESIGN_PRIORITY_RULE, DESIGN_SYSTEM_HINT } from "./design-reference.js";
 import {
   buildSelfContainedHtml,
@@ -76,6 +76,7 @@ const COMMANDS = new Set([
   "open",
   "poll",
   "reply",
+  "catch-up",
   "end",
   "stop",
   "server",
@@ -94,13 +95,12 @@ const DESCRIPTION =
   "Hilight helps agents turn rich HTML artifacts into collaborative human review surfaces. Whenever you are about to give user a complex response that will be easier to understand via a rich / interactive page, consider using Hilight. " +
   "First generate an interactive HTML artifact according to user request, then run `hilight <html-file>` so the user can visually review it, annotate elements or selected text, queue prompts, and send feedback back through `hilight poll`.";
 export const POLL_WAKE_PATH_RULES = Object.freeze([
-  "Keep the poll in the foreground by default and let it return the feedback directly to the agent.",
-  "A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent.",
-  "Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive.",
-  "If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor.",
-  "Do not tell the user the artifact is being monitored until that wake path is live.",
-  "If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely.",
-  "If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited.",
+  "Run the poll in the foreground and read its output when it exits.",
+  "Run it in the background only when you are told the moment a background command finishes, so its output still reaches you.",
+  "Never detach it to keep it alive (`nohup`, a trailing `&`, `disown`, `start /b`, a separate terminal window): nobody would read the feedback it prints.",
+  "Do not tell the user you are watching the page until a poll is actually running.",
+  "If the poll is killed or times out, re-run it: feedback stays queued until a poll delivers it. A delivered response is consumed, so read all of it.",
+  "If it returns browser_disconnected, the session can still be resumed; ask the user whether to reopen or end it, and do neither uninvited.",
 ]);
 export const POLL_SEND_AND_END_RULE =
   "`Send all and end session` ends the session. Its final feedback is still delivered once. After that response, polling stops, and the agent must not reopen the session uninvited.";
@@ -113,8 +113,66 @@ export const POLL_AGENT_REPLY_RULE =
   " " +
   "Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting.";
 const POLL_AGENT_REPLY_HELP_POINTER = "The comment threads' Markdown subset is in README's Feedback controls bullet.";
-const POLL_AGENT_REPLY_NEXT_POINTER = "The comment threads' Markdown subset is in `hilight poll --help` and README.";
 const POLL_VALUE_FLAGS = ["--agent-reply", "--agent-reply-file", "--timeout-ms", "--owner"];
+
+// Every flag each command reads. A flag not listed here is a typo the command would otherwise
+// silently ignore, so it is refused (exit 2) with the valid flags named. `--help` always passes.
+const COMMAND_FLAGS = {
+  open: { switches: ["--no-gate", "--reopen", "--no-open"] },
+  poll: { switches: ["--takeover", "--full"], values: POLL_VALUE_FLAGS },
+  reply: { values: ["--agent-reply", "--agent-reply-file"] },
+  "catch-up": { switches: ["--full"] },
+  end: {},
+  export: { values: ["--out"] },
+  share: { switches: ["--unpublish", "--private"], values: SHARE_VALUE_FLAGS },
+  stop: { values: ["--port"] },
+  libraries: { values: ["--search", "--library"] },
+  update: { switches: ["--check"] },
+  board: { switches: ["--repin"] },
+  server: { switches: ["--verbose"], values: ["--port", "--also-listen"] },
+  playbook: {},
+  design: {},
+};
+
+export function assertKnownFlags(command, args) {
+  const spec = COMMAND_FLAGS[command];
+  if (!spec) return;
+  const switches = spec.switches || [];
+  const values = spec.values || [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--") return;
+    if (arg === "-" || !arg.startsWith("-") || arg === "--help") continue;
+    const name = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+    if (values.includes(name)) {
+      if (name === arg) i += 1;
+      continue;
+    }
+    if (switches.includes(arg)) continue;
+    const valid = [...switches, ...values.map((flag) => `${flag} <value>`)];
+    throw new AxiError(`Unknown flag for \`hilight ${command}\`: ${name}`, "VALIDATION_ERROR", [
+      valid.length ? `Valid flags: ${valid.join(", ")}` : `\`hilight ${command}\` takes no flags`,
+      `Run \`hilight ${command} --help\``,
+    ]);
+  }
+}
+
+/**
+ * @template C
+ * @param {Record<string, import("axi-sdk-js").AxiCliCommand<C>>} commands
+ * @returns {Record<string, import("axi-sdk-js").AxiCliCommand<C>>}
+ */
+function withFlagCheck(commands) {
+  return Object.fromEntries(
+    Object.entries(commands).map(([name, handler]) => [
+      name,
+      (args, context) => {
+        assertKnownFlags(name, args);
+        return handler(args, context);
+      },
+    ]),
+  );
+}
 const AGENT_REPLY_JSON_LIMIT_BYTES = 2 * 1024 * 1024;
 const AGENT_REPLY_JSON_ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ agent_reply: "" }));
 const AGENT_REPLY_INPUT_LIMIT_BYTES = AGENT_REPLY_JSON_LIMIT_BYTES - AGENT_REPLY_JSON_ENVELOPE_BYTES;
@@ -122,10 +180,9 @@ const AGENT_REPLY_LIMIT_LABEL = "2 MB JSON request limit";
 const POLL_STATE_HEADER = "lavish-poll-state";
 const CODEX_POLL_WAKE_PATH_GUIDANCE =
   "Codex detected: completed background tasks may not resume Codex automatically, so keep the poll attached to the active turn.";
-// Inlined at build time from package.json; falls back to reading package.json so source-run tests work.
-export const VERSION =
-  process.env.LAVISH_AXI_BUILD_VERSION ||
-  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+import { isVersionOnlyArgv, VERSION } from "./version.js";
+
+export { isVersionOnlyArgv, VERSION };
 
 export function detectInvokingAgent(env = process.env) {
   return ["CODEX_SANDBOX", "CODEX_THREAD_ID"].some((key) => Object.hasOwn(env, key)) ? "codex" : "generic";
@@ -193,9 +250,6 @@ export function pollExecutionGuidance({ agent = "generic" } = {}) {
 
 // Mirrors the SDK's own version-flag detection so the fast path below prints exactly
 // what `runAxiCli` would have printed, for exactly the same argv shapes.
-export function isVersionOnlyArgv(argv) {
-  return argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v" || argv[0] === "-V");
-}
 
 export async function run(argv) {
   // `--version` sits on the agent-startup hot path (harnesses probe every tool's version
@@ -209,6 +263,9 @@ export async function run(argv) {
   const normalizedArgv = normalizeArgv(argv);
   const agent = detectInvokingAgent(process.env);
   const isTopLevelHelp = argv.length === 1 && argv[0] === "--help";
+  // `--help --full` is what `--help` used to print: the static home view with every rule.
+  const isFullTopLevelHelp = argv.length === 2 && argv.includes("--help") && argv.includes("--full");
+  const fullHelp = argv.includes("--full");
   const command = telemetryCommandName(argv);
   const telemetry = initDefaultTelemetry({
     app: "hilight",
@@ -221,19 +278,20 @@ export async function run(argv) {
     await runAxiCli({
       description: DESCRIPTION,
       version: VERSION,
-      argv: isTopLevelHelp ? [] : normalizedArgv,
-      topLevelHelp: createTopLevelHelp({ agent }),
+      argv: isFullTopLevelHelp ? [] : isTopLevelHelp ? ["--help"] : normalizedArgv,
+      topLevelHelp: createTopLevelHelp(),
       home: async () =>
         createHomeOutput({
           bin: process.argv[1] || "hilight",
-          sessions: isTopLevelHelp ? [] : await visibleSessions(),
-          includeSessions: !isTopLevelHelp,
+          sessions: isFullTopLevelHelp ? [] : await visibleSessions(),
+          includeSessions: !isFullTopLevelHelp,
           agent,
         }),
-      commands: {
+      commands: withFlagCheck({
         open: openCommand,
         poll: pollCommand,
         reply: replyCommand,
+        "catch-up": catchUpCommand,
         end: endCommand,
         stop: stopCommand,
         playbook: playbookCommand,
@@ -245,8 +303,8 @@ export async function run(argv) {
         libraries: librariesCommand,
         board: boardCommand,
         update: updateCommand,
-      },
-      getCommandHelp: (command) => getCommandHelp(command, { agent }),
+      }),
+      getCommandHelp: (command) => getCommandHelp(command, { agent, full: fullHelp }),
     });
     telemetry.track("command", { command, status: "success" });
   } catch (error) {
@@ -374,7 +432,7 @@ export function createOpenOutput({
     session: { file, url, status },
     ...(networkWarning ? { network_warning: networkWarning } : {}),
     ...(selfPaintWarning ? { self_paint_warning: selfPaintWarning } : {}),
-    next_step: `${networkPrefix}${selfPaintPrefix}Do not respond to the user just yet. Now you must run \`hilight poll ${file}\`. This command long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, and it stays silent the whole time - that is normal, never kill it. Layout issues the browser detects do not return this poll; they wait in the user's Layout issues inbox until the user queues them, then arrive as an ordinary tag "layout-warnings" prompt. Do not pass --timeout-ms during normal agent use. ${pollExecutionGuidance({ agent })} After applying feedback, run \`hilight poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to show a concise response in Hilight and keep waiting for more feedback. If instead you are handing back a result without starting another long-poll, run \`hilight reply ${file} --agent-reply "<message for the user>"\` to get an acceptance receipt. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_NEXT_POINTER} If the user ends the session, stop polling and do not reopen it by re-running \`hilight ${file}\` unless the user asks for further review or something genuinely important needs their visual attention - deliver routine updates directly in this conversation instead. When reopening is warranted, run \`hilight ${file} --reopen\`.`,
+    next_step: `${networkPrefix}${selfPaintPrefix}Do not respond to the user just yet. Now you must run \`hilight poll ${file}\`. It prints nothing until the user sends feedback, ends the session, or leaves the page closed past a grace period - that is normal, never kill it. Layout issues the browser finds wait in the user's Layout issues inbox and reach you only when the user queues them. Do not pass --timeout-ms. ${pollExecutionGuidance({ agent })} To answer feedback, edit the file, write your reply to a file, then run \`hilight poll ${file} --agent-reply-file <reply-file>\` to post it and keep waiting for more feedback; \`hilight reply ${file} --agent-reply-file <reply-file>\` posts it without starting another long-poll. A line \`## c1\` in the reply answers comment thread c1. ${SAME_PAGE_RULE} If the user ends the session, stop polling and do not reopen it by re-running \`hilight ${file}\` unless the user asks for further review or something genuinely important needs their visual attention. When reopening is warranted, run \`hilight ${file} --reopen\`. Every rule: \`hilight poll --help --full\`.`,
   };
 }
 
@@ -513,7 +571,12 @@ async function pollCommand(args) {
         `Re-run hilight poll ${absolute} only if you intend to take over listening`,
       ]);
     }
-    return createPollOutput({ file: absolute, response, agent: detectInvokingAgent(process.env) });
+    return createPollOutput({
+      file: absolute,
+      response,
+      agent: detectInvokingAgent(process.env),
+      full: args.includes("--full"),
+    });
   } finally {
     waitReporter?.stop();
     if (!timeoutMs) {
@@ -551,6 +614,9 @@ async function replyCommand(args) {
   const absolute = await canonicalFile(file);
   const baseUrl = await ensureServer();
   const receipt = await postAgentReply(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, text, absolute);
+  if (receipt?.status === "held") {
+    return createPollOutput({ file: absolute, response: receipt, agent: detectInvokingAgent(process.env) });
+  }
   return createReplyOutput(absolute, text, receipt?.threads);
 }
 
@@ -562,7 +628,93 @@ export function createReplyOutput(file, text = "", landed = undefined) {
     : [...new Set(splitThreadReply(text).sections.map((section) => section.threadId))];
   return {
     reply: { file, status: "sent", ...(threads.length ? { threads } : {}) },
-    next_step: `Hilight accepted the reply for ${file} and is no longer showing Working. ${SAME_PAGE_RULE} Run \`hilight poll ${file}\` when you are ready to wait for more feedback.`,
+    next_step: `Posted; the review no longer shows Working. Run \`hilight poll ${file}\` to listen for more.`,
+  };
+}
+
+// `hilight catch-up <file> [thread_id] [--full]`: what an agent without the earlier context (a
+// fresh session, a compacted one) asks for once, instead of every poll resending it. Hilight never
+// guesses whether an agent has context. No id summarizes the review; an id prints that whole
+// thread; --full adds the page snapshot the last delivery came with.
+async function catchUpCommand(args) {
+  const [file, threadId] = args.filter((arg) => !arg.startsWith("--"));
+  if (!file) {
+    throw new AxiError("HTML file path is required", "VALIDATION_ERROR", [
+      "Run `hilight catch-up <html-file> [thread_id]`",
+    ]);
+  }
+  const absolute = await canonicalFile(file);
+  const baseUrl = await ensureServer();
+  const review = await fetchJson(`${baseUrl}/api/${sessionKey(absolute)}/review`).catch((error) => {
+    if (/\b404\b/.test(String(error?.message))) {
+      throw new AxiError("No active Hilight session for this file", "NOT_FOUND", [`Run \`hilight ${absolute}\` first`]);
+    }
+    throw error;
+  });
+  return createCatchUpOutput(absolute, review, { threadId, full: args.includes("--full") });
+}
+
+export function createCatchUpOutput(file, review, { threadId = undefined, full = false } = {}) {
+  const threads = Array.isArray(review?.threads) ? review.threads : [];
+  const page = Array.isArray(review?.page) ? review.page : [];
+  const snapshot = full ? { dom_snapshot: String(review?.dom_snapshot || "") } : {};
+  const who = (role) => (role === "agent" ? "you" : "user");
+  if (threadId) {
+    const thread = threadId === "page" ? null : threads.find((item) => item.id === threadId);
+    if (threadId !== "page" && !thread) {
+      throw new AxiError(`Unknown comment thread ${threadId}`, "VALIDATION_ERROR", [
+        `Threads in this session: page${threads.map((item) => ", " + item.id).join("")}`,
+      ]);
+    }
+    const messages = thread ? thread.messages || [] : page;
+    return {
+      thread: thread
+        ? { thread_id: thread.id, on: threadAnchorLine(thread), resolved: Boolean(thread.resolved) }
+        : { thread_id: "page", on: "page" },
+      messages: messages.map((message) => ({ from: who(message.role), text: String(message.text || "") })),
+      ...snapshot,
+    };
+  }
+  const open = threads.filter((thread) => !thread.resolved);
+  const row = (id, on, messages) => {
+    const last = messages.at(-1);
+    return {
+      thread_id: id,
+      on,
+      last: last ? `${who(last.role)}: ${oneLine(last.text, 120)}` : "",
+      waiting: last?.role === "agent" ? "user" : "you",
+    };
+  };
+  const rows = [
+    ...(page.length ? [row("page", "page", page)] : []),
+    ...open.map((thread) => row(thread.id, threadAnchorLine(thread), thread.messages || [])),
+  ];
+  const code = review?.code_cards;
+  const drifted = Array.isArray(code?.drifted) ? code.drifted : [];
+  const problems = Array.isArray(review?.board_problems) ? review.board_problems : [];
+  return {
+    session: {
+      file,
+      status: String(review?.status || ""),
+      ...(review?.title ? { board: String(review.title) } : {}),
+    },
+    open_threads: rows.length ? rows : "none",
+    resolved_threads: threads.length - open.length,
+    waiting_to_be_delivered: Number(review?.pending_prompts) || 0,
+    ...(code
+      ? {
+          code_cards: drifted.length
+            ? `${drifted.length} of ${code.total} changed since pinned: ${drifted.map((item) => `${item.card} (${item.status})`).join(", ")}`
+            : `all ${code.total} match the code`,
+          ...(problems.length ? { board_problems: problems } : {}),
+        }
+      : {}),
+    ...snapshot,
+    help: [
+      `Run \`hilight catch-up ${file} <thread_id>\` for one whole thread`,
+      ...(Number(review?.pending_prompts) ? [`Run \`hilight poll ${file}\` to receive the waiting comments`] : []),
+      ...(full ? [] : ["Add --full for the page snapshot"]),
+    ],
   };
 }
 
@@ -614,24 +766,30 @@ export function startPollWaitReporter({
  *   dom_snapshot?: string,
  * }}
  */
-export function createPollOutput({ file, response, agent = "generic" }) {
+export function createPollOutput({ file, response, agent = "generic", full = false }) {
   if (response.status === "missing") {
     throw new AxiError("No active Hilight session for this file", "NOT_FOUND", [`Run \`hilight ${file}\` first`]);
   }
-  if (response.status === "feedback") {
+  if (response.status === "feedback" || response.status === "held") {
+    const held = response.status === "held";
     const artifactFailures = Array.isArray(response.artifact_failures) ? response.artifact_failures : [];
     const sessionEnded = Boolean(response.session_ended);
     const endedBy = typeof response.ended_by === "string" ? response.ended_by : undefined;
+    const prompts = Array.isArray(response.prompts) ? response.prompts : [];
+    const changes = feedbackChanges(response, prompts);
     return {
       session: {
         file,
-        status: "feedback",
+        status: response.status,
         ...(sessionEnded ? { session_ended: true, ...(endedBy ? { ended_by: endedBy } : {}) } : {}),
       },
-      prompts: response.prompts || [],
+      prompts: full ? prompts : compactPrompts(prompts, response.thread_anchors),
       ...(artifactFailures.length > 0 ? { artifact_failures: artifactFailures } : {}),
-      next_step: createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, response.prompts || [], agent),
-      dom_snapshot: response.dom_snapshot || "",
+      ...(changes ? { changes } : {}),
+      next_step: held
+        ? createHeldNextStep(file, prompts)
+        : createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, prompts, agent),
+      ...(full ? { dom_snapshot: response.dom_snapshot || "" } : {}),
     };
   }
   if (response.status === "ended") {
@@ -651,6 +809,87 @@ export function createPollOutput({ file, response, agent = "generic" }) {
     session: { file, status: response.status || "waiting" },
     next_step: `No user feedback arrived before the optional timeout. Run \`hilight poll ${file}\` without --timeout-ms to wait indefinitely - feedback remains queued until delivery, so re-running the poll is safe while waiting. Poll delivery consumes the response, so read it completely.`,
   };
+}
+
+const oneLine = (value, max) => {
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+};
+
+// Where a prompt sits, in one line: the thread's anchor for a comment, else what kind of note it is.
+function promptOn(prompt, anchors) {
+  if (prompt.thread_id && anchors?.[prompt.thread_id]) return String(anchors[prompt.thread_id]);
+  if (prompt.tag === "board") return "canvas marks";
+  if (prompt.tag === "whiteboard") return "whiteboard edits";
+  if (prompt.tag === "layout-warnings") {
+    const ids = Array.isArray(prompt.target?.warnings) ? prompt.target.warnings.map((item) => item?.id) : [];
+    return `layout issues ${ids.filter(Boolean).join(" ")}`.trim();
+  }
+  if (prompt.tag === "message" && !prompt.thread_id) return "page";
+  return prompt.text ? `"${oneLine(prompt.text, 80)}"` : oneLine(prompt.selector, 80) || "page";
+}
+
+// Local files a prompt points at: image attachments, and a whiteboard's scene and preview.
+function promptFiles(prompt) {
+  const files = (Array.isArray(prompt.attachments) ? prompt.attachments : []).map((item) => item?.path);
+  if (prompt.tag === "whiteboard") files.push(prompt.target?.scenePath, prompt.target?.previewPath);
+  return files.filter(Boolean).map(String);
+}
+
+/**
+ * The agent-facing prompt list: one row per note, the thread it belongs to, where it sits, and the
+ * reviewer's words. Only the new message of a thread reply is here; the agent's session already has
+ * the earlier back-and-forth (`hilight show <file> <thread_id>` prints a whole thread).
+ */
+export function compactPrompts(prompts, anchors = {}) {
+  const rows = prompts.map((prompt) => ({
+    thread_id: String(prompt.thread_id || "page"),
+    on: promptOn(prompt, anchors),
+    text: String(prompt.prompt || ""),
+    files: promptFiles(prompt).join(" "),
+  }));
+  return rows.some((row) => row.files) ? rows : rows.map(({ files: _files, ...row }) => row);
+}
+
+// What changed on a board since the agent's last turn, beyond the notes themselves.
+function feedbackChanges(response, prompts) {
+  const code = response.code_cards;
+  if (!code || typeof code !== "object") return null;
+  const changed = Array.isArray(code.changed) ? code.changed : [];
+  const names = changed
+    .slice(0, 8)
+    .map((item) => `${item.card} (${item.status})`)
+    .join(", ");
+  const more = changed.length > 8 ? ` and ${changed.length - 8} more` : "";
+  const canvas = prompts.some((prompt) => prompt?.tag === "board")
+    ? "new marks, in the canvas marks prompt"
+    : "no new marks";
+  if (!code.total) return { canvas };
+  return {
+    code_cards: changed.length
+      ? `${changed.length} of ${code.total} changed since ${code.since === "pinned" ? "pinned" : "your last turn"}: ${names}${more}`
+      : `all ${code.total} unchanged`,
+    canvas: prompts.some((prompt) => prompt?.tag === "board")
+      ? "new marks, in the canvas marks prompt"
+      : "no new marks",
+  };
+}
+
+// Short, every turn: the reply rule first, then the two commands. The long rules are in --help.
+function shortReplyGuidance(file) {
+  return `Answer everything in one reply file: a line \`## <thread_id>\` starts each thread's answer (thread_id is the first column above); text before the first one goes to the page thread. Write it to a file, then run \`hilight poll ${file} --agent-reply-file <reply-file>\` to post it and keep listening, or \`hilight reply ${file} --agent-reply-file <reply-file>\` to post it and stop. If more comments arrive while you work, the reply is held and they come back to you: answer them too in the same file and run the same command again.`;
+}
+
+// Every turn ends with this, because Hilight never guesses whether the agent still has context.
+function catchUpLine(file) {
+  return `Missing context? Run \`hilight catch-up ${file}\`. Full rules: \`hilight poll --help\`.`;
+}
+
+function createHeldNextStep(file, prompts) {
+  const count = prompts.length;
+  return `Your reply was NOT posted: ${count} new comment${count === 1 ? "" : "s"} arrived while you worked (above). Handle ${count === 1 ? "it" : "them"} too, then re-run the same command with one reply body that answers everything, the earlier notes and these (\`## <thread_id>\` per thread). ${prompts.some((prompt) => prompt?.tag === "board") ? "Canvas marks: edit those cards in the file. " : ""}Nothing reaches the reviewer until that reply is posted. ${catchUpLine(file)}`;
 }
 
 function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, prompts = [], agent = "generic") {
@@ -683,8 +922,24 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
     }
     return `${failureNote}${layoutNote}${whiteboardNote}${boardNote}${attachmentNote}This was the last feedback before the Hilight session ended. Stop polling ${file}. Deliver any remaining updates directly in this conversation, or run \`hilight ${file}\` to open a fresh session if the user needs further visual review.`;
   }
+  // Short every turn: the full rules live behind `hilight poll --help`.
   const prefix = count > 0 ? artifactFailuresPrefix(file, artifactFailures) : feedbackPrefix(file, prompts);
-  return `${prefix}${layoutNote}${whiteboardNote}${boardNote}${attachmentNote}Do not respond to the user just yet. If you are continuing to wait for feedback, run \`hilight poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run \`hilight reply ${file} --agent-reply "<message for the user>"\` to post it and receive an acceptance receipt. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_NEXT_POINTER} The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. ${pollExecutionGuidance({ agent })}`;
+  const notes = [
+    prompts.some((prompt) => prompt?.tag === "board")
+      ? "Canvas marks: edit those cards in the file; the marks stay on Hilight's canvas. "
+      : "",
+    prompts.some((prompt) => prompt?.tag === "whiteboard")
+      ? "Whiteboard edits: apply them to the Mermaid source in the file, never the scene file. "
+      : "",
+    prompts.some((prompt) => prompt?.tag === "layout-warnings")
+      ? "Layout issues: fix every listed one in one pass. "
+      : "",
+    prompts.some((prompt) => Array.isArray(prompt?.attachments) && prompt.attachments.length)
+      ? "Open the image files in the files column. "
+      : "",
+    agent === "codex" ? `${CODEX_POLL_WAKE_PATH_GUIDANCE} ` : "",
+  ].join("");
+  return `${prefix}${notes}${shortReplyGuidance(file)} ${catchUpLine(file)}`;
 }
 
 const QUESTION_WORD_RE =
@@ -718,12 +973,10 @@ export function isQuestionOnlyFeedback(prompts) {
 }
 
 function feedbackPrefix(file, prompts) {
-  const threaded = prompts.some((prompt) => prompt && typeof prompt.thread_id === "string");
-  const where = threaded ? "in its own thread (see the `## <thread_id>` reply format below)" : "in your reply";
   if (isQuestionOnlyFeedback(prompts)) {
-    return `This feedback is only questions. Answer each one ${where}. Do not edit ${file} unless an answer genuinely needs the page to change. `;
+    return "These are only questions: answer each one, and edit the file only if an answer needs the page to change. ";
   }
-  return `Apply the requested changes to ${file} in place and answer any questions ${where}. `;
+  return "Apply the requested changes to the file in place and answer any questions. ";
 }
 
 // The narrow fatal path. Ordinary layout findings never reach the poll: they wait in the user's
@@ -2660,7 +2913,7 @@ export async function postAgentReply(url, text, file, { timeoutMs = AGENT_REPLY_
       createEndedNextStep(file, payload.ended_by),
     ]);
   }
-  if (!response.ok || payload?.status !== "sent") {
+  if (!response.ok || (payload?.status !== "sent" && payload?.status !== "held")) {
     throw new AxiError(`Hilight did not accept the agent reply (${response.status})`, "SERVER_ERROR", [
       `Confirm the session is open with \`hilight ${file}\`, then re-run \`hilight reply ${file}\``,
     ]);
@@ -2886,19 +3139,111 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function getCommandHelp(command, { agent = "generic" } = {}) {
+export function getCommandHelp(command, { agent = "generic", full = false } = {}) {
+  if (!full && SHORT_COMMAND_HELP[command]) {
+    return `${SHORT_COMMAND_HELP[command]}\nEvery rule: \`hilight ${command} --help --full\`\n`;
+  }
   return createCommandHelp({ agent })[command] || null;
 }
 
-function createTopLevelHelp({ agent = "generic" } = {}) {
-  return `hilight - Hilight AXI\n\nUsage:\n  hilight\n  hilight <html-file> [--no-open] [--no-gate] [--reopen]\n  hilight poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n  hilight reply <html-file> (--agent-reply "..." | --agent-reply-file <path>)\n  hilight end <html-file>\n  hilight export <html-file> [--out <path>]\n  hilight share <html-file> [--private | --password <pw>] [--token <t>]\n  hilight share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  hilight share --unpublish --site <site_id> --update-key <key>\n  hilight stop\n  hilight playbook [playbook_id]\n  hilight design\n  hilight libraries [--search <text>] [--library <id>]\n  hilight board stamp|check <html-file> [--repin]\n  hilight setup hooks [--replace-lavish]\n  hilight setup plugin\n  hilight update [--check]\n\n${DESIGN_SYSTEM_HINT}\n\n${SAME_PAGE_RULE} ${THREAD_REPLY_RULE}\n\nNote: poll long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, staying silent while it waits - never kill it. Layout issues the browser detects are passive: they collect in the user's Layout issues inbox in the Hilight top bar and reach the agent only when the user selects them and queues the fixes, as an ordinary tag "layout-warnings" prompt. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. ${pollExecutionGuidance({ agent })} ${POLL_SEND_AND_END_RULE} Use \`hilight reply\` when handing a result back without waiting for more feedback: it exits 0 only after the server accepts the reply, so the board stops showing Working. \`poll --agent-reply\` posts a reply and then keeps waiting.\n\n`;
+// What `hilight --help` prints: the commands and the review loop in plain shell terms. The
+// static home view with every rule is behind `hilight --help --full`.
+export function createTopLevelHelp() {
+  return `hilight - show an HTML file as a page the user reviews and comments on, then listen for their feedback.
+
+Usage:
+  hilight                                       sessions, guidance, playbooks
+  hilight <html-file> [--no-open] [--no-gate] [--reopen]
+  hilight poll <html-file> [--agent-reply-file <path>] [--full]
+  hilight reply <html-file> --agent-reply-file <path>
+  hilight catch-up <html-file> [thread_id] [--full]
+  hilight end <html-file>
+  hilight export <html-file> [--out <path>]
+  hilight share <html-file> [--private | --password <pw>]
+  hilight board stamp|check <html-file> [--repin]
+  hilight playbook [playbook_id]
+  hilight design
+  hilight libraries [--search <text>] [--library <id>]
+  hilight setup hooks|plugin
+  hilight stop
+  hilight update [--check]
+
+The loop:
+  1. Write the page, then run \`hilight <html-file>\`.
+  2. Run \`hilight poll <html-file>\`. It prints nothing until the user sends feedback; never kill it.
+  3. Edit the file, write your answer to a reply file, then run
+     \`hilight poll <html-file> --agent-reply-file <reply-file>\` to post it and listen again
+     (\`hilight reply\` posts without listening). A \`## c1\` line answers comment thread c1.
+  4. Comments that arrive while you work hold the reply and come back to you: answer them too, then re-run.
+  Missing context? \`hilight catch-up <html-file>\`.
+
+How the review page works, to explain it to the user: ${collapseHomeDirectory(USING_THE_PAGE_FILE, os.homedir())}
+Design and artifact guidance: \`hilight design\`, \`hilight playbook\`.
+One command: \`hilight <command> --help\`. Every rule: \`hilight --help --full\`.
+`;
 }
+
+// Ships in the package with the skill; the CLI routes here so the skill need not.
+const USING_THE_PAGE_FILE = fileURLToPath(new URL("../skills/hilight/references/using-the-page.md", import.meta.url));
+
+const SHORT_COMMAND_HELP = {
+  poll: `Usage: hilight poll <html-file> [--agent-reply-file <path>] [--full]
+
+Waits for the user's feedback on an open page and prints one compact batch. Each prompt row is
+thread_id, on (what it is about), text, and files (local files to read, if any). \`changes\` says
+what moved since your last turn. It prints nothing while it waits; that is normal, never kill it.
+
+To answer: edit the file, write the reply to a file, then pass it with --agent-reply-file. A line
+\`## c1\` starts the answer for thread c1; text before the first such line goes to the page thread.
+The reply is posted first, then the poll waits again. If comments arrived while you worked, the
+reply is held (status: held) and they are returned instead: answer them too, then re-run.
+
+Flags:
+  --agent-reply-file <path>  post this reply first (\`-\` reads stdin)
+  --agent-reply "<text>"     post a short one-line reply instead
+  --full                     add the page snapshot and every prompt field
+  --owner <label>            name this listener in \`hilight\` session listings
+  --takeover                 replace another poll listening on the same page
+  --timeout-ms <ms>          tests and debugging only
+
+Examples:
+  hilight poll report.html
+  hilight poll report.html --agent-reply-file reply.md
+  hilight poll report.html --agent-reply "Renamed the payment step."
+
+${POLL_WAKE_PATH_RULES.join("\n")}
+`,
+  reply: `Usage: hilight reply <html-file> (--agent-reply-file <path> | --agent-reply "<text>")
+
+Posts your reply and exits 0 once Hilight accepts it; the page stops showing Working. Use it when
+you are handing a result back and are not about to long-poll (\`hilight poll <html-file>
+--agent-reply-file <path>\` posts and then listens). A line \`## c1\` starts the answer for thread
+c1; text before the first such line goes to the page thread. If comments arrived while you
+worked, nothing is posted: they come back (status: held). Answer them too, then re-run.
+
+Examples:
+  hilight reply report.html --agent-reply-file reply.md
+  hilight reply report.html --agent-reply "Renamed the payment step."
+`,
+  "catch-up": `Usage: hilight catch-up <html-file> [thread_id] [--full]
+
+For an agent without the earlier context (a new session, a compacted one). Polls send only what is
+new, so this is where the rest is. With no thread id: the board title, open threads (id, card, last
+message, who is waiting), how many are resolved, comments not yet delivered, and code cards that
+changed. With a thread id (c1, or page): every message in that thread. --full adds the page
+snapshot from the last delivery.
+
+Examples:
+  hilight catch-up report.html
+  hilight catch-up report.html c1
+`,
+};
 
 function createCommandHelp({ agent = "generic" } = {}) {
   return {
     open: `Usage: hilight <html-file> [--no-open] [--no-gate] [--reopen]\n\nOpen or resume a Hilight review session for an HTML artifact. Use --no-open when you need to ensure the server/session exists without opening another browser window. Use --no-gate to skip the open-time layout curtain for this browser open. If the user explicitly ended the session from the browser, this refuses to reopen it and returns guidance instead - pass --reopen to force it open when the user asks for further review or something important needs their visual attention. Sessions ended by the agent (\`hilight end\`) reopen normally without the flag.\n`,
-    poll: `Usage: hilight poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n\nThis command exclusively long-polls for queued user prompts. Pass --owner <label> to make the active listener visible in session listings; --takeover displaces an existing listener, which receives LISTENER_REPLACED. A second poll without --takeover fails with LISTENER_ACTIVE instead of silently returning waiting.\n\nThis command long-polls indefinitely for queued user prompts. It stays silent while it waits - that is normal, never kill it. Browser-detected layout issues do NOT return this poll: they are filed passively in the user's Layout issues inbox and arrive as an ordinary tag "layout-warnings" prompt only after the user selects them and queues the fixes. Warning lifecycle: an issue stays unresolved and counted while queued, becomes recurring if a newer artifact revision still shows it, and is resolved only after a newer artifact load plus a complete diagnostic pass at the same viewport no longer detects it. A failed or incomplete pass preserves it as unverified rather than clearing it. The only response that arrives without user action is artifact_failures - a fatal failure that made the review surface itself unusable. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. In a Herdr-managed pane, set HILIGHT_HERDR_CHIME=1 to request attention when the poll has entered its waiting state; unset it or use any other value to keep the current silent behavior. Notification failures never interrupt the poll. ${pollExecutionGuidance({ agent })} Use --agent-reply after applying prior feedback to display a concise response in Hilight before waiting again. When you are handing a result back and are not about to long-poll, run \`hilight reply <html-file> --agent-reply "..."\` instead: that command exits 0 only after the server accepts the reply, so the board stops showing Working without this poll staying open. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_HELP_POINTER} Do not combine --agent-reply with --agent-reply-file.\n\nExamples:\n  hilight poll report.html --agent-reply "Renamed the payment step."\n  hilight poll report.html --agent-reply-file reply.md\n  hilight poll report.html --agent-reply-file -\n  printf '## c1\\nTen teams is enough.\\n\\n## c2 reveal=r2\\nAdded an owner column.\\n' | hilight poll report.html --agent-reply-file -\n\n${POLL_SEND_AND_END_RULE}\n`,
-    reply: `Usage: hilight reply <html-file> (--agent-reply "..." | --agent-reply-file <path>)\n\nPost an agent reply to the open Hilight session and exit once the server confirms it was accepted. Exit 0 only when the server answers that the reply was sent, which is when the board stops showing Working. If that answer does not arrive within ${AGENT_REPLY_RECEIPT_TIMEOUT_MS / 1000} seconds, exit non-zero with a timeout error. Use this when you are handing a result back and are not about to wait for more feedback. A reply also marks every note the poll delivered to you as Replied in the reviewer's comment threads, so reply once you have handled them.\n\nUse \`hilight poll <html-file> --agent-reply "..."\` instead when the reply should be followed by a long-poll. That command posts the reply and then keeps waiting, so it does not exit when the reply is accepted.\n\nPass exactly one of --agent-reply or --agent-reply-file. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_HELP_POINTER} Do not combine the two flags. An empty reply is refused.\n\nExamples:\n  hilight reply report.html --agent-reply "Renamed the payment step."\n  hilight reply report.html --agent-reply-file reply.md\n  hilight reply report.html --agent-reply-file -\n  printf '## c1\\nTen teams is enough.\\n\\n## c2 reveal=r2\\nAdded an owner column.\\n' | hilight reply report.html --agent-reply-file -\n`,
+    poll: `Usage: hilight poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n\nThis command exclusively long-polls for queued user prompts. Pass --owner <label> to make the active listener visible in session listings; --takeover displaces an existing listener, which receives LISTENER_REPLACED. A second poll without --takeover fails with LISTENER_ACTIVE instead of silently returning waiting.\n\nThis command long-polls indefinitely for queued user prompts. It stays silent while it waits - that is normal, never kill it. Browser-detected layout issues do NOT return this poll: they are filed passively in the user's Layout issues inbox and arrive as an ordinary tag "layout-warnings" prompt only after the user selects them and queues the fixes. Warning lifecycle: an issue stays unresolved and counted while queued, becomes recurring if a newer artifact revision still shows it, and is resolved only after a newer artifact load plus a complete diagnostic pass at the same viewport no longer detects it. A failed or incomplete pass preserves it as unverified rather than clearing it. The only response that arrives without user action is artifact_failures - a fatal failure that made the review surface itself unusable. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. In a Herdr-managed pane, set HILIGHT_HERDR_CHIME=1 to request attention when the poll has entered its waiting state; unset it or use any other value to keep the current silent behavior. Notification failures never interrupt the poll. ${pollExecutionGuidance({ agent })} Use --agent-reply after applying prior feedback to display a concise response in Hilight before waiting again. When you are handing a result back and are not about to long-poll, run \`hilight reply <html-file> --agent-reply "..."\` instead: that command exits 0 only after the server accepts the reply, so the board stops showing Working without this poll staying open. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_HELP_POINTER} Do not combine --agent-reply with --agent-reply-file. If comments arrived after the batch you are answering, the reply is not posted: the response has status held and carries them, so answer them too in the same reply file and re-run. Pass --full for the page snapshot and every prompt field; \`hilight catch-up <html-file>\` summarizes the review for an agent without the earlier context.\n\nExamples:\n  hilight poll report.html --agent-reply "Renamed the payment step."\n  hilight poll report.html --agent-reply-file reply.md\n  hilight poll report.html --agent-reply-file -\n\n${POLL_SEND_AND_END_RULE}\n`,
+    reply: `Usage: hilight reply <html-file> (--agent-reply "..." | --agent-reply-file <path>)\n\nPost an agent reply to the open Hilight session and exit once the server confirms it was accepted. Exit 0 only when the server answers that the reply was sent, which is when the board stops showing Working. If that answer does not arrive within ${AGENT_REPLY_RECEIPT_TIMEOUT_MS / 1000} seconds, exit non-zero with a timeout error. Use this when you are handing a result back and are not about to wait for more feedback. A reply also marks every note the poll delivered to you as Replied in the reviewer's comment threads, so reply once you have handled them.\n\nUse \`hilight poll <html-file> --agent-reply "..."\` instead when the reply should be followed by a long-poll. That command posts the reply and then keeps waiting, so it does not exit when the reply is accepted.\n\nPass exactly one of --agent-reply or --agent-reply-file. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_HELP_POINTER} Do not combine the two flags. An empty reply is refused. If comments arrived after the batch you are answering, nothing is posted: the response has status held and carries them, so answer them too in the same reply file and re-run.\n\nExamples:\n  hilight reply report.html --agent-reply "Renamed the payment step."\n  hilight reply report.html --agent-reply-file reply.md\n  hilight reply report.html --agent-reply-file -\n`,
     end: `Usage: hilight end <html-file>\n\nEnd a Hilight session as the agent. A session ended this way still reopens normally on the next \`hilight <html-file>\`, unlike a user ending it from the browser, which requires --reopen.\n`,
     export: `Usage: hilight export <html-file> [--out <path>]\n\nWrite a portable copy of an artifact: one HTML file with its LOCAL assets inlined (relative-path stylesheets, scripts, images, and fonts become inline <style>/<script> blocks and data URIs). Remote CDN/font references (https URLs) are left as links for the browser to load, so the file needs network to render those. Hilight makes no outbound requests - it only reads local files, confined to the artifact's directory. Defaults to writing <name>.export.html next to the source; pass --out to choose a path. The Hilight annotation SDK is never included in an export.\n`,
     share: `Usage:\n  hilight share <html-file> [--private | --password <pw>] [--token <t>]\n  hilight share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  hilight share --unpublish --site <site_id> --update-key <key>\n\nPublish the artifact on ht-ml.app (https://ht-ml.app), a third-party hosting service not part of Hilight, and print a visitable URL. Shares are PUBLIC by default: anyone with the link can open the page, and it may be indexed or scraped. Pass --private to publish a PRIVATE page behind a generated password, returned once in the output - give it to the user with the URL and tell them it is a shared secret. Pass --password <pw> instead when the user chose the password; it is never echoed back. Builds the same local-inlined HTML as 'export' (local assets inlined; remote CDN/font URLs left as links and are not blocked by CSP on ht-ml.app, but still load over the viewer's network), then POSTs it to ht-ml.app's /v1 API. Creating a site needs no account or API key. The response includes the url plus a secret update_key (shown once) for changing the page later.\n\n--site <site_id> with --update-key <key> republishes an existing page in place: same URL, new HTML. On a republish the password is left alone unless you pass --private (rotate to a new generated one) or --password <pw> (set one). There is no way to make a private page public again: ht-ml.app accepts a request to clear a password and silently ignores it, so Hilight does not offer one rather than reporting a page as public while it is still gated. Locking a page that was PUBLIC is also not instant at ht-ml.app's CDN: it was observed still answering uncredentialed requests for minutes after the password was set, so do not tell the user a newly gated page is unreachable right away (a page that was already private has no such cached copy).\n\n--unpublish takes the same credentials and no file. ht-ml.app has NO delete endpoint, so this replaces the page with a short placeholder and locks it behind a random password that is immediately discarded; the URL still resolves and the host still holds what was published. Say that to the user rather than calling it deleted. The update_key still works, so republishing with --private brings the page back behind a new password.\n\nA value flag given an empty or whitespace-only value is REFUSED rather than acted on: an unquoted shell variable that is unset makes \`--password $PW\` an empty password, which the host treats as none and would publish a PUBLIC page while you believed it was gated. Quote the value, or pass --private to have Hilight generate one.\n\nSet HILIGHT_HTML_APP_TOKEN (or pass --token) to attach an optional bearer token when CREATING a page; it is never required. A republish (--site/--update-key) or --unpublish rejects --token, because the update_key is what the Authorization header carries there. The annotation SDK is never included.\n`,

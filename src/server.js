@@ -567,6 +567,44 @@ export async function serve({
     return rest;
   }
 
+  // On a board, what happened to the code cards since the agent's last turn: the cards whose
+  // status moved, or none. A page that is not a board says nothing.
+  async function withCodeCardChanges(key, result) {
+    if (result?.status !== "feedback") return result;
+    try {
+      const session = await store.findByKey(key);
+      const html = session ? await readFile(session.file, "utf8").catch(() => null) : null;
+      const board = html === null ? null : await readBoard(session.file, html);
+      if (!board) return result;
+      const now = Object.fromEntries(
+        board.cards.filter((card) => card.kind === "code" && card.code).map((card) => [card.id, card.code.status]),
+      );
+      const previous = await store.exchangeAgentCodeStatus(key, now);
+      // The first time, a change is a card that no longer matches its pin; after that, any move.
+      const drifted = new Set(["stale", "moved", "missing", "invalid"]);
+      const changed = Object.entries(now)
+        .filter(([id, status]) =>
+          previous ? previous[id] !== undefined && previous[id] !== status : drifted.has(status),
+        )
+        .map(([id, status]) => ({ card: id, status }));
+      return {
+        ...result,
+        code_cards: { total: Object.keys(now).length, changed, since: previous ? "last_turn" : "pinned" },
+      };
+    } catch {
+      return result;
+    }
+  }
+
+  // A reply sent while new comments wait is held, not posted: the agent gets those comments back
+  // and answers everything in one reply (re-running the same command). Nothing is published, so
+  // the review stays on Working. Returns the agent-facing hold, or null when nothing is waiting.
+  async function holdReplyForPending(key) {
+    const taken = await store.takeFeedback(key, { onlyPrompts: true });
+    if (taken.status !== "feedback") return null;
+    return { taken, response: { ...agentFacingFeedback(await withCodeCardChanges(key, taken)), status: "held" } };
+  }
+
   // `takeFeedback` is destructive: it clears the batch from `state.json` before anything is
   // written to the response. A client that disconnected while that take was in flight would
   // otherwise lose the feedback for good, so put it back verbatim through the store's `restore`
@@ -953,6 +991,18 @@ export async function serve({
           res.status(400).json({ status: "error", code: "VALIDATION_ERROR", error: error.message });
           return;
         }
+        // Comments that arrived while the agent worked are answered in this same turn.
+        const held = existing && !takeover ? await holdReplyForPending(key) : null;
+        if (held) {
+          detachRequestClose();
+          if (requestClosed || res.writableEnded) {
+            await restoreClosedFeedback(key, held.taken);
+            return;
+          }
+          finishFeedbackDelivery(key, held.taken);
+          res.json(held.response);
+          return;
+        }
       }
       const { holder, previousPresence, conflict, missing } = await pollOwnershipLock.runExclusive(async () => {
         const currentHolder = activePolls.get(key);
@@ -1011,7 +1061,7 @@ export async function serve({
         releasePollListener(holder, activePolls, deliveredFeedback, events);
         if (immediate.session_ended) clearFeedbackDelivery(key, activePolls, deliveredFeedback, events);
         detachRequestClose();
-        res.json(agentFacingFeedback(immediate));
+        res.json(agentFacingFeedback(await withCodeCardChanges(key, immediate)));
         return;
       }
       if (holder.replaced) {
@@ -1092,7 +1142,7 @@ export async function serve({
             return;
           }
           finishFeedbackDelivery(key, responseResult);
-          const agentResponse = agentFacingFeedback(responseResult);
+          const agentResponse = agentFacingFeedback(await withCodeCardChanges(key, responseResult));
           if (streamHeartbeat) {
             res.end(JSON.stringify(agentResponse));
           } else {
@@ -1368,9 +1418,68 @@ export async function serve({
     }
   });
 
+  // What `hilight catch-up` prints: everything an agent without the earlier context needs once -
+  // the board, every comment thread, the page messages, what is still waiting, and the last page
+  // snapshot an agent was sent. Read-only; a foreign Origin is refused like the poll's.
+  app.get("/api/:key/review", async (req, res, next) => {
+    try {
+      if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ error: "cross-origin review request rejected" });
+        return;
+      }
+      const session = await store.findByKey(req.params.key);
+      if (!session) {
+        res.status(404).json({ error: "session not found" });
+        return;
+      }
+      const html = await readFile(session.file, "utf8").catch(() => null);
+      const board = html === null ? null : await readBoard(session.file, html).catch(() => null);
+      const code = board ? board.cards.filter((card) => card.kind === "code" && card.code) : [];
+      res.json({
+        status: session.status,
+        title: board?.title || "",
+        threads: serializeThreads(session.threads || []),
+        page: (session.chat || [])
+          .filter((entry) => entry && !entry.thread_id)
+          .map((entry) => ({ role: entry.role === "agent" ? "agent" : "user", text: String(entry.text || "") })),
+        pending_prompts: Array.isArray(session.prompts) ? session.prompts.length : 0,
+        ...(board
+          ? {
+              code_cards: {
+                total: code.length,
+                drifted: code
+                  .filter((card) => ["stale", "moved", "missing", "invalid"].includes(card.code.status))
+                  .map((card) => ({ card: card.id, status: card.code.status })),
+              },
+              board_problems: board.problems || [],
+            }
+          : {}),
+        dom_snapshot: String(session.last_dom_snapshot || ""),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/:key/agent-reply", async (req, res, next) => {
     try {
-      const session = await publishAgentReply(req.params.key, String(req.body?.text || ""), {
+      const text = String(req.body?.text || "");
+      const existing = await store.findByKey(req.params.key);
+      if (existing && existing.status !== "ended") {
+        // A bad `## c9` is still a plain 400, before anything is taken.
+        planThreadReply(existing.threads, text);
+        const held = await holdReplyForPending(req.params.key);
+        if (held) {
+          if (req.aborted || res.writableEnded) {
+            await restoreClosedFeedback(req.params.key, held.taken);
+            return;
+          }
+          finishFeedbackDelivery(req.params.key, held.taken);
+          res.json(held.response);
+          return;
+        }
+      }
+      const session = await publishAgentReply(req.params.key, text, {
         requireOpen: true,
       });
       if (!session) {

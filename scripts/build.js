@@ -1,14 +1,24 @@
-import { chmod, copyFile, cp, mkdir, readFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
 
 import * as esbuild from "esbuild";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
 await mkdir("dist", { recursive: true });
+// Chunk names carry a content hash, so clear old ones before writing new ones.
+for (const name of await readdir("dist")) {
+  if (/^cli-.+\.mjs$/.test(name)) await rm(`dist/${name}`);
+}
 
 await esbuild.build({
-  entryPoints: ["bin/hilight.js"],
-  outfile: "dist/cli.mjs",
+  // Split, so `hilight --version` loads only the small entry chunk (bin/hilight.js imports the CLI
+  // lazily); the rest of the CLI and its dependencies load for every other command. Chunks sit
+  // next to cli.mjs because the CLI resolves server.mjs and its assets from import.meta.url.
+  entryPoints: { cli: "bin/hilight.js" },
+  outdir: "dist",
+  outExtension: { ".js": ".mjs" },
+  splitting: true,
+  chunkNames: "cli-[name]-[hash]",
   bundle: true,
   packages: "external",
   platform: "node",

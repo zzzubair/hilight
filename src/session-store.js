@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { planThreadReply, recordThreadPrompts, requireThread } from "./comment-threads.js";
+import { planThreadReply, recordThreadPrompts, requireThread, threadAnchorLine } from "./comment-threads.js";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -667,7 +667,9 @@ export class SessionStore {
   }
 
   /** @returns {Promise<any>} */
-  async takeFeedback(key) {
+  // `onlyPrompts` is the held-reply take (an agent replying while new comments wait): it takes
+  // nothing unless a prompt is pending, and never an ended session's final batch.
+  async takeFeedback(key, { onlyPrompts = false } = {}) {
     return this.runExclusive(async () => {
       const state = await this.readState();
       const session = state.sessions[key];
@@ -677,6 +679,7 @@ export class SessionStore {
       // Prompts queued before the session ended (a browser send-and-end) must still reach the
       // agent, so deliver them before reporting the ended state; the next poll then sees ended.
       const prompts = session.prompts || [];
+      if (onlyPrompts && (prompts.length === 0 || session.status === "ended")) return { status: "waiting" };
       // Layout warnings stay passive until the user queues them. Only fatal artifact
       // failures can reach the agent without explicit user action.
       const artifactFailures = Array.isArray(session.artifact_failures) ? session.artifact_failures : [];
@@ -688,6 +691,7 @@ export class SessionStore {
       // shares this lock, so the user entries with no stamp are exactly this batch. The sequence
       // rides on the result so a closed-poll restore can undo only this take's stamps.
       const deliverySeq = normalizeRevision(session.delivery_seq) + 1;
+      /** @type {Record<string, any>} */
       const result = {
         status: "feedback",
         dom_snapshot: session.dom_snapshot || "",
@@ -696,6 +700,16 @@ export class SessionStore {
         ...(alreadyEnded ? { session_ended: true, ended_by: session.ended_by } : {}),
         ...(prompts.length > 0 ? { delivery_seq: deliverySeq } : {}),
       };
+      // Only what changed reaches the agent: a thread reply arrives as its new message plus the
+      // thread's one-line anchor. Hilight never guesses whether an agent still has the earlier
+      // context; `hilight catch-up <file>` gives it back on request.
+      const deliveredThreads = new Set(prompts.map((prompt) => prompt?.thread_id).filter(Boolean));
+      const anchors = Object.fromEntries(
+        (session.threads || [])
+          .filter((thread) => deliveredThreads.has(thread.id))
+          .map((thread) => [thread.id, threadAnchorLine(thread)]),
+      );
+      if (Object.keys(anchors).length) result.thread_anchors = anchors;
       // Delivery clears pending prompts, so retain the attachment ids for a bounded
       // grace window while the polling agent opens the absolute paths it received.
       const deliveredNow = Date.now();
@@ -727,6 +741,8 @@ export class SessionStore {
       session.prompts = [];
       session.artifact_failures = [];
       session.pending_prompts = 0;
+      // Kept for `hilight show <file> --full`: the page snapshot is no longer in every poll.
+      if (session.dom_snapshot) session.last_dom_snapshot = session.dom_snapshot;
       session.dom_snapshot = "";
       if (!alreadyEnded) {
         session.status = "open";
@@ -734,6 +750,25 @@ export class SessionStore {
       session.updated_at = new Date().toISOString();
       await this.writeState(state);
       return result;
+    });
+  }
+
+  /**
+   * Swap in the code-card statuses an agent is about to be told, returning the ones it was told
+   * last time (`null` on the first delivery), so a poll can say what changed since the last turn.
+   * @param {string} key
+   * @param {Record<string, string>} next
+   */
+  async exchangeAgentCodeStatus(key, next) {
+    return this.runExclusive(async () => {
+      const state = await this.readState();
+      const session = state.sessions[key];
+      if (!session) return null;
+      const previous =
+        session.agent_code_status && typeof session.agent_code_status === "object" ? session.agent_code_status : null;
+      session.agent_code_status = next;
+      await this.writeState(state);
+      return previous;
     });
   }
 
