@@ -216,6 +216,7 @@ test(
   async (t) => {
     const result = await runBrowserFixture(t, "board-canvas");
     if (!result) return;
+    assert.ok(result.opening.includes("intro"), "the board opens on its top row");
     assert.deepEqual(
       result.root.map((card) => card.id),
       ["intro", "fresh", "stale", "inside"],

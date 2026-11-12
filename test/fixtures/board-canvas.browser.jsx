@@ -43,7 +43,8 @@ function model(staleStatus) {
       card("fresh", { kind: "code", x: 400, h: 120, note: "", code: code("fresh", pinned) }),
       card("stale", {
         kind: "code",
-        x: 800,
+        // Code cards size themselves (48 columns at least), so leave room after "fresh".
+        x: 900,
         h: 120,
         note: "",
         code: code(staleStatus, staleStatus === "fresh" ? pinned : [pinned[0], "  return a - b;", pinned[2]]),
@@ -81,6 +82,11 @@ const visibleCards = () =>
 async function run() {
   const posts = [];
   const board = startBoard({ board: model("stale"), saved: null, theme: "light" }, { post: (m) => posts.push(m) });
+  // The board opens on its top row at a readable zoom, which may leave cards off-screen
+  // (Excalidraw renders only on-screen embeddables); Fit shows the whole level.
+  await until("opening view", () => visibleCards().some((item) => item.id === "intro"));
+  const opening = visibleCards().map((item) => item.id);
+  document.querySelector("button[title='Fit the board to the screen']").click();
   await until("root cards", () => visibleCards().length === 4);
   const root = visibleCards();
   const health = document.querySelector(".bd-health")?.textContent || "";
@@ -109,6 +115,7 @@ async function run() {
 
   return {
     pass: true,
+    opening,
     root,
     health,
     changedLines,
