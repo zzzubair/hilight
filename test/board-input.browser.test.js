@@ -286,9 +286,16 @@ test("a board answers trackpad and mouse input in real Chrome", { timeout: 180_0
       sub.skip(`Input.synthesizePinchGesture is not available here: ${error.message}`);
       return;
     }
-    await sleep(200);
-    await frames(3);
-    const after = await cards();
+    // A loaded CI runner can still be delivering the gesture's last wheels after the command
+    // returns, so read once the zoom has stopped changing rather than after a fixed wait.
+    let after = await cards();
+    for (let settled = 0, tries = 0; settled < 2 && tries < 30; tries += 1) {
+      await sleep(100);
+      await frames(2);
+      const next = await cards();
+      settled = Math.abs(moved(after, next, "b").scale - 1) < 0.001 ? settled + 1 : 0;
+      after = next;
+    }
     const { scale } = moved(before, after, "b");
     assert.ok(scale > 1.2, `zoomed in (${scale.toFixed(3)}x)`);
     steadyUnder(at, before, after, "b", 3);
