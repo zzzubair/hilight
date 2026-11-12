@@ -776,7 +776,13 @@ export function createPollOutput({ file, response, agent = "generic", full = fal
     const sessionEnded = Boolean(response.session_ended);
     const endedBy = typeof response.ended_by === "string" ? response.ended_by : undefined;
     const prompts = Array.isArray(response.prompts) ? response.prompts : [];
-    const changes = feedbackChanges(response, prompts);
+    // AXI: a field left out says how big it is and where it is. The snapshot was consumed with
+    // this delivery, so `catch-up --full` (which keeps the last one) is where it lives now.
+    const snapshotChars = String(response.dom_snapshot || "").length;
+    const changes = {
+      ...feedbackChanges(response, prompts),
+      ...(!full && snapshotChars ? { page_snapshot: `${snapshotChars} chars not shown (catch-up --full)` } : {}),
+    };
     return {
       session: {
         file,
@@ -785,7 +791,7 @@ export function createPollOutput({ file, response, agent = "generic", full = fal
       },
       prompts: full ? prompts : compactPrompts(prompts, response.thread_anchors),
       ...(artifactFailures.length > 0 ? { artifact_failures: artifactFailures } : {}),
-      ...(changes ? { changes } : {}),
+      ...(Object.keys(changes).length ? { changes } : {}),
       next_step: held
         ? createHeldNextStep(file, prompts)
         : createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, prompts, agent),
@@ -871,9 +877,7 @@ function feedbackChanges(response, prompts) {
     code_cards: changed.length
       ? `${changed.length} of ${code.total} changed since ${code.since === "pinned" ? "pinned" : "your last turn"}: ${names}${more}`
       : `all ${code.total} unchanged`,
-    canvas: prompts.some((prompt) => prompt?.tag === "board")
-      ? "new marks, in the canvas marks prompt"
-      : "no new marks",
+    canvas,
   };
 }
 

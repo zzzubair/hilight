@@ -3828,3 +3828,15 @@ test("every command refuses a flag it does not read, naming the valid ones", () 
   assert.doesNotThrow(() => assertKnownFlags("open", ["--", "--odd-name.html"]));
   assert.doesNotThrow(() => assertKnownFlags("setup", ["hooks", "--replace-lavish"]), "setup checks its own args");
 });
+
+test("a poll leaves the page snapshot out but says how big it is and where it is", () => {
+  const response = { status: "feedback", dom_snapshot: "x".repeat(120), prompts: [{ prompt: "Hi", tag: "message" }] };
+  const short = createPollOutput({ file: "/tmp/r.html", response });
+  assert.equal("dom_snapshot" in short, false);
+  assert.equal(short.changes.page_snapshot, "120 chars not shown (catch-up --full)");
+  const full = createPollOutput({ file: "/tmp/r.html", response, full: true });
+  assert.equal(full.dom_snapshot.length, 120);
+  assert.equal(full.changes, undefined);
+  const empty = createPollOutput({ file: "/tmp/r.html", response: { ...response, dom_snapshot: "" } });
+  assert.equal(empty.changes, undefined, "nothing to say when there is no snapshot");
+});
