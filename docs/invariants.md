@@ -230,6 +230,18 @@ The build also inlines `package.json`'s version as `process.env.LAVISH_AXI_BUILD
 Users opt out with `HILIGHT_TELEMETRY=0`.
 The client is best-effort and must never affect CLI behavior - all errors are swallowed.
 
+### Event log and traceability
+
+Hilight serves the user and the agent, and both need to know what happened after the fact, so the server keeps one event log: `server.log` in the state directory (`src/event-log.js`), one line per event, `<ISO time> <session key or -> <event> <cause>`. The server writes it itself with synchronous appends, whatever started it (the CLI, systemd, a terminal), so a stop line is on disk before the sockets close or the process exits. It is appended and never truncated; it rotates at `EVENT_LOG_MAX_BYTES` into `server.log.1` and `server.log.2`. A detached server's stdio goes to the same file; those lines never parse as events and readers skip them. Logging never throws.
+
+- `serverCommand` turns SIGTERM, SIGINT and SIGHUP into `server.stop(cause)`. Without that, a supervisor stop exited with no line and the reason a poll died was gone (an empty `server.log` after a restart).
+- `shutdown` writes a `listen-end` line naming the stop for every active poll, then `server-stop`, then closes sockets. The `listen-end` handler never relabels those polls as "disconnected".
+- Every way a poll stops listening goes through `releasePollListener`, which emits `listen-end` with `holder.endReason`. `listen` and `listen-end` lines are written only for polls that entered the wait, so an immediate delivery logs `delivered` alone.
+- At startup the server reads the recent log: `previousServerExit` names why the server before it went away (or that it left no line), and the last `listen-end` per session seeds `listenEnded`. A `listen` with no end becomes "the server stopped (...)". The `agent-presence` event carries `since` and `why` when the state is `waiting`, and the chrome shows them; it never invents a reason.
+- `hilight poll` reconnects after a lost connection for `POLL_RECONNECT_WINDOW_MS`. For the first 3 seconds it only probes, so a supervisor's own server wins the port. A request that carried a reply and failed before any answer is reported, not retried, because it may have landed; once the server answered, a retry only listens again (`reconnect=1`, logged as such).
+- `GET /api/:key/history` (the page's Activity list) and `hilight status`/`hilight log` only read. History refuses a foreign Origin like `/review`. `hilight status` never starts a server.
+- CLI errors render through `formatTraceError`: the SDK's `error`, `code`, `help`, plus `why` and `log` when known. `toonString` follows TOON's own quoting rule so an error without them renders byte for byte as before.
+
 ## Things to know when editing
 
 - `run()` short-circuits `--version`/`-v`/`-V` (`isVersionOnlyArgv`) before `ensureStateDir` and `initDefaultTelemetry`, because agent harnesses probe every tool's version at session start and the telemetry drain in the `finally` block costs up to a full second. Any new startup work must go after that short-circuit; `test/cli-version.test.js` guards both the latency budget and the "no telemetry request, no state dir" property.

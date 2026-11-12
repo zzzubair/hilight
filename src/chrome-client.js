@@ -46,6 +46,11 @@ let pageBarHeight = 0;
 let lastThreadAnchors = "[]";
 let pageSignature = "";
 let resolvedDrawerOpen = false;
+// Since when and why nobody is listening, as the server last reported it (null when unknown).
+/** @type {{ since: string, why: string } | null} */
+let agentStopped = null;
+let activityDrawerOpen = false;
+let activityRequest = 0;
 // Canvas mode (see renderBoardHeader).
 const boardTitle = document.getElementById("boardTitle");
 const boardInfoWrap = document.getElementById("boardInfoWrap");
@@ -166,6 +171,11 @@ const sheetScrim = /** @type {HTMLDivElement} */ (document.getElementById("sheet
 const pageThread = /** @type {HTMLElement} */ (document.getElementById("pageThread"));
 const pageMessages = /** @type {HTMLOListElement} */ (document.getElementById("pageMessages"));
 const pageThreadStatus = /** @type {HTMLSpanElement} */ (document.getElementById("pageThreadStatus"));
+const pageThreadTime = /** @type {HTMLTimeElement | null} */ (document.getElementById("pageThreadTime"));
+const activityOpenButton = /** @type {HTMLButtonElement | null} */ (document.getElementById("activityOpen"));
+const activityDrawer = /** @type {HTMLDivElement | null} */ (document.getElementById("activityDrawer"));
+const activityNow = /** @type {HTMLParagraphElement | null} */ (document.getElementById("activityNow"));
+const activityList = /** @type {HTMLOListElement | null} */ (document.getElementById("activityList"));
 const agentStatus = /** @type {HTMLSpanElement} */ (document.getElementById("agentStatus"));
 const resolvedWrap = /** @type {HTMLDivElement} */ (document.getElementById("resolvedWrap"));
 const resolvedButton = /** @type {HTMLButtonElement} */ (document.getElementById("resolvedButton"));
@@ -1036,8 +1046,12 @@ function setAgentPresence(state) {
 
 function renderAgentStatus() {
   const [text, title] = ended ? ["Ended", "This review session has ended."] : AGENT_STATUS[agentPresence];
-  agentStatus.textContent = text;
-  agentStatus.title = title;
+  const stopped = !ended && agentPresence === "waiting" ? agentStopped : null;
+  const short = stopped ? shortStopReason(stopped.why) : "";
+  agentStatus.textContent = stopped
+    ? `Not listening since ${clockTime(stopped.since)}${short ? ` · ${short}` : ""}`
+    : text;
+  agentStatus.title = stopped ? notListeningSentence(stopped) : title;
   agentStatus.dataset.state = ended ? "ended" : agentPresence;
 }
 
@@ -1060,6 +1074,32 @@ function chromeOutdatedCopy(reason) {
 
 // Say so where the user can dismiss it, and never reload on their behalf - a forced reload
 // interrupts whatever they were reading or writing.
+// "23:05", or "12 Nov 23:05" when it was not today. An unreadable time reads as nothing.
+function clockTime(iso) {
+  const date = new Date(String(iso || ""));
+  if (Number.isNaN(date.getTime())) return "";
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (date.toDateString() === new Date().toDateString()) return time;
+  return `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
+}
+
+// Two or three words for the status bar; the full reason is in its tooltip and in Activity.
+function shortStopReason(why) {
+  const text = String(why || "");
+  if (/server stopped/.test(text)) return "server restarted";
+  if (/poll disconnected/.test(text)) return "poll closed";
+  if (/took over/.test(text)) return "listener replaced";
+  if (/timed out/.test(text)) return "poll timed out";
+  if (/took your comments/.test(text)) return "took your comments";
+  if (/review page was closed/.test(text)) return "page closed";
+  return "";
+}
+
+function notListeningSentence(stopped) {
+  const at = clockTime(stopped.since);
+  return `Your agent stopped listening${at ? ` at ${at}` : ""}${stopped.why ? `: ${stopped.why}` : ""}. Comments you send will queue until it polls again.`;
+}
+
 function setChromeOutdated(visible, reason = chromeOutdatedReason) {
   chromeOutdatedReason = String(reason || "");
   chromeOutdatedGeneration += 1;
@@ -1233,7 +1273,8 @@ function sheetSummary() {
   if (agentPresence === "working") return { text: "Agent is working", accent: false, unread: false };
   if (agentPresence === "external") return { text: "External listener active", accent: false, unread: false };
   if (agentPresence === "listening") return { text: "Agent listening", accent: false, unread: false };
-  return { text: "Agent not listening", accent: false, unread: false };
+  const since = agentStopped ? clockTime(agentStopped.since) : "";
+  return { text: since ? `Agent not listening since ${since}` : "Agent not listening", accent: false, unread: false };
 }
 
 function renderSheetSummary() {
@@ -4558,6 +4599,7 @@ sendAndEndButton.onclick = () => sendQueued(true);
 moreButton.onclick = () => {
   closeWarningsDrawer();
   closeResolvedDrawer();
+  closeActivityDrawer();
   toggleMenu(moreButton, moreMenu);
 };
 warningsButton.onclick = () => {
@@ -4566,8 +4608,16 @@ warningsButton.onclick = () => {
 };
 resolvedButton.onclick = () => {
   closeWarningsDrawer();
+  closeActivityDrawer();
   setResolvedDrawerOpen(resolvedDrawer.hidden);
 };
+if (activityOpenButton) {
+  activityOpenButton.onclick = () => {
+    closeWarningsDrawer();
+    closeResolvedDrawer();
+    setActivityDrawerOpen(true);
+  };
+}
 resolveUndoButton.onclick = undoResolve;
 attachImagesButton.onclick = () => {
   closeMenus();
@@ -4720,6 +4770,7 @@ document.addEventListener("mousedown", (event) => {
   if (!moreMenu.hidden && !moreWrap.contains(target)) setMenuOpen(moreButton, moreMenu, false);
   if (warningsDrawerOpen && !warningsWrap.contains(target)) closeWarningsDrawer();
   if (resolvedDrawerOpen && !resolvedWrap.contains(target)) closeResolvedDrawer();
+  if (activityDrawerOpen && activityDrawer && !activityDrawer.contains(target)) closeActivityDrawer();
 });
 // A non-modal popover closes when focus leaves it, so keyboard users are never stranded inside a
 // panel they cannot see the end of.
@@ -4738,6 +4789,8 @@ document.addEventListener("keydown", (event) => {
       closeWhiteboard();
     } else if (!shareDialog.hidden) {
       closeShareDialog();
+    } else if (activityDrawerOpen) {
+      closeActivityDrawer({ restoreFocus: true });
     } else if (resolvedDrawerOpen) {
       closeResolvedDrawer({ restoreFocus: true });
     } else if (warningsDrawerOpen) {
@@ -5171,6 +5224,7 @@ function threadEntryFor(message) {
 // One plain word per thread for where its latest message stands. Drafts come first: a thread
 // with an unsent note is Not sent (Sending while its batch is in flight, Not delivered after a
 // failed send); otherwise an agent answer reads Replied and a sent note reads its receipt.
+/** @returns {{ text: string, retry: boolean, at?: string, trail?: string } | null} */
 function threadStatus(messages) {
   const drafts = messages.filter((message) => message.pending);
   if (drafts.length) {
@@ -5181,8 +5235,36 @@ function threadStatus(messages) {
   }
   const last = [...messages].reverse().find((message) => message.role === "user" || message.role === "agent");
   if (!last) return null;
-  if (last.role === "agent") return { text: "Replied", retry: false };
-  return { text: deliveryLabel(threadEntryFor(last) || last), retry: false };
+  if (last.role === "agent") return { text: "Replied", retry: false, ...deliveryTimes(null, last) };
+  const entry = threadEntryFor(last) || last;
+  return { text: deliveryLabel(entry), retry: false, ...deliveryTimes(entry, null) };
+}
+
+// When the latest state happened (shown beside the word) and the whole trail (its tooltip):
+// sent, delivered to the agent, working, answered.
+function deliveryTimes(entry, answer) {
+  if (answer) {
+    const at = clockTime(answer.at);
+    return at ? { at, trail: `Answered by the agent at ${at}` } : {};
+  }
+  if (!entry || entry.receipt === "none") return {};
+  const steps = [
+    ["Sent", entry.at],
+    ["delivered to the agent", entry.delivered_at],
+    ["agent working", entry.working_at],
+    ["answered", entry.done_at],
+  ]
+    .map(([label, iso]) => [label, clockTime(iso)])
+    .filter(([, at]) => at);
+  if (!steps.length) return {};
+  return { at: steps[steps.length - 1][1], trail: steps.map(([label, at]) => `${label} ${at}`).join(" · ") };
+}
+
+function timeHtml(status) {
+  if (!status?.at) return "";
+  return (
+    '<time class="thread-time" title="' + escapeHtml(status.trail || "") + '">' + escapeHtml(status.at) + "</time>"
+  );
 }
 
 function statusHtml(status) {
@@ -5399,6 +5481,7 @@ function buildThreadCard(thread, placement, missing, messages, status) {
     '</span><span class="thread-status">' +
     statusHtml(status) +
     "</span>" +
+    timeHtml(status) +
     // A resolved comment is a one-line row; Reopen sits on it, never behind an expand.
     (thread.resolved ? '<button type="button" class="text-button thread-reopen">Reopen</button>' : "") +
     "</header>" +
@@ -5507,6 +5590,10 @@ function renderPageThread() {
   if (signature === pageSignature) return;
   pageSignature = signature;
   pageThreadStatus.innerHTML = statusHtml(status);
+  if (pageThreadTime) {
+    pageThreadTime.textContent = status?.at || "";
+    pageThreadTime.title = status?.trail || "";
+  }
   bindStatusRetry(pageThreadStatus);
   // A new reply never yanks the reader: the list follows the end only if they were already there.
   const atEnd = pageMessages.scrollTop + pageMessages.clientHeight >= pageMessages.scrollHeight - 4;
@@ -5555,6 +5642,81 @@ function closeResolvedDrawer({ restoreFocus = false } = {}) {
   if (!resolvedDrawerOpen) return;
   setResolvedDrawerOpen(false);
   if (restoreFocus) resolvedButton.focus();
+}
+
+// Activity: the session's history from server.log, newest first, so the reviewer can see when a
+// comment reached the agent, when it answered, and why it stopped listening.
+function setActivityDrawerOpen(open) {
+  if (!activityDrawer) return;
+  activityDrawerOpen = Boolean(open) && !ended;
+  activityDrawer.hidden = !activityDrawerOpen;
+  activityOpenButton?.setAttribute("aria-expanded", String(activityDrawerOpen));
+  if (activityDrawerOpen) {
+    setMenuOpen(moreButton, moreMenu, false);
+    void loadActivity();
+  }
+}
+
+function closeActivityDrawer({ restoreFocus = false } = {}) {
+  if (!activityDrawerOpen) return;
+  setActivityDrawerOpen(false);
+  if (restoreFocus) moreButton.focus();
+}
+
+async function loadActivity() {
+  if (!activityList || !activityNow) return;
+  const request = ++activityRequest;
+  let history;
+  try {
+    const response = await fetch(`/api/${key}/history`);
+    history = response.ok ? await response.json() : null;
+  } catch {
+    history = null;
+  }
+  if (request !== activityRequest) return;
+  renderActivity(history);
+}
+
+function renderActivity(history) {
+  if (!activityList || !activityNow) return;
+  if (!history) {
+    activityNow.textContent = "Activity is not available: Hilight did not answer.";
+    activityList.replaceChildren();
+    return;
+  }
+  const stopped =
+    history.stopped && history.stopped.at ? { since: history.stopped.at, why: history.stopped.why } : null;
+  activityNow.textContent =
+    history.presence === "listening"
+      ? "Your agent is listening. Send delivers right away."
+      : history.presence === "working"
+        ? "Your agent is working on what you sent. New comments reach it on its next poll."
+        : stopped
+          ? notListeningSentence(stopped)
+          : "No agent is listening. Comments you send will queue until it polls.";
+  const events = Array.isArray(history.events) ? [...history.events].reverse() : [];
+  if (!events.length) {
+    const empty = document.createElement("li");
+    empty.className = "activity-empty";
+    empty.textContent = "Nothing recorded yet.";
+    activityList.replaceChildren(empty);
+    return;
+  }
+  activityList.replaceChildren(
+    ...events.map((event) => {
+      const item = document.createElement("li");
+      item.className = "activity-item";
+      const time = document.createElement("time");
+      time.className = "activity-time";
+      time.dateTime = String(event.at || "");
+      time.textContent = clockTime(event.at);
+      const text = document.createElement("span");
+      text.className = "activity-text";
+      text.textContent = String(event.text || "");
+      item.append(time, text);
+      return item;
+    }),
+  );
 }
 
 function renderThreads() {
@@ -5738,7 +5900,12 @@ events.set("chat-sync", (data) => {
   // After the transcript, so thread cards read fresh delivery receipts.
   syncThreads(data);
 });
-events.set("agent-presence", (data) => setAgentPresence(data.mode === "external-listener" ? "external" : data.state));
+events.set("agent-presence", (data) => {
+  agentStopped =
+    data.state === "waiting" && data.since ? { since: String(data.since), why: String(data.why || "") } : null;
+  setAgentPresence(data.mode === "external-listener" ? "external" : data.state);
+  if (activityDrawerOpen) void loadActivity();
+});
 events.set("layout-warnings", (data) => setLayoutWarnings(data.warnings || []));
 events.set("ended", () => markSessionEnded());
 connectLiveEvents();

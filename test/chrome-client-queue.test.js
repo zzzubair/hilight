@@ -9261,6 +9261,51 @@ test("a margin thread's status reads the stamps on its latest message's transcri
   assert.equal(chrome.pageItems().length, 0, "a threaded entry stays out of the page thread");
 });
 
+// Beside the word, when it happened; the tooltip has the whole trail. The reviewer can see when a
+// comment reached the agent and when it was answered.
+test("a thread shows when its latest state happened, with the sent-delivered-answered trail", async () => {
+  const sent = "2026-10-04T10:00:00.000Z";
+  const delivered = "2026-10-04T10:02:00.000Z";
+  const done = "2026-10-04T10:09:00.000Z";
+  const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const chrome = await createChromeHarness({
+    sessionData: {
+      ...defaultSessionData,
+      initialChat: [
+        {
+          role: "user",
+          kind: "message",
+          text: "Fix it",
+          at: sent,
+          delivered_at: delivered,
+          delivered_seq: 1,
+          done_at: done,
+        },
+      ],
+    },
+  });
+  assert.equal(pageStatus(chrome), "Replied", "the word itself is unchanged");
+  const time = chrome.element("pageThreadTime");
+  assert.match(time.textContent, new RegExp(clock(done).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(time.title, /^Sent .+ · delivered to the agent .+ · answered .+$/);
+});
+
+test("Not listening says since when and why, and the tooltip says comments will queue", async () => {
+  const chrome = await createChromeHarness();
+  const presence = (data) => chrome.eventSource().listeners.get("agent-presence")({ data: JSON.stringify(data) });
+  const since = new Date().toISOString();
+  const clock = new Date(since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  presence({ state: "waiting", since, why: "the server stopped (SIGTERM: stopped by its supervisor or a kill)" });
+  const status = chrome.element("agentStatus");
+  assert.equal(status.textContent, `Not listening since ${clock} · server restarted`);
+  assert.equal(
+    status.title,
+    `Your agent stopped listening at ${clock}: the server stopped (SIGTERM: stopped by its supervisor or a kill). Comments you send will queue until it polls again.`,
+  );
+  presence({ state: "listening", mode: "agent-listener" });
+  assert.equal(status.textContent, "Listening", "a listening agent clears the reason");
+});
+
 test("an unseen note's status ignores live presence, which the top bar reports instead", async () => {
   const chrome = await createChromeHarness({
     sessionData: { ...defaultSessionData, initialChat: [{ role: "user", kind: "message", text: "Waiting" }] },

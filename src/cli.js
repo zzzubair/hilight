@@ -20,6 +20,14 @@ import { fileURLToPath } from "node:url";
 import { AxiError, installSessionStartHooks, RESERVED_COMMANDS, runAxiCli } from "axi-sdk-js";
 
 import { splitThreadReply, threadAnchorLine } from "./comment-threads.js";
+import {
+  createLogOutput,
+  createStatusOutput,
+  formatTraceError,
+  parseSince,
+  recentLogLines,
+  serverExitCause,
+} from "./trace.js";
 import { createDesignOutput, DESIGN_PRIORITY_RULE, DESIGN_SYSTEM_HINT } from "./design-reference.js";
 import {
   buildSelfContainedHtml,
@@ -77,6 +85,8 @@ const COMMANDS = new Set([
   "poll",
   "reply",
   "catch-up",
+  "status",
+  "log",
   "end",
   "stop",
   "server",
@@ -122,6 +132,8 @@ const COMMAND_FLAGS = {
   poll: { switches: ["--takeover", "--full"], values: POLL_VALUE_FLAGS },
   reply: { values: ["--agent-reply", "--agent-reply-file"] },
   "catch-up": { switches: ["--full"] },
+  status: {},
+  log: { values: ["--since", "--limit"] },
   end: {},
   export: { values: ["--out"] },
   share: { switches: ["--unpublish", "--private"], values: SHARE_VALUE_FLAGS },
@@ -287,11 +299,14 @@ export async function run(argv) {
           includeSessions: !isFullTopLevelHelp,
           agent,
         }),
+      formatError: formatCliError,
       commands: withFlagCheck({
         open: openCommand,
         poll: pollCommand,
         reply: replyCommand,
         "catch-up": catchUpCommand,
+        status: statusCommand,
+        log: logCommand,
         end: endCommand,
         stop: stopCommand,
         playbook: playbookCommand,
@@ -520,7 +535,9 @@ async function pollCommand(args) {
   const agentReply = await resolveAgentReply(args);
   await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
-  const baseUrl = await ensureServer();
+  const key = sessionKey(absolute);
+  const pollStartedAt = Date.now();
+  let baseUrl = await ensureServer();
   const timeoutMs = flagValue(args, "--timeout-ms");
   const query = new URLSearchParams({ file: absolute });
   if (timeoutMs) query.set("timeoutMs", timeoutMs);
@@ -549,7 +566,7 @@ async function pollCommand(args) {
   let waitReporter = null;
   let delivered = 0;
   try {
-    const request =
+    const firstRequest =
       agentReply || takeover
         ? {
             method: "POST",
@@ -557,23 +574,61 @@ async function pollCommand(args) {
             body: JSON.stringify(agentReply ? { agent_reply: agentReply } : {}),
           }
         : {};
-    const response = await fetchJson(`${baseUrl}/api/poll?${query}`, {
-      ...request,
-      // Poll ownership is claimed before the response is available. Retrying a transport failure
-      // can leave the first claim alive and make the retry reject itself as LISTENER_ACTIVE.
-      retries: 0,
-      onResponse: (pollResponse) => {
-        delivered = Number(pollResponse.headers.get(DELIVERED_HEADER)) || 0;
-        if (!timeoutMs) {
-          waitReporter = startPollWaitReporter({
-            file: absolute,
-            narrateTicks: shouldNarratePollWaitTicks({ isTTY: process.stderr.isTTY }),
-            short: delivered > 0,
-          });
+    // A reconnect never resends the reply: once the server answered the first request the reply
+    // was published, so it only listens again (keeping a takeover, which carries no reply).
+    const retryRequest = takeover
+      ? { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }
+      : {};
+    let request = firstRequest;
+    let answered = false;
+    let reconnect = null;
+    let response;
+    for (;;) {
+      try {
+        response = await fetchJson(`${baseUrl}/api/poll?${query}`, {
+          ...request,
+          // Poll ownership is claimed before the response is available. Retrying a transport failure
+          // here can leave the first claim alive and make the retry reject itself as LISTENER_ACTIVE;
+          // the reconnect loop below retries only once the old connection is gone.
+          retries: 0,
+          onResponse: (pollResponse) => {
+            answered = true;
+            delivered = Number(pollResponse.headers.get(DELIVERED_HEADER)) || 0;
+            if (reconnect) {
+              if (!timeoutMs) process.stderr.write("[hilight] Reconnected; still waiting for feedback.\n");
+            } else if (!timeoutMs) {
+              waitReporter = startPollWaitReporter({
+                file: absolute,
+                narrateTicks: shouldNarratePollWaitTicks({ isTTY: process.stderr.isTTY }),
+                short: delivered > 0,
+              });
+            }
+            if (pollResponse.headers.get(POLL_STATE_HEADER) === "listening") notifyHerdrPollReady();
+          },
+        });
+        break;
+      } catch (error) {
+        // A server restart (an update, a crash, a supervisor) cuts the long-poll. Queued feedback
+        // lives in state.json, so listen again for a while instead of making the agent re-run.
+        // Before any answer, a request that carried a reply may or may not have landed: report it.
+        const lost = error instanceof AxiError && /** @type {AxiError & { transport?: string }} */ (error).transport;
+        if (!lost || (!answered && request === firstRequest && agentReply)) {
+          throw withTrace(error, key, lost ? serverExitCause(serverLogFile(), pollStartedAt) : "");
         }
-        if (pollResponse.headers.get(POLL_STATE_HEADER) === "listening") notifyHerdrPollReady();
-      },
-    });
+        const cause = serverExitCause(serverLogFile(), pollStartedAt);
+        reconnect ??= { started: Date.now(), attempt: 0 };
+        if (reconnect.attempt === 0 && !timeoutMs) {
+          process.stderr.write(
+            `[hilight] Lost the server: ${cause}. Reconnecting for up to ${pollReconnectWindowMs() / 1000}s; queued feedback is kept.\n`,
+          );
+        }
+        const next = await reconnectPollServer(reconnect);
+        if (!next) throw withTrace(pollReconnectFailedError(absolute), key, cause);
+        baseUrl = next;
+        query.set("reconnect", "1");
+        request = answered ? retryRequest : request;
+      }
+    }
     if (response.code === "LISTENER_REPLACED") {
       throw new AxiError("Hilight poll listener was replaced by a takeover", "LISTENER_REPLACED", [
         `Re-run hilight poll ${absolute} only if you intend to take over listening`,
@@ -593,6 +648,52 @@ async function pollCommand(args) {
       process.off("SIGTERM", onPollSignal);
     }
   }
+}
+
+async function statusCommand(args) {
+  const file = firstPositionalArg(args);
+  if (!file) {
+    throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `hilight status <html-file>`"]);
+  }
+  await assertHtmlFile(file);
+  const absolute = await canonicalFile(file);
+  const key = sessionKey(absolute);
+  // Read-only: status never starts a server, so "not running" is reported as it is.
+  const { health } = await findRunningServer(defaultPort());
+  const session = await new SessionStore(stateFile()).findByKey(key);
+  return createStatusOutput({
+    file: absolute,
+    key,
+    logFile: serverLogFile(),
+    session,
+    health: health?.app === "lavish-axi" ? health : null,
+  });
+}
+
+async function logCommand(args) {
+  const file = firstPositionalArg(args, ["--since", "--limit"]);
+  if (!file) {
+    throw new AxiError("HTML file path is required", "VALIDATION_ERROR", [
+      "Run `hilight log <html-file> [--since 30m]`",
+    ]);
+  }
+  const sinceFlag = flagValue(args, "--since");
+  const since = parseSince(sinceFlag);
+  if (Number.isNaN(since)) {
+    throw new AxiError(`Cannot read --since ${sinceFlag}`, "VALIDATION_ERROR", [
+      "Pass an age (30m, 2h, 1d), a clock time today (23:05), or an ISO time",
+    ]);
+  }
+  const limitFlag = flagValue(args, "--limit");
+  const limit = limitFlag === null ? 30 : Number(limitFlag);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new AxiError(`--limit must be a whole number of at least 1`, "VALIDATION_ERROR", [
+      "Pass --limit 50, for example",
+    ]);
+  }
+  await assertHtmlFile(file);
+  const absolute = await canonicalFile(file);
+  return createLogOutput({ file: absolute, key: sessionKey(absolute), logFile: serverLogFile(), since, limit });
 }
 
 const REPLY_VALUE_FLAGS = ["--agent-reply", "--agent-reply-file"];
@@ -622,7 +723,11 @@ async function replyCommand(args) {
   await assertHtmlFile(file);
   const absolute = await canonicalFile(file);
   const baseUrl = await ensureServer();
-  const receipt = await postAgentReply(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, text, absolute);
+  const receipt = await postAgentReply(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, text, absolute).catch(
+    (error) => {
+      throw error instanceof AxiError && error.code === "SERVER_ERROR" ? withTrace(error, sessionKey(absolute)) : error;
+    },
+  );
   if (receipt?.status === "held") {
     return createPollOutput({ file: absolute, response: receipt, agent: detectInvokingAgent(process.env) });
   }
@@ -2279,6 +2384,13 @@ async function serverCommand(args) {
     debug,
     extraListenHosts: flagValues(args, "--also-listen"),
   });
+  // Without these a supervisor stop (systemd, kill, Ctrl-C) ended the process with no log line,
+  // and the reason a poll died was gone. Shut down through the server so the cause is logged.
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.once(signal, () => {
+      void server.stop(`${signal}: stopped by its supervisor or a kill`);
+    });
+  }
   await server.done;
   return "";
 }
@@ -2926,7 +3038,7 @@ export async function postAgentReply(url, text, file, { timeoutMs = AGENT_REPLY_
   } catch {
     if (signal.aborted) throw agentReplyReceiptTimeoutError(file, timeoutMs);
     throw new AxiError("Hilight server connection failed", "SERVER_ERROR", [
-      `Run \`hilight server --verbose\` or inspect \`${displayServerLogFile()}\` for server startup or crash diagnostics`,
+      serverLogHint(),
       `Re-run \`hilight reply ${file} --agent-reply "<message>"\` after the server is reachable`,
     ]);
   }
@@ -2962,26 +3074,108 @@ function agentReplyReceiptTimeoutError(file, timeoutMs) {
     `Hilight did not confirm the agent reply within ${timeoutMs}ms, so acceptance is unknown`,
     "SERVER_ERROR",
     [
-      `Run \`hilight server --verbose\` or inspect \`${displayServerLogFile()}\` for server diagnostics`,
+      serverLogHint(),
       `Check the Hilight conversation for the reply before re-running \`hilight reply ${file}\`, so it is not posted twice`,
     ],
   );
 }
 
+// `transport` marks a request that never reached the server ("connect") or whose answer was cut
+// off ("body"); the poll reconnects after either instead of failing.
 function serverConnectionError() {
-  return new AxiError("Hilight server connection failed", "SERVER_ERROR", [
-    `Run \`hilight server --verbose\` or inspect \`${displayServerLogFile()}\` for server startup or crash diagnostics`,
+  const error = new AxiError("Hilight server connection failed", "SERVER_ERROR", [
+    serverLogHint(),
     "Re-run the last `hilight poll <html-file>` command after the server is healthy",
   ]);
+  return Object.assign(error, { transport: "connect" });
 }
 
 // The usual cause is a server restart (an update, a crash). The next poll starts the server again
 // and queued feedback is kept, so the first hint is simply to re-run.
 function pollResponseInterruptedError() {
-  return new AxiError("Hilight poll response was interrupted", "SERVER_ERROR", [
+  const error = new AxiError("Hilight poll response was interrupted", "SERVER_ERROR", [
     "Re-run the same `hilight poll <html-file>` command: it starts the server again if needed, and queued feedback is kept",
-    `If it fails again, inspect \`${displayServerLogFile()}\``,
+    serverLogHint(),
   ]);
+  return Object.assign(error, { transport: "body" });
+}
+
+export const POLL_RECONNECT_WINDOW_MS = 30_000;
+// HILIGHT_POLL_RECONNECT_MS shortens the window for tests and debugging.
+function pollReconnectWindowMs() {
+  const value = Number(readEnv(process.env, "POLL_RECONNECT_MS"));
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : POLL_RECONNECT_WINDOW_MS;
+}
+// A supervisor (systemd, a terminal loop) usually brings its own server back within a second or
+// two. Starting one of ours inside that window would take the port from it, so only wait at first.
+const POLL_RECONNECT_WAIT_ONLY_MS = 3_000;
+const POLL_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000];
+
+/** @param {{ started: number, attempt: number }} state @returns {Promise<string | null>} */
+async function reconnectPollServer(state) {
+  for (;;) {
+    const elapsed = Date.now() - state.started;
+    if (elapsed >= pollReconnectWindowMs()) return null;
+    const wait = POLL_RECONNECT_DELAYS_MS[Math.min(state.attempt, POLL_RECONNECT_DELAYS_MS.length - 1)];
+    state.attempt += 1;
+    await delay(Math.min(wait, pollReconnectWindowMs() - elapsed));
+    try {
+      if (Date.now() - state.started < POLL_RECONNECT_WAIT_ONLY_MS) {
+        const { baseUrl, health, foreign } = await findRunningServer(defaultPort());
+        if (health?.app === "lavish-axi" && !foreign) return baseUrl;
+      } else {
+        return await ensureServer();
+      }
+    } catch {
+      // Still down, or starting: try again until the window closes.
+    }
+  }
+}
+
+function pollReconnectFailedError(file) {
+  return new AxiError(
+    `The Hilight server went away and did not come back within ${pollReconnectWindowMs() / 1000}s`,
+    "SERVER_ERROR",
+    [`Re-run \`hilight poll ${file}\` once the server is up: queued feedback is kept`, serverLogHint()],
+  );
+}
+
+// What happened and the last few log lines that show it, on a server failure, so the agent can
+// explain it to the user without going digging.
+function withTrace(error, key, why = "") {
+  if (!(error instanceof AxiError)) return error;
+  return Object.assign(error, {
+    ...(why ? { why } : {}),
+    log: recentLogLines(serverLogFile(), key),
+  });
+}
+
+/** @param {unknown} error */
+function formatCliError(error) {
+  if (error instanceof AxiError) {
+    const traced = /** @type {AxiError & { why?: string, log?: string[] }} */ (error);
+    return {
+      output: formatTraceError({
+        message: traced.message,
+        code: traced.code,
+        suggestions: traced.suggestions,
+        why: traced.why,
+        log: traced.log,
+      }),
+      exitCode: traced.code === "VALIDATION_ERROR" ? 2 : 1,
+    };
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return { output: formatTraceError({ message, code: "UNKNOWN" }), exitCode: 1 };
+}
+
+// Point at the log only when it exists. A server started by the CLI appends to server.log; one
+// started another way (systemd, a terminal) writes wherever that process's output goes.
+function serverLogHint() {
+  if (existsSync(serverLogFile())) {
+    return `Inspect \`${displayServerLogFile()}\` (or run \`hilight server --verbose\`) for server startup or crash diagnostics`;
+  }
+  return `No server log at \`${displayServerLogFile()}\`: this server was not started by \`hilight\`, so its output goes wherever its launcher sends it (a terminal, or \`journalctl --user -u <unit>\` for a systemd unit). Run \`hilight server --verbose\` to see it live`;
 }
 
 function firstPositionalArg(args, valueFlags = []) {
@@ -3181,7 +3375,7 @@ export function getCommandHelp(command, { agent = "generic", full = false } = {}
   if (!full && SHORT_COMMAND_HELP[command]) {
     return `${SHORT_COMMAND_HELP[command]}\nEvery rule: \`hilight ${command} --help --full\`\n`;
   }
-  return createCommandHelp({ agent })[command] || null;
+  return createCommandHelp({ agent })[command] || SHORT_COMMAND_HELP[command] || null;
 }
 
 // What `hilight --help` prints: the commands and the review loop in plain shell terms. The
@@ -3195,6 +3389,8 @@ Usage:
   hilight poll <html-file> [--agent-reply-file <path>] [--full]
   hilight reply <html-file> --agent-reply-file <path>
   hilight catch-up <html-file> [thread_id] [--full]
+  hilight status <html-file>                    server, listener, queue, last delivery and reply
+  hilight log <html-file> [--since 30m]         what happened, with times (server.log)
   hilight end <html-file>
   hilight export <html-file> [--out <path>]
   hilight share <html-file> [--private | --password <pw>]
@@ -3213,7 +3409,7 @@ The loop:
      \`hilight poll <html-file> --agent-reply-file <reply-file>\` to post it and listen again
      (\`hilight reply\` posts without listening). A \`## c1\` line answers comment thread c1.
   4. Comments that arrive while you work hold the reply and come back to you: answer them too, then re-run.
-  Missing context? \`hilight catch-up <html-file>\`.
+  Missing context? \`hilight catch-up <html-file>\`. Something went wrong? \`hilight status <html-file>\`.
 
 How the review page works, to explain it to the user: ${collapseHomeDirectory(USING_THE_PAGE_FILE, os.homedir())}
 Design and artifact guidance: \`hilight design\`, \`hilight playbook\`.
@@ -3274,6 +3470,27 @@ snapshot from the last delivery.
 Examples:
   hilight catch-up report.html
   hilight catch-up report.html c1
+`,
+  status: `Usage: hilight status <html-file>
+
+What is going on with this review right now: the server (pid, version, uptime, the last restart
+and why), the session, whether an agent is listening (or since when and why not), comments waiting
+for the agent, and the last delivery, held reply and posted reply with their times. Read-only: it
+never starts the server. Use it when a poll failed or the user asks why nothing happened.
+
+Example:
+  hilight status report.html
+`,
+  log: `Usage: hilight log <html-file> [--since <time>] [--limit <n>]
+
+This session's history from server.log, oldest first: opened, listen, listen-end (with why),
+delivered, held, reply, requeued, ended, plus the server's own start, stop and crash lines with
+their causes. --since takes an age (30m, 2h, 1d), a clock time today (23:05), or an ISO time.
+--limit caps the rows (default 30). The same history shows on the page under the agent status.
+
+Examples:
+  hilight log report.html --since 1h
+  hilight log report.html --since 23:05 --limit 100
 `,
 };
 
