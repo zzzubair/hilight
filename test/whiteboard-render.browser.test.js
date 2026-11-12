@@ -224,6 +224,8 @@ test(
     assert.match(result.root.find((card) => card.id === "fresh").className, /is-fresh/);
     assert.match(result.root.find((card) => card.id === "stale").className, /is-stale/);
     assert.equal(result.changedLines, 1);
+    assert.deepEqual(result.landings, [1, 1], "an arrow highlights the line it starts on and the line it ends on");
+    assert.deepEqual(result.legend, ["Add"]);
     assert.match(result.health, /1 of 2 code cards changed since pinned/);
     assert.equal(result.savedCards, 5);
     assert.equal(result.savedLinks, 5, "saved cards keep their link so a reload admits them again");

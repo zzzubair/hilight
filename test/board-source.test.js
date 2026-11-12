@@ -10,6 +10,7 @@ import {
   codeRangeHash,
   parseBoardHtml,
   parseCodeRef,
+  parseFlowStep,
   readBoard,
   stampBoardFile,
 } from "../src/board-source.js";
@@ -234,4 +235,108 @@ test("readBoard sizes code cards to their longest line and wraps past the column
     codeRows(byId.capped.code.lines, byId.capped.code.cols).every((row) => row.text.length <= byId.capped.code.cols),
   );
   assert.equal(line, 20);
+});
+
+const MINIMAL = `<main data-hilight-board="Checkout">
+  <p>How a payment request becomes a charge, and where it can fail twice.</p>
+  <section id="intro"><h2>Start here</h2><p>Read the two flows left to right.</p></section>
+  <section id="api" data-code="src/api.js:1-3"><h2>API</h2><p>Takes the request and checks the key.</p></section>
+  <section id="charge" data-code="src/charge.js:1-3"><h2>Charge</h2><p>Calls the processor once.</p></section>
+  <section id="store" data-code="src/store.js:1-3"><h2>Store</h2><p>Remembers the key.</p></section>
+  <ol data-flow="Pay">
+    <li>api:2 -> charge:1-2 hands the request on</li>
+    <li>charge:3 → store:2</li>
+  </ol>
+  <ol data-flow="Retry"><li>store:1 -> api:3 a retry finds the key</li></ol>
+</main>`;
+
+test("parseFlowStep reads chained steps and their words, and explains a bad step", () => {
+  assert.deepEqual(parseFlowStep("a:1-2 -> b:3 → c then it ends").steps, [
+    {
+      from: { card: "a", lines: { start: 1, end: 2 } },
+      to: { card: "b", lines: { start: 3, end: 3 } },
+      text: "then it ends",
+    },
+    { from: { card: "b", lines: { start: 3, end: 3 } }, to: { card: "c", lines: null }, text: "then it ends" },
+  ]);
+  assert.match(parseFlowStep("api calls charge").error, /write it as cardA:12-18 -> cardB:40-44/);
+});
+
+test("a minimal board needs only sections, flows and text; the app lays it out by flow", () => {
+  const model = parseBoardHtml(MINIMAL);
+  assert.ok(model);
+  assert.deepEqual(
+    model.cards.map((card) => [card.id, card.kind]),
+    [
+      ["intro", "html"],
+      ["api", "code"],
+      ["charge", "code"],
+      ["store", "code"],
+    ],
+  );
+  assert.equal(model.levels[0].summary, "How a payment request becomes a charge, and where it can fail twice.");
+  assert.deepEqual(
+    model.flows.map((flow) => [flow.name, flow.steps.length, flow.color]),
+    [
+      ["Pay", 2, model.flows[0].color],
+      ["Retry", 1, model.flows[1].color],
+    ],
+  );
+  assert.notEqual(model.flows[0].color, model.flows[1].color);
+  assert.deepEqual(model.problems, []);
+  const byId = Object.fromEntries(model.cards.map((card) => [card.id, card]));
+  // Text cards sit above the flow; each step's target is right of its source.
+  assert.ok(byId.intro.y + byId.intro.h < byId.api.y);
+  assert.ok(byId.charge.x > byId.api.x + byId.api.w);
+  assert.ok(byId.store.x > byId.charge.x + byId.charge.w);
+  for (const a of model.cards) {
+    for (const b of model.cards) {
+      if (a === b) continue;
+      const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+      assert.ok(apart, `${a.id} and ${b.id} do not overlap`);
+    }
+  }
+  // The flow list is not part of the summary or any card.
+  assert.doesNotMatch(model.levels[0].summary, /->/);
+});
+
+test("board problems say what is wrong and what to write instead", () => {
+  const model = parseBoardHtml(
+    MINIMAL.replace("charge:3 → store:2", "charge:3 → stor:2")
+      .replace("store:1 -> api:3", "store:1 -> api:30")
+      .replace("<li>api:2", "<li>api calls charge</li><li>intro:4 -> api:2</li><li>api:2"),
+  );
+  assert.ok(model);
+  const text = model.problems.join("\n");
+  assert.match(text, /Flow "Pay": "api calls charge" is not a step: write it as cardA:12-18 -> cardB:40-44/);
+  assert.match(text, /no card "stor"\. Cards here: intro, api, charge, store\./);
+  assert.match(text, /api:30-30 is outside its lines 1-3/);
+  assert.match(text, /"intro" is not a code card, so drop the :4 lines/);
+});
+
+test("each flow gets its own band, in the order the flows are written", () => {
+  const model = parseBoardHtml(`<main data-hilight-board="Two flows">
+<section id="a" data-code="a.js:1-3"><h2>A</h2></section>
+<section id="b" data-code="b.js:1-3"><h2>B</h2></section>
+<section id="c" data-code="c.js:1-3"><h2>C</h2></section>
+<section id="d" data-code="d.js:1-3"><h2>D</h2></section>
+<ol data-flow="First"><li>a:1 -> b:2 calls</li></ol>
+<ol data-flow="Second"><li>c:1 -> d:2 calls</li><li>d:3 -> b:1 reuses</li></ol>
+</main>`);
+  assert.ok(model);
+  const byId = Object.fromEntries(model.cards.map((card) => [card.id, card]));
+  const firstBottom = Math.max(byId.a.y + byId.a.h, byId.b.y + byId.b.h);
+  assert.ok(byId.c.y >= firstBottom, "the second flow sits below the first");
+  assert.ok(byId.d.y >= firstBottom);
+  assert.ok(byId.d.x > byId.c.x + byId.c.w, "each band still reads left to right");
+});
+
+test("the board playbook's copyable example parses with no problems", async () => {
+  const { findPlaybook } = await import("../src/playbooks.js");
+  const playbook = findPlaybook("board");
+  assert.ok(playbook && typeof playbook.example === "string");
+  const model = parseBoardHtml(playbook.example);
+  assert.ok(model, "the example is a board");
+  assert.deepEqual(model.problems, []);
+  assert.ok(model.flows.length >= 2, "the example shows more than one flow");
 });

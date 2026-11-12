@@ -3,12 +3,13 @@
 import "@excalidraw/excalidraw/index.css";
 import "../../src/whiteboard-frame.css";
 
+import { parseEndpoint } from "../../src/board-core.js";
 import { startBoard } from "../../src/board-frame.js";
 
 window.EXCALIDRAW_ASSET_PATH = `${location.origin}/whiteboard-assets/`;
 
 const pinned = ["export function add(a, b) {", "  return a + b;", "}"];
-const card = (id, extra) => ({ id, level: "", kind: "html", title: id, x: 0, y: 0, w: 320, h: 180, to: [], ...extra });
+const card = (id, extra) => ({ id, level: "", kind: "html", title: id, x: 0, y: 0, w: 320, h: 180, ...extra });
 const code = (status, lines, extra = {}) => ({
   ref: "src/math.js:1-3",
   path: "src/math.js",
@@ -39,7 +40,7 @@ function model(staleStatus) {
       { id: "inside", title: "Inside", parent: "" },
     ],
     cards: [
-      card("intro", { html: "<p>Adds numbers.</p>", attrs: [["id", "intro"]], to: ["fresh"] }),
+      card("intro", { html: "<p>Adds numbers.</p>", attrs: [["id", "intro"]] }),
       card("fresh", { kind: "code", x: 400, h: 120, note: "", code: code("fresh", pinned) }),
       card("stale", {
         kind: "code",
@@ -56,6 +57,15 @@ function model(staleStatus) {
         board: { count: 1, preview: [{ x: 0, y: 0, w: 1, h: 1, kind: "html" }] },
       }),
       card("deep", { level: "inside", html: "<p>One level down.</p>", attrs: [["id", "deep"]] }),
+    ],
+    flows: [
+      {
+        id: "flow-1",
+        name: "Add",
+        level: "",
+        color: "#7048e8",
+        steps: [{ from: parseEndpoint("fresh:2"), to: parseEndpoint("stale:2"), text: "the sum is checked" }],
+      },
     ],
   };
 }
@@ -91,6 +101,11 @@ async function run() {
   const root = visibleCards();
   const health = document.querySelector(".bd-health")?.textContent || "";
   const changedLines = [...document.querySelectorAll('.bd-card[data-card="stale"] .bd-line.is-changed')].length;
+  // Both ends of a flow step highlight the lines the arrow joins, and the legend names the flow.
+  const landings = ["fresh", "stale"].map(
+    (id) => [...document.querySelectorAll(`.bd-card[data-card="${id}"] .bd-line.is-landing`)].length,
+  );
+  const legend = [...document.querySelectorAll(".bd-legend-item")].map((item) => item.textContent.trim());
 
   // Excalidraw draws a link icon beside any linked element; cards drop their link once admitted.
   await sleep(400);
@@ -119,6 +134,8 @@ async function run() {
     root,
     health,
     changedLines,
+    landings,
+    legend,
     savedCards: savedCards.length,
     savedLinks: savedLinks.length,
     connectorsSaved,

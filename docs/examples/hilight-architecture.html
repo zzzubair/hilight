@@ -5,250 +5,176 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>How Hilight works</title>
     <style>
-      :root {
-        color-scheme: light;
-        --ink: #1c1c1a;
-        --muted: #6f6e69;
-        --line: #dddcd6;
-        --paper: #ffffff;
-        --table: #efeeea;
-      }
       body {
-        margin: 0;
-        background: var(--table);
-        color: var(--ink);
         font:
-          14px/1.55 ui-sans-serif,
-          system-ui,
-          -apple-system,
-          "Segoe UI",
+          15px/1.55 system-ui,
           sans-serif;
-      }
-      /* Plain-page fallback: without Hilight the board reads as a grid of cards. */
-      [data-hilight-board] {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-        gap: 20px;
-        padding: 28px;
-        max-width: 1400px;
-        margin: 0 auto;
-      }
-      [data-card] {
-        background: var(--paper);
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 16px 18px;
-        min-width: 0;
-        overflow: auto;
-      }
-      [data-card="board"] {
-        grid-column: 1 / -1;
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        gap: 12px;
-        background: transparent;
-      }
-      [data-card="board"] > :is(h2, p) {
-        grid-column: 1 / -1;
-        margin: 0;
-      }
-      [data-card] h2,
-      [data-card] h3 {
-        margin: 0 0 6px;
-        font-size: 15px;
-      }
-      [data-card] pre {
-        margin: 10px 0 0;
-        font:
-          12px/1.5 ui-monospace,
-          SFMono-Regular,
-          Menlo,
-          monospace;
-        overflow: auto;
-      }
-      /* Shared by the plain page and the HTML cards on the canvas. */
-      .lede {
-        margin: 0 0 12px;
-        color: var(--muted);
-      }
-      .steps {
-        margin: 0;
-        padding-left: 18px;
-      }
-      .steps li {
-        margin: 3px 0;
-      }
-      .kbd {
-        font:
-          12px ui-monospace,
-          SFMono-Regular,
-          Menlo,
-          monospace;
-        border: 1px solid var(--line);
-        border-bottom-width: 2px;
-        border-radius: 5px;
-        padding: 0 5px;
+        max-width: 960px;
+        margin: 24px auto;
+        padding: 0 16px;
       }
       table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 13px;
+        font-size: 13.5px;
       }
       th,
       td {
         text-align: left;
-        padding: 7px 8px;
-        border-bottom: 1px solid var(--line);
+        padding: 6px 8px;
+        border-bottom: 1px solid #e3e2dc;
         vertical-align: top;
       }
       th {
-        font-weight: 600;
-        color: var(--muted);
-        font-size: 11.5px;
-        text-transform: none;
-      }
-      code {
-        font:
-          12px ui-monospace,
-          SFMono-Regular,
-          Menlo,
-          monospace;
-      }
-      .split {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-top: 4px;
-      }
-      .split div {
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 10px 12px;
-      }
-      .split b {
-        display: block;
-        font-size: 12px;
-        color: var(--muted);
-        font-weight: 600;
-        margin-bottom: 2px;
+        color: #55544f;
+        font-size: 12.5px;
       }
     </style>
   </head>
   <body>
     <main data-hilight-board="How Hilight works">
-      <section id="start-here" data-card data-x="0" data-y="0" data-w="560" data-h="300">
+      <p>
+        How an HTML file becomes a review page, and how your marks get back to the agent. Follow Open a board first,
+        then Marks reach the agent.
+      </p>
+
+      <section id="start-here">
         <h2>Start here</h2>
-        <p class="lede">
-          Hilight is one CLI, one local server, and one browser page. An agent writes an HTML file; you point at it;
-          your words come back to the agent through a long poll.
+        <p>
+          Hilight is one CLI, one local server, and one browser page. Every code card below is read from this repo when
+          the board opens, and turns Stale if its lines change.
         </p>
-        <ol class="steps">
-          <li>Top lane: the Node side. Bottom lane: the browser side.</li>
-          <li>
-            Every code card below is read from this repo when the board opens, and flips to <b>Stale</b> if the lines
-            change.
-          </li>
-          <li>
-            Draw arrows, circle lines, drop notes, then <b>Queue marks</b>. Select a card and press <b>Comment</b> to
-            start a thread.
-          </li>
-          <li>Double-click <b>How this canvas works</b> to go one level deeper.</li>
-        </ol>
+        <ul>
+          <li>Each coloured arrow is one step of a flow; the legend names the flows.</li>
+          <li>Arrows start and end on the exact lines responsible, highlighted in the flow's colour.</li>
+          <li>Draw on the canvas, then Queue marks. Select a card and press Comment to start a thread.</li>
+          <li>Double-click How the canvas is built to go one level deeper.</li>
+        </ul>
       </section>
 
-      <section id="trust" data-card data-x="1740" data-y="0" data-w="560" data-h="300">
+      <section id="trust">
         <h2>Who may talk to whom</h2>
+        <p>Every message is trusted for where it came from, never for what it claims.</p>
         <table>
-          <thead>
-            <tr>
-              <th>Window</th>
-              <th>Origin</th>
-              <th>Trusted because</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Chrome page</td>
-              <td>Hilight</td>
-              <td>Same-origin guard on every write</td>
-            </tr>
-            <tr>
-              <td>Artifact frame</td>
-              <td>opaque (sandbox)</td>
-              <td>It is <code>frame.contentWindow</code></td>
-            </tr>
-            <tr>
-              <td>Whiteboard frame</td>
-              <td>opaque (sandbox)</td>
-              <td>Its parent is the artifact frame</td>
-            </tr>
-            <tr>
-              <td>Card documents</td>
-              <td>opaque (sandbox)</td>
-              <td>Nothing: they render, never report</td>
-            </tr>
-          </tbody>
+          <tr>
+            <th>Window</th>
+            <th>Trusted because</th>
+          </tr>
+          <tr>
+            <td>Review page</td>
+            <td>Same-origin guard on every write</td>
+          </tr>
+          <tr>
+            <td>Artifact frame</td>
+            <td>It is the page's own sandboxed iframe</td>
+          </tr>
+          <tr>
+            <td>Canvas frame</td>
+            <td>Its parent is the artifact frame and its token names this session</td>
+          </tr>
+          <tr>
+            <td>Card documents</td>
+            <td>Nothing: they render and never report</td>
+          </tr>
         </table>
       </section>
 
-      <section id="canvas" data-card="board" data-x="640" data-y="0" data-w="420" data-h="300">
-        <h2>How this canvas works</h2>
-        <p>One board file, two views: a plain page without Hilight, this canvas with it.</p>
+      <section id="canvas">
+        <h2>How the canvas is built</h2>
+        <p>
+          One board file, two views. The server reads cards and flows from the file, places them, and the browser routes
+          every arrow around the cards.
+        </p>
 
-        <section id="two-views" data-card data-x="0" data-y="0" data-w="520" data-h="270" data-to="parse-board">
+        <section id="two-views">
           <h3>One file, two views</h3>
-          <div class="split">
-            <div><b>Opened directly</b>The cards are a grid of sections. Nothing is lost.</div>
-            <div><b>Opened with Hilight</b>The SDK hides the grid and mounts one sandboxed canvas over it.</div>
-          </div>
-          <p class="lede" style="margin-top: 12px">
-            Your arrows and notes live in Hilight's own state, never in the file. The agent gets them in words.
+          <p>
+            Opened directly, this file is a plain page of sections and numbered steps, so nothing is lost without
+            Hilight. Opened with Hilight, the SDK hides that page and mounts the canvas over it.
           </p>
         </section>
 
-        <section
-          id="parse-board"
-          data-card
-          data-code="src/board-source.js:157-176"
-          data-hash="5bd6b4bb3272"
-          data-x="900"
-          data-y="0"
-          data-to="check-pin"
-        >
-          <h3>Reading the board from disk</h3>
-          <p>Every card is a [data-card] section; nested boards recurse.</p>
-          <pre data-snapshot><code>function directCards(container) {
-  const found = [];
-  const visit = (node) =&gt; {
-    for (const child of elementChildren(node)) {
-      if (isCard(child)) found.push(child);
-      else visit(child);
-    }
-  };
-  visit(container);
-  return found;
-}
-
-function cardKind(node) {
-  const declared = String(attr(node, CARD_ATTRIBUTE) || "")
-    .trim()
-    .toLowerCase();
-  if (declared === "board" || directCards(node).length &gt; 0) return "board";
-  if (hasAttr(node, "data-code")) return "code";
-  return "html";
-}</code></pre>
+        <section id="read-flows" data-code="src/board-source.js:343-353" data-hash="35cdc2c5f78b">
+          <h3>Flows are read from the file</h3>
+          <p>
+            Each ol data-flow becomes a named flow with its own colour. A step that does not parse becomes a problem
+            sentence for hilight board check, instead of a silent gap.
+          </p>
+          <pre data-snapshot><code>    for (const list of directFlows(container)) {
+      if (flows.length &gt;= MAX_FLOWS) break;
+      const name = squash(attr(list, "data-flow") || "", MAX_TITLE_CHARS) || `Flow ${flows.length + 1}`;
+      const steps = [];
+      for (const item of elementChildren(list).filter((child) =&gt; child.tagName === "li")) {
+        const parsed = parseFlowStep(textOf(item));
+        if (parsed.error) problems.push(`Flow "${name}": ${parsed.error}.`);
+        steps.push(...parsed.steps.slice(0, MAX_FLOW_STEPS - steps.length));
+      }
+      flows.push({ id: `flow-${flows.length + 1}`, name, level: levelId, steps, color: flowColor(flows.length) });
+    }</code></pre>
         </section>
 
-        <section
-          id="check-pin"
-          data-card
-          data-code="src/board-source.js:499-529"
-          data-hash="ef60bc72f817"
-          data-x="900"
-          data-y="582"
-        >
-          <h3>The pin check</h3>
-          <p>A changed range is stale, unless the same lines moved: then the card follows them.</p>
+        <section id="place-cards" data-code="src/board-source.js:608-621" data-hash="7764aecca76e">
+          <h3>Flows decide where cards go</h3>
+          <p>
+            Each flow gets its own band, in the order it is written, and every step's target lands one column right of
+            its source. A flow reads left to right without the agent writing any coordinates.
+          </p>
+          <pre data-snapshot><code>  let y = originY;
+  for (const band of bands) {
+    const columnY = new Map();
+    let bottom = y;
+    for (const id of band) {
+      const card = byId.get(id);
+      const column = rank.get(id);
+      card.x = columnX[column];
+      card.y = columnY.get(column) ?? y;
+      columnY.set(column, card.y + card.h + FLOW_ROW_GAP);
+      bottom = Math.max(bottom, card.y + card.h);
+    }
+    y = bottom + FLOW_ROW_GAP * 1.5;
+  }</code></pre>
+        </section>
+
+        <section id="route-arrows" data-code="src/board-core.js:648-673" data-hash="e53425677058">
+          <h3>Arrows go around cards</h3>
+          <p>
+            Each step is routed from its source lines to its target lines through the gaps between cards, then
+            overlapping segments of different flows are pushed apart so both stay visible.
+          </p>
+          <pre data-snapshot><code>export function createLinkElements(cards, cardElements, flows = []) {
+  const byCard = new Map(
+    cardElements.filter((element) =&gt; !element.isDeleted).map((element) =&gt; [cardIdOfElement(element), element]),
+  );
+  const models = new Map(cards.map((card) =&gt; [card.id, card]));
+  const obstacles = [...byCard.values()].map(elementRect);
+  const routes = [];
+  const meta = [];
+  const seen = new Set();
+  for (const step of flowSteps(flows)) {
+    const fromElement = byCard.get(step.from.card);
+    const toElement = byCard.get(step.to.card);
+    if (!fromElement || !toElement || fromElement === toElement) continue;
+    const id = `${LINK_ELEMENT_PREFIX}${step.key}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const a = elementRect(fromElement);
+    const b = elementRect(toElement);
+    const fromY = lineY(fromElement, models.get(step.from.card), step.from.lines);
+    const toY = lineY(toElement, models.get(step.to.card), step.to.lines);
+    const route =
+      routeAround(cardPorts(a, fromY, b), cardPorts(b, toY, a), obstacles) || connectorPoints(a, b, { fromY, toY });
+    routes.push(route.map((point) =&gt; [...point]));
+    meta.push({ id, step, level: models.get(step.from.card)?.level ?? "" });
+  }
+  nudgeOverlaps(routes);</code></pre>
+        </section>
+
+        <section id="check-pin" data-code="src/board-source.js:724-754" data-hash="ef60bc72f817">
+          <h3>Stale or moved</h3>
+          <p>
+            Compares the live lines with the pinned hash. If the pinned copy shows up elsewhere in the file the card
+            follows it as Moved; otherwise it is Stale, so the board never silently describes old code.
+          </p>
           <pre data-snapshot><code>export function checkCodeCard(code, file) {
   if (code.error) return { status: "invalid", error: code.error };
   if (file.error) return { status: "missing", error: file.error };
@@ -282,37 +208,18 @@ function cardKind(node) {
 }</code></pre>
         </section>
 
-        <section
-          id="follow-cards"
-          data-card
-          data-code="src/artifact-sdk.js:1157-1162"
-          data-hash="c1d214363489"
-          data-x="0"
-          data-y="350"
-          data-to="check-pin"
-        >
-          <h3>Comments follow the cards</h3>
-          <p>Thread anchors ask the canvas where a hidden card is on screen.</p>
-          <pre data-snapshot><code>  function elementRect(el) {
-    const card = boardCardOf(el);
-    if (!card) return el.getBoundingClientRect();
-    const rect = board?.rects.get(boardCardId(card));
-    return rect ? new DOMRect(rect[0], rect[1], rect[2], rect[3]) : new DOMRect(0, 0, 0, 0);
-  }</code></pre>
-        </section>
+        <ol data-flow="File to canvas">
+          <li>read-flows:352 -> place-cards:614-615 the parsed steps decide each card's band and column</li>
+          <li>place-cards:615-616 -> route-arrows:668-669 the placed cards become the obstacles every arrow avoids</li>
+        </ol>
       </section>
 
-      <section
-        id="cli"
-        data-card
-        data-code="src/cli.js:2495-2512"
-        data-hash="5bc127722e9b"
-        data-x="0"
-        data-y="420"
-        data-to="server"
-      >
-        <h3>CLI starts a detached server</h3>
-        <p><code>hilight file.html</code> spawns the server once; every later command reuses it.</p>
+      <section id="cli" data-code="src/cli.js:2498-2515" data-hash="5bc127722e9b">
+        <h2>CLI starts one detached server</h2>
+        <p>
+          The first hilight command spawns the server and lets it outlive the command; every later command finds it and
+          reuses it, so all review pages share one process.
+        </p>
         <pre data-snapshot><code>async function startServer(port, { alsoListen = [] } = {}) {
   await ensureStateDir();
   const entry = resolveServerEntry();
@@ -333,17 +240,12 @@ function cardKind(node) {
 }</code></pre>
       </section>
 
-      <section
-        id="server"
-        data-card
-        data-code="src/server.js:1632-1643"
-        data-hash="f7b465853113"
-        data-x="794"
-        data-y="420"
-        data-to="store chrome"
-      >
-        <h3>Server serves the artifact</h3>
-        <p>The file on disk plus exactly one injected SDK script tag.</p>
+      <section id="artifact-route" data-code="src/server.js:1632-1643" data-hash="f7b465853113">
+        <h2>Server serves the file as it is on disk</h2>
+        <p>
+          Reads the HTML fresh on every load and adds exactly one SDK script tag. A stale load token gets 409, so an old
+          tab can never review a newer file by mistake.
+        </p>
         <pre data-snapshot><code>      const html = await readFile(beforeRead.session.file, "utf8");
       const verified = await store.verifyArtifactLoad(key, token, revision);
       if (!verified?.valid) {
@@ -358,16 +260,158 @@ function cardKind(node) {
       res.type("html").send(injectLavishSdk(html, key, verified.artifact_revision, verified.artifact_load_token));</code></pre>
       </section>
 
-      <section
-        id="store"
-        data-card
-        data-code="src/session-store.js:669-697"
-        data-hash="9fdb828c4ee2"
-        data-x="1740"
-        data-y="420"
-      >
-        <h3>Session store hands feedback to the poll</h3>
-        <p>One lock, one state file; a take drains every queued prompt.</p>
+      <section id="mount" data-code="src/artifact-sdk.js:1122-1138" data-hash="f752b6164047">
+        <h2>The SDK turns a board into a canvas</h2>
+        <p>
+          Finds the board element, hides it, and covers the page with one sandboxed canvas frame. The file itself is
+          untouched, which is why it still reads as a plain page.
+        </p>
+        <pre data-snapshot><code>  function mountBoard() {
+    if (board) return;
+    const root = document.querySelector("[data-hilight-board]");
+    if (!root) return;
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("data-lavish-ui", "board");
+    iframe.setAttribute("title", "Board canvas");
+    iframe.setAttribute("sandbox", "allow-scripts allow-popups");
+    iframe.src =
+      "/whiteboard-frame?" + new URLSearchParams({ diagramIndex: "999", key: String(sessionKey || ""), board: "1" });
+    iframe.style.cssText =
+      "position:fixed;inset:0;width:100%;height:100%;margin:0;border:0;z-index:2147483646;background:#efeeea;color-scheme:normal";
+    /** @type {HTMLElement} */ (root).style.display = "none";
+    document.documentElement.style.overflow = "hidden";
+    (document.body || document.documentElement).appendChild(iframe);
+    board = { root, iframe, ids: boardCardIds(root), rects: new Map(), lastThreads: "", live: false };
+  }</code></pre>
+      </section>
+
+      <section id="frame-route" data-code="src/server.js:1742-1754" data-hash="77757180673b">
+        <h2>The canvas frame gets a session token</h2>
+        <p>
+          The frame must name its session; the token it receives is signed for that session only, so a frame cannot read
+          or write another review's canvas.
+        </p>
+        <pre data-snapshot><code>  app.get("/whiteboard-frame", (req, res) =&gt; {
+    res.setHeader("cache-control", "no-store");
+    // The frame's channel token is minted for one session, so the caller must
+    // name it. Both call sites (the chrome overlay and the artifact SDK's
+    // inline embed) know their own key; a request without one could only
+    // produce a token that authenticates nothing, so reject it outright.
+    const sessionKey = String(req.query.key || "");
+    if (!isValidWhiteboardKey(sessionKey)) {
+      res.status(400).type("text/plain").send("Missing session key");
+      return;
+    }
+    res.type("html").send(createWhiteboardFrameHtml(createWhiteboardChannelToken(whiteboardChannelSecret, sessionKey)));
+  });</code></pre>
+      </section>
+
+      <section id="queue-marks" data-code="src/chrome-client.js:3716-3735" data-hash="e3d207c37814">
+        <h2>Queue marks becomes one prompt</h2>
+        <p>
+          The canvas describes your arrows, circles and notes in words, and the review page holds them as one
+          board-tagged comment until you press Send. Queueing again replaces it rather than piling up.
+        </p>
+        <pre data-snapshot><code>    if (index === BOARD_SCENE_INDEX &amp;&amp; message.board) {
+      const boardText =
+        (note ? note + "\n\n" : "") +
+        "Marks on the board canvas:\n" +
+        (summary ? "- " + summary.split("\n").join("\n- ") : "(only the note above)") +
+        (files.preview_path ? "\n\nPNG preview of the current board level: " + String(files.preview_path) : "");
+      if (
+        !enqueuePrompt(
+          {
+            uid: "",
+            prompt: boardText,
+            selector: "",
+            tag: "board",
+            text: "Board: canvas marks",
+            target: {
+              type: "board-canvas",
+              revision: String(message.sourceHash || ""),
+              scenePath: String(files.scene_path || ""),
+              previewPath: String(files.preview_path || ""),
+              stats: message.stats &amp;&amp; typeof message.stats === "object" ? message.stats : {},</code></pre>
+      </section>
+
+      <section id="send" data-code="src/chrome-client.js:1975-1994" data-hash="360e2343f2fe">
+        <h2>Send posts every queued comment at once</h2>
+        <p>
+          One request carries the whole batch, retried once without the page snapshot if it is too large, so your
+          feedback is never split or partly delivered.
+        </p>
+        <pre
+          data-snapshot
+        ><code>  const body = { prompts: prompts.map(stripInternalPromptFields), domSnapshot: submission.domSnapshot };
+  if (shouldEndSession) body.endSession = true;
+  let response;
+  try {
+    response = await fetch("/api/" + key + "/prompts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    // The DOM snapshot is optional context and can be the difference between a
+    // useful terminal batch and Express' request-size limit. Retry exactly once
+    // without it; never mutate or split the user's exact feedback batch.
+    if (response.status === 413 &amp;&amp; body.domSnapshot) {
+      body.domSnapshot = "";
+      response = await fetch("/api/" + key + "/prompts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    }</code></pre>
+      </section>
+
+      <section id="prompts-route" data-code="src/server.js:1166-1180" data-hash="fcfb75273c9a">
+        <h2>The server only accepts its own page</h2>
+        <p>
+          A request from any other origin is refused before anything is stored. Knowing the session key is not enough to
+          queue a prompt.
+        </p>
+        <pre data-snapshot><code>  app.post("/api/:key/prompts", async (req, res, next) =&gt; {
+    try {
+      if (!isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ error: "cross-origin prompt submission rejected" });
+        return;
+      }
+      const shouldEndSession = Boolean(req.body?.endSession || req.body?.end_session);
+      const hasLayoutWarningPrompt = Array.isArray(req.body?.prompts)
+        ? req.body.prompts.some((prompt) =&gt; prompt?.tag === "layout-warnings")
+        : false;
+      const result = await store.queuePrompts(req.params.key, req.body || {}, {
+        resolveAttachment: (sessionKeyValue, id) =&gt; resolveAttachment(attachmentStateRoot, sessionKeyValue, id),
+        maxPerPrompt: attachmentConfig.maxPerPrompt,
+        maxPromptBytes: attachmentConfig.maxPromptBytes,
+      });</code></pre>
+      </section>
+
+      <section id="poll" data-code="src/server.js:1076-1086" data-hash="096146829ffa">
+        <h2>The agent's poll wakes up</h2>
+        <p>
+          The waiting hilight poll takes the feedback the moment it is stored. If the agent's connection dropped, the
+          batch is put back instead of being lost.
+        </p>
+        <pre data-snapshot><code>      const respond = async (forcedResult = null) =&gt; {
+        if (responding || res.writableEnded) return;
+        responding = true;
+        let finalSessionEnded = false;
+        try {
+          const result = await store.takeFeedback(key);
+          // Feedback or an explicit end that raced the grace timer wins. The disconnect result
+          // is only the non-terminal replacement for a poll that would otherwise keep waiting.
+          const responseResult = forcedResult &amp;&amp; result.status === "waiting" ? forcedResult : result;
+          finalSessionEnded = responseResult?.session_ended === true;
+          if (holder.replaced) {</code></pre>
+      </section>
+
+      <section id="store" data-code="src/session-store.js:669-697" data-hash="9fdb828c4ee2">
+        <h2>One locked take drains the batch</h2>
+        <p>
+          Reads every pending prompt under the store's lock and hands them over together, so two polls can never each
+          get half of your feedback.
+        </p>
         <pre data-snapshot><code>  async takeFeedback(key) {
     return this.runExclusive(async () =&gt; {
       const state = await this.readState();
@@ -399,78 +443,18 @@ function cardKind(node) {
       };</code></pre>
       </section>
 
-      <section
-        id="chrome"
-        data-card
-        data-code="src/chrome-client.js:3841-3850"
-        data-hash="c683af4d3f18"
-        data-x="794"
-        data-y="1222"
-        data-to="artifact"
-      >
-        <h3>Chrome page trusts frames by descent</h3>
-        <p>A whiteboard message counts only if its sender's parent is the artifact frame.</p>
-        <pre data-snapshot><code>function isArtifactChildWindow(source) {
-  if (!source) return false;
-  try {
-    // Reading `parent` on a cross-origin WindowProxy is permitted; the frame's
-    // sandbox makes everything else about it opaque.
-    return source.parent === frame.contentWindow;
-  } catch {
-    return false;
-  }
-}</code></pre>
-      </section>
+      <ol data-flow="Open a board">
+        <li>cli:2510 -> artifact-route:1643 the spawned server answers the page with the file plus the SDK</li>
+        <li>artifact-route:1643 -> mount:1130-1131 the SDK finds the board and opens the canvas frame</li>
+        <li>mount:1130-1131 -> frame-route:1753 the frame is served with a token for this session only</li>
+      </ol>
 
-      <section
-        id="artifact"
-        data-card
-        data-code="src/artifact-sdk.js:1121-1137"
-        data-hash="f752b6164047"
-        data-x="1572"
-        data-y="1222"
-        data-to="whiteboard"
-      >
-        <h3>Artifact frame mounts this board</h3>
-        <p>The SDK swaps the grid for the canvas at view time only.</p>
-        <pre data-snapshot><code>  function mountBoard() {
-    if (board) return;
-    const root = document.querySelector("[data-hilight-board]");
-    if (!root) return;
-    const iframe = document.createElement("iframe");
-    iframe.setAttribute("data-lavish-ui", "board");
-    iframe.setAttribute("title", "Board canvas");
-    iframe.setAttribute("sandbox", "allow-scripts allow-popups");
-    iframe.src =
-      "/whiteboard-frame?" + new URLSearchParams({ diagramIndex: "999", key: String(sessionKey || ""), board: "1" });
-    iframe.style.cssText =
-      "position:fixed;inset:0;width:100%;height:100%;margin:0;border:0;z-index:2147483646;background:#efeeea;color-scheme:normal";
-    /** @type {HTMLElement} */ (root).style.display = "none";
-    document.documentElement.style.overflow = "hidden";
-    (document.body || document.documentElement).appendChild(iframe);
-    board = { root, iframe, ids: boardCardIds(root), rects: new Map(), lastThreads: "", live: false };
-  }</code></pre>
-      </section>
-
-      <section
-        id="whiteboard"
-        data-card
-        data-code="src/server.js:240-247"
-        data-hash="67486b9761d6"
-        data-x="2518"
-        data-y="1222"
-      >
-        <h3>Whiteboard frame gets a session-bound token</h3>
-        <p>Signed over the session key: it opens a channel for one session only.</p>
-        <pre data-snapshot><code>export function createWhiteboardChannelToken(secret, sessionKey, now = Date.now()) {
-  const nonce = crypto.randomBytes(24).toString("base64url");
-  const signature = crypto
-    .createHmac("sha256", secret)
-    .update(whiteboardChannelPayload(now, nonce, String(sessionKey || "")))
-    .digest("base64url");
-  return `${now}.${nonce}.${signature}`;
-}</code></pre>
-      </section>
+      <ol data-flow="Marks reach the agent">
+        <li>queue-marks:3722-3729 -> send:1975 your marks wait as one board prompt until Send collects them</li>
+        <li>send:1979-1983 -> prompts-route:1168-1171 the batch is posted, and other origins are refused first</li>
+        <li>prompts-route:1176 -> poll:1081 storing the batch wakes the agent's waiting poll</li>
+        <li>poll:1081 -> store:678-693 the poll drains every pending prompt in one locked read</li>
+      </ol>
     </main>
   </body>
 </html>

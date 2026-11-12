@@ -3,15 +3,24 @@ import test from "node:test";
 
 import {
   cardElementId,
+  codeBodyTop,
   codeColumns,
   codeChromeWidth,
+  codeLineSpan,
   codeLinesUnder,
+  codeNoteHeight,
   codeRows,
   CODE_CARD_LAYOUT,
   createCardElement,
+  createLinkElements,
   diffCodeLines,
+  FLOW_COLORS,
+  linkLandings,
+  noteRows,
   normalizeBoardCanvasTarget,
   normalizeBoardCardTarget,
+  parseEndpoint,
+  parseLinkToken,
   reconcileLevelElements,
   summarizeBoardMarks,
 } from "../src/board-core.js";
@@ -179,13 +188,55 @@ test("diffCodeLines marks the live lines that are not in the pinned copy", () =>
   assert.deepEqual(diffCodeLines(["a", "b"], ["a", "b  "]), { changed: [], removed: 0 });
 });
 
-test("data-to connectors are drawn from the file, bound to both cards, and never reported as marks", () => {
-  const a = { ...cli, to: ["server"] };
+function flow(steps, extra = {}) {
+  return {
+    id: "f1",
+    name: "Request",
+    level: "",
+    color: FLOW_COLORS[0],
+    steps: steps.map(([from, to]) => ({ from: end(from), to: end(to), text: "" })),
+    ...extra,
+  };
+}
+
+function end(text) {
+  const [card, lines] = text.split(":");
+  if (!lines) return { card, lines: null };
+  const [a, b] = lines.split("-").map(Number);
+  return { card, lines: { start: a, end: b || a } };
+}
+
+function absolute(link) {
+  return link.points.map(([x, y]) => [link.x + x, link.y + y]);
+}
+
+function linksFor(cards, flows) {
+  return createLinkElements(cards, cards.map(createCardElement), flows);
+}
+
+function assertOrthogonal(points) {
+  for (let index = 1; index < points.length; index += 1) {
+    const [x1, y1] = points[index - 1];
+    const [x2, y2] = points[index];
+    assert.ok(x1 === x2 || y1 === y2, `segment ${index} is horizontal or vertical: ${JSON.stringify(points)}`);
+  }
+}
+
+// True when the segment passes through the inside of the rect.
+function crosses([x1, y1], [x2, y2], rect) {
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  const top = Math.min(y1, y2);
+  const bottom = Math.max(y1, y2);
+  return left < rect.x + rect.w && right > rect.x && top < rect.y + rect.h && bottom > rect.y;
+}
+
+test("flow arrows run edge to edge for whole cards, in the flow's colour, unbound, and are never reported as marks", () => {
   const elements = reconcileLevelElements(
-    [a, server],
+    [cli, server],
     [
       {
-        id: "link:cli>server",
+        id: "link:old",
         type: "arrow",
         x: 0,
         y: 0,
@@ -193,21 +244,125 @@ test("data-to connectors are drawn from the file, bound to both cards, and never
           [0, 0],
           [1, 1],
         ],
-        customData: { hilightLink: "cli>server" },
+        customData: { hilightLink: "f1.1" },
       },
     ],
+    [flow([["cli", "server"]], { color: FLOW_COLORS[2] })],
   );
   const links = elements.filter((element) => element.customData?.hilightLink);
   assert.equal(links.length, 1);
-  assert.equal(links[0].startBinding.elementId, cardElementId("cli"));
-  assert.equal(links[0].endBinding.elementId, cardElementId("server"));
+  assert.equal(links[0].strokeColor, FLOW_COLORS[2]);
   assert.equal(links[0].locked, true);
-  // From the right edge of cli to the left edge of server.
-  assert.deepEqual([links[0].x, links[0].y], [310, 100]);
-  assert.deepEqual(elements.find((element) => element.id === cardElementId("cli")).boundElements, [
-    { id: "link:cli>server", type: "arrow" },
+  assert.equal(links[0].startBinding, null);
+  assert.equal(links[0].endBinding, null);
+  assert.deepEqual(absolute(links[0]), [
+    [300, 100],
+    [500, 100],
   ]);
+  assert.deepEqual(elements.find((element) => element.id === cardElementId("cli")).boundElements, []);
   assert.deepEqual(summarizeBoardMarks(board, elements).lines, []);
+});
+
+test("parseEndpoint and parseLinkToken read cards and line spans", () => {
+  assert.deepEqual(parseEndpoint("server"), { card: "server", lines: null });
+  assert.deepEqual(parseEndpoint("server:L10-L12"), { card: "server", lines: { start: 10, end: 12 } });
+  assert.equal(parseEndpoint("server:12-3"), null);
+  assert.equal(parseEndpoint("server:"), null);
+  assert.deepEqual(parseLinkToken("88-90>server:120"), {
+    card: "server",
+    lines: { start: 120, end: 120 },
+    from: { start: 88, end: 90 },
+  });
+  assert.equal(parseLinkToken("x>server"), null);
+});
+
+test("an arrow between code lines starts and ends inside the cards, on those lines, both highlighted", () => {
+  const source = { ...server, id: "src", x: 0 };
+  const target = { ...server, id: "dst", x: 700 };
+  const flows = [flow([["src:104", "dst:110-112"]])];
+  const [link] = linksFor([source, target], flows);
+  const row = (n) => codeBodyTop(server) + n * CODE_CARD_LAYOUT.line;
+  const points = absolute(link);
+  assert.deepEqual(points[0], [488, row(4) + CODE_CARD_LAYOUT.line / 2], "starts inside src on line 104");
+  assert.deepEqual(points.at(-1), [712, row(10) + (3 * CODE_CARD_LAYOUT.line) / 2], "ends inside dst on 110-112");
+  assertOrthogonal(points);
+  const landings = linkLandings([source, target], flows);
+  assert.deepEqual([...landings.get("src")], [[4, FLOW_COLORS[0]]]);
+  assert.deepEqual([...landings.get("dst").keys()], [10, 11, 12]);
+});
+
+test("line anchors use the pinned numbering, so they follow code that moved", () => {
+  const moved = { ...server, code: { ...server.code, start: 110, end: 129, pinned_start: 100 } };
+  assert.deepEqual(
+    [
+      ...linkLandings([cli, moved], [flow([["cli", "server:105"]])])
+        .get("server")
+        .keys(),
+    ],
+    [5],
+  );
+  assert.equal(codeLineSpan(moved, { start: 105, end: 105 })?.top, codeBodyTop(moved) + 5 * CODE_CARD_LAYOUT.line);
+  // A line outside the card falls back to its edge and highlights nothing.
+  const [outside] = linksFor([cli, server], [flow([["cli", "server:400"]])]);
+  assert.equal(absolute(outside).at(-1)[0], 500);
+  assert.equal(linkLandings([cli, server], [flow([["cli", "server:400"]])]).size, 0);
+});
+
+test("an arrow routes around every card it does not connect", () => {
+  const a = { ...cli, id: "a", x: 0, y: 0 };
+  const wall = { ...cli, id: "wall", x: 400, y: -100, w: 200, h: 420 };
+  const b = { ...cli, id: "b", x: 700, y: 0 };
+  const [link] = linksFor([a, wall, b], [flow([["a", "b"]])]);
+  const points = absolute(link);
+  assertOrthogonal(points);
+  const onEdge = ([x, y], r) =>
+    ((x === r.x || x === r.x + r.w) && y >= r.y && y <= r.y + r.h) ||
+    ((y === r.y || y === r.y + r.h) && x >= r.x && x <= r.x + r.w);
+  assert.ok(onEdge(points[0], a), "starts on a's edge");
+  assert.ok(onEdge(points.at(-1), b), "ends on b's edge");
+  for (let index = 1; index < points.length; index += 1) {
+    assert.ok(!crosses(points[index - 1], points[index], wall), `segment ${index} stays clear of the wall`);
+  }
+  // Stacked code cards with a line anchor still never cross a third card.
+  const above = { ...cli, id: "above", x: 0, y: 0 };
+  const middle = { ...cli, id: "middle", x: 0, y: 260, w: 600, h: 100 };
+  const below = { ...server, id: "below", x: 0, y: 420 };
+  const [down] = linksFor([above, middle, below], [flow([["above", "below:103"]])]);
+  const route = absolute(down);
+  assertOrthogonal(route);
+  for (let index = 1; index < route.length; index += 1) {
+    assert.ok(!crosses(route[index - 1], route[index], middle), `segment ${index} stays clear of the middle card`);
+  }
+});
+
+test("overlapping segments of different flows are nudged apart", () => {
+  const a = { ...cli, id: "a", x: 0, y: 0, w: 300, h: 100 };
+  const b = { ...cli, id: "b", x: 600, y: 300, w: 300, h: 100 };
+  const links = linksFor(
+    [a, b],
+    [flow([["a", "b"]]), flow([["a", "b"]], { id: "f2", name: "Reply", color: FLOW_COLORS[1] })],
+  );
+  assert.equal(links.length, 2);
+  assert.notEqual(links[0].strokeColor, links[1].strokeColor);
+  const vertical = (link) => {
+    const points = absolute(link);
+    const index = points.findIndex((point, i) => i > 0 && point[0] === points[i - 1][0]);
+    return points[index][0];
+  };
+  assert.equal(Math.abs(vertical(links[0]) - vertical(links[1])), 6);
+});
+
+test("a code card's note wraps to the rows its width allows, and the code starts below it", () => {
+  assert.equal(noteRows("", 500), 0);
+  assert.equal(noteRows("Short note.", 500), 1);
+  const long = "Why these lines matter in the flow and what would break without them. ".repeat(4);
+  assert.equal(noteRows(long, 500), 4, "capped at four rows");
+  assert.ok(noteRows(long.slice(0, 120), 500) >= 2);
+  const noted = { ...server, note: long.slice(0, 120) };
+  assert.equal(codeBodyTop(noted), CODE_CARD_LAYOUT.header + codeNoteHeight(noted) + CODE_CARD_LAYOUT.padTop);
+  assert.ok(codeNoteHeight(noted) >= 2 * CODE_CARD_LAYOUT.line);
+  const rect = { y: 0, h: 400 };
+  assert.equal(codeLinesUnder(noted, rect, codeBodyTop(noted) + 1, codeBodyTop(noted) + 2)?.start, 100);
 });
 
 test("codeRows wraps a long line at a word boundary, keeps its indent, and marks continuations", () => {

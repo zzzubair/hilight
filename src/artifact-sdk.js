@@ -1100,13 +1100,14 @@ export function createArtifactSdk(
   /** @type {{ root: Element, iframe: HTMLIFrameElement, ids: Map<Element, string>, rects: Map<string, number[]>, lastThreads: string, live: boolean } | null} */
   let board = null;
 
-  // Mirrors parseBoardHtml's id rule (src/board-source.js): the id attribute,
-  // else card-<n> in document order for a missing or repeated id.
+  // Mirrors parseBoardHtml's card and id rules (src/board-source.js): a card
+  // is any <section> or [data-card] inside the board; its id is the id
+  // attribute, else card-<n> in document order for a missing or repeated id.
   function boardCardIds(root) {
     const ids = new Map();
     const used = new Set();
     let generated = 0;
-    for (const node of root.querySelectorAll("[data-card]")) {
+    for (const node of root.querySelectorAll("section, [data-card]")) {
       let id = (node.getAttribute("id") || "").trim();
       if (!id || used.has(id)) {
         do id = "card-" + ++generated;
@@ -1138,7 +1139,8 @@ export function createArtifactSdk(
 
   function boardCardOf(el) {
     if (!board || !(el instanceof Element) || !board.root.contains(el)) return null;
-    return el.closest("[data-card]");
+    const card = el.closest("section, [data-card]");
+    return card && card !== board.root && board.root.contains(card) ? card : null;
   }
 
   function boardCardId(card) {

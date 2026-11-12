@@ -4,7 +4,16 @@ import path from "node:path";
 
 import { parse, serializeOuter } from "parse5";
 
-import { CODE_CARD_LAYOUT, codeCardWidth, codeColumns, codeRows } from "./board-core.js";
+import {
+  CODE_CARD_LAYOUT,
+  codeCardWidth,
+  codeColumns,
+  codeNoteHeight,
+  codeRows,
+  flowColor,
+  parseEndpoint,
+  parseLinkToken,
+} from "./board-core.js";
 
 // Server-side reading of a board artifact: one HTML file whose
 // `[data-hilight-board]` element holds `[data-card]` sections. The file on
@@ -24,9 +33,14 @@ const MAX_NOTE_CHARS = 600;
 const MAX_TITLE_CHARS = 160;
 const GRID_GAP = 56;
 const GRID_COLUMNS = 3;
+// Room between flow columns and rows, for arrows routed around the cards.
+const FLOW_COLUMN_GAP = 160;
+const FLOW_ROW_GAP = 96;
+const MAX_FLOWS = 12;
+const MAX_FLOW_STEPS = 60;
 
 const DEFAULT_SIZE = {
-  html: { w: 380, h: 260 },
+  html: { w: 460, h: 260 },
   code: { w: 560, h: 200 },
   board: { w: 380, h: 240 },
 };
@@ -133,8 +147,14 @@ function findFirst(node, predicate) {
   return null;
 }
 
+// A card is any <section> inside the board (data-card is optional).
 function isCard(node) {
-  return hasAttr(node, CARD_ATTRIBUTE);
+  return node.tagName === "section" || hasAttr(node, CARD_ATTRIBUTE);
+}
+
+// A flow is an <ol data-flow="Name"> (or <ul>) of steps owned by a board level.
+function isFlowList(node) {
+  return (node.tagName === "ol" || node.tagName === "ul") && hasAttr(node, "data-flow");
 }
 
 function isSnapshot(node) {
@@ -166,6 +186,56 @@ function directCards(container) {
   return found;
 }
 
+// Flow lists owned by `container`: not inside any of its cards.
+function directFlows(container) {
+  const found = [];
+  const visit = (node) => {
+    for (const child of elementChildren(node)) {
+      if (isFlowList(child)) found.push(child);
+      else if (!isCard(child)) visit(child);
+    }
+  };
+  visit(container);
+  return found;
+}
+
+const STEP_ARROW = /\s*(?:->|→|=>)\s*/g;
+
+/**
+ * One flow step: `cardA:12-18 -> cardB:40-44`, optionally chained
+ * (`a -> b -> c`) and followed by words describing the step.
+ * @param {string} text
+ * @returns {{ steps: any[], error: string }}
+ */
+export function parseFlowStep(text) {
+  const value = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = value.replace(STEP_ARROW, " -> ").split(" ");
+  const ends = [];
+  let index = 0;
+  for (;;) {
+    const end = parseEndpoint(parts[index] || "");
+    if (!end) break;
+    ends.push(end);
+    if (parts[index + 1] !== "->") {
+      index += 1;
+      break;
+    }
+    index += 2;
+  }
+  if (ends.length < 2) {
+    return {
+      steps: [],
+      error: `"${squash(value, 80)}" is not a step: write it as cardA:12-18 -> cardB:40-44, then what happens`,
+    };
+  }
+  const words = parts.slice(index).join(" ").trim();
+  const steps = [];
+  for (let at = 1; at < ends.length; at += 1) steps.push({ from: ends[at - 1], to: ends[at], text: words });
+  return { steps, error: "" };
+}
+
 function cardKind(node) {
   const declared = String(attr(node, CARD_ATTRIBUTE) || "")
     .trim()
@@ -187,8 +257,20 @@ function cardTitle(node) {
 
 function ownContent(node, skip) {
   return (Array.isArray(node.childNodes) ? node.childNodes : []).filter(
-    (child) => child !== skip && !(child.tagName && (isCard(child) || isSnapshot(child))),
+    (child) => child !== skip && !(child.tagName && (isCard(child) || isSnapshot(child) || isFlowList(child))),
   );
+}
+
+// How much text an HTML card holds, to size it when the file gives no height.
+function textSize(node, skip) {
+  let blocks = 0;
+  const count = (child) => {
+    if (/^(p|li|tr|h[1-6]|pre|blockquote|dt|dd)$/.test(child.tagName || "")) blocks += 1;
+    elementChildren(child).forEach(count);
+  };
+  const own = ownContent(node, skip).filter((child) => child.tagName);
+  own.forEach(count);
+  return { chars: squash(own.map(textOf).join(" "), 20_000).length, blocks };
 }
 
 function noteText(node, skip) {
@@ -246,14 +328,33 @@ export function parseBoardHtml(html) {
     "Board";
   /** @type {any[]} */
   const cards = [];
-  const levels = [{ id: "", title: rootTitle, parent: null }];
+  /** @type {any[]} */
+  const flows = [];
+  /** @type {string[]} */
+  const problems = [];
+  // The board's summary is the text that sits directly in <main>, outside cards
+  // and its heading; a nested board's summary is its own card text.
+  const rootHeading = elementChildren(root).find(isHeading) || null;
+  const levels = [{ id: "", title: rootTitle, parent: null, summary: noteText(root, rootHeading) }];
   const usedIds = new Set();
   let generated = 0;
 
   const visitLevel = (container, levelId) => {
+    for (const list of directFlows(container)) {
+      if (flows.length >= MAX_FLOWS) break;
+      const name = squash(attr(list, "data-flow") || "", MAX_TITLE_CHARS) || `Flow ${flows.length + 1}`;
+      const steps = [];
+      for (const item of elementChildren(list).filter((child) => child.tagName === "li")) {
+        const parsed = parseFlowStep(textOf(item));
+        if (parsed.error) problems.push(`Flow "${name}": ${parsed.error}.`);
+        steps.push(...parsed.steps.slice(0, MAX_FLOW_STEPS - steps.length));
+      }
+      flows.push({ id: `flow-${flows.length + 1}`, name, level: levelId, steps, color: flowColor(flows.length) });
+    }
     for (const node of directCards(container)) {
       if (cards.length >= MAX_BOARD_CARDS) return;
       let id = String(attr(node, "id") || "").trim();
+      if (id && usedIds.has(id)) problems.push(`Two cards have id "${id}"; give each card its own id.`);
       if (!id || usedIds.has(id)) {
         do id = `card-${++generated}`;
         while (usedIds.has(id));
@@ -281,11 +382,13 @@ export function parseBoardHtml(html) {
       if (kind === "html") {
         card.html = cardHtml(node, heading);
         card.attrs = wrapperAttrs(node);
+        card.text_size = textSize(node, heading);
       } else {
         card.note = noteText(node, heading);
       }
       if (kind === "code") {
         const ref = parseCodeRef(attr(node, "data-code"));
+        if (!ref) problems.push(`Card "${id}": data-code should look like src/file.js:120-180.`);
         card.code = ref
           ? {
               ref: formatCodeRef(ref),
@@ -300,19 +403,45 @@ export function parseBoardHtml(html) {
       }
       cards.push(card);
       if (kind === "board") {
-        levels.push({ id, title: title || id, parent: levelId });
+        levels.push({ id, title: title || id, parent: levelId, summary: card.note || "" });
         visitLevel(node, id);
       }
     }
   };
   visitLevel(root, "");
+  // Legacy data-to connectors become one unnamed flow per level.
+  for (const level of levels) {
+    const steps = [];
+    for (const card of cards.filter((item) => item.level === level.id)) {
+      for (const token of card.to) {
+        const link = parseLinkToken(token);
+        if (!link) {
+          problems.push(`Card "${card.id}": data-to "${token}" should look like card, card:120, or 88>card:120.`);
+          continue;
+        }
+        steps.push({ from: { card: card.id, lines: link.from }, to: { card: link.card, lines: link.lines }, text: "" });
+      }
+    }
+    if (steps.length) {
+      flows.push({
+        id: `links-${level.id || "root"}`,
+        name: "",
+        level: level.id,
+        steps,
+        color: flowColor(flows.length),
+      });
+    }
+  }
   const board = {
     title: rootTitle,
     head: headHtml(document),
     main_attrs: wrapperAttrs(root),
     levels,
     cards,
+    flows,
+    problems,
   };
+  problems.push(...boardProblems(board));
   layoutBoard(board);
   return board;
 }
@@ -322,7 +451,10 @@ export function parseBoardHtml(html) {
 // cards the file did not place are moved.
 function layoutBoard(board) {
   for (const level of board.levels) {
-    layoutLevel(board.cards.filter((card) => card.level === level.id));
+    layoutLevel(
+      board.cards.filter((card) => card.level === level.id),
+      (board.flows || []).filter((flow) => flow.level === level.id),
+    );
   }
   for (const card of board.cards) {
     if (card.kind !== "board") continue;
@@ -345,7 +477,7 @@ export function codeCardHeight(card) {
   }
   return (
     CODE_CARD_LAYOUT.header +
-    (card.note ? CODE_CARD_LAYOUT.note : 0) +
+    codeNoteHeight(card) +
     CODE_CARD_LAYOUT.padTop +
     Math.max(rows, 1) * CODE_CARD_LAYOUT.line +
     CODE_CARD_LAYOUT.padBottom
@@ -367,16 +499,32 @@ function sizeCodeCard(card) {
   card.h = codeCardHeight(card);
 }
 
-// Cards without explicit positions flow into a three-column grid after any
-// explicitly placed cards, so an agent can write a board without coordinates.
-export function layoutLevel(cards) {
+// A text card's height when the file gives none: its text wrapped at the
+// card's width, plus a little per paragraph, list item, or table row.
+function htmlCardHeight(card) {
+  const size = card.text_size || { chars: 0, blocks: 0 };
+  const perRow = Math.max(20, Math.floor((card.w - 36) / 7.4));
+  const rows = Math.ceil(size.chars / perRow) + size.blocks * 0.6;
+  return Math.round(Math.min(Math.max(64 + rows * 22, 140), 640));
+}
+
+/**
+ * Place the cards of one level that the file does not place. Cards in a flow
+ * are laid out by it, left to right: a step's target sits in a column right
+ * of its source, so arrows mostly run forward. Every other card (an intro, a
+ * nested board) goes in a row above. Without flows, cards fill a grid.
+ * @param {any[]} cards
+ * @param {any[]} [flows]
+ */
+export function layoutLevel(cards, flows = []) {
   for (const card of cards) {
     if (card.kind === "code") {
       sizeCodeCard(card);
       continue;
     }
     if (card.w === null || card.w <= 0) card.w = DEFAULT_SIZE[card.kind].w;
-    if (card.h === null || card.h <= 0) card.h = DEFAULT_SIZE[card.kind].h;
+    if (card.h === null || card.h <= 0)
+      card.h = card.kind === "html" ? htmlCardHeight(card) : DEFAULT_SIZE[card.kind].h;
     card.w = Math.min(Math.max(card.w, 160), 2400);
     card.h = Math.min(Math.max(card.h, 100), 2400);
   }
@@ -384,15 +532,92 @@ export function layoutLevel(cards) {
   const floating = cards.filter((card) => !card.placed);
   let originY = placed.length ? Math.max(...placed.map((card) => card.y + card.h)) + GRID_GAP * 2 : 0;
   const originX = placed.length ? Math.min(...placed.map((card) => card.x)) : 0;
-  for (let index = 0; index < floating.length; index += GRID_COLUMNS) {
-    const row = floating.slice(index, index + GRID_COLUMNS);
+  const byId = new Map(floating.map((card) => [card.id, card]));
+  // Each flow gets its own horizontal band, in the order the flows are
+  // written; a card shared by two flows sits in the first flow's band.
+  const bands = [];
+  const bandOf = new Map();
+  const edges = [];
+  for (const flow of flows) {
+    const band = [];
+    for (const step of flow.steps) {
+      const from = step.from.card;
+      const to = step.to.card;
+      if (from === to || !byId.has(from) || !byId.has(to)) continue;
+      edges.push([from, to]);
+      for (const id of [from, to]) {
+        if (bandOf.has(id)) continue;
+        bandOf.set(id, bands.length);
+        band.push(id);
+      }
+    }
+    if (band.length) bands.push(band);
+  }
+  const order = bands.flat();
+  const others = floating.filter((card) => !bandOf.has(card.id));
+  for (let index = 0; index < others.length; index += GRID_COLUMNS) {
+    const row = others.slice(index, index + GRID_COLUMNS);
     let x = originX;
     for (const card of row) {
       card.x = x;
       card.y = originY;
       x += card.w + GRID_GAP;
     }
-    originY += Math.max(...row.map((card) => card.h)) + GRID_GAP;
+    originY += Math.max(...row.map((card) => card.h)) + (order.length ? FLOW_ROW_GAP * 1.5 : GRID_GAP);
+  }
+  if (!order.length) return;
+  // Longest-path columns over the flow graph without its back edges, so a
+  // flow that loops back (a retry) still reads left to right. Columns are
+  // shared by every band, so a step's column means the same thing in each.
+  const next = new Map(order.map((id) => [id, []]));
+  for (const [from, to] of edges) next.get(from).push(to);
+  const forward = [];
+  const state = new Map();
+  const visit = (id) => {
+    state.set(id, 1);
+    for (const to of next.get(id)) {
+      if (state.get(to) === 1) continue;
+      forward.push([id, to]);
+      if (!state.has(to)) visit(to);
+    }
+    state.set(id, 2);
+  };
+  for (const id of order) if (!state.has(id)) visit(id);
+  const rank = new Map(order.map((id) => [id, 0]));
+  for (let pass = 0; pass < order.length; pass += 1) {
+    let changed = false;
+    for (const [from, to] of forward) {
+      if (rank.get(to) < rank.get(from) + 1) {
+        rank.set(to, rank.get(from) + 1);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  const columnWidth = [];
+  for (const id of order) {
+    const column = rank.get(id);
+    columnWidth[column] = Math.max(columnWidth[column] || 0, byId.get(id).w);
+  }
+  const columnX = [];
+  let x = originX;
+  for (let column = 0; column < columnWidth.length; column += 1) {
+    columnX[column] = x;
+    if (columnWidth[column]) x += columnWidth[column] + FLOW_COLUMN_GAP;
+  }
+  let y = originY;
+  for (const band of bands) {
+    const columnY = new Map();
+    let bottom = y;
+    for (const id of band) {
+      const card = byId.get(id);
+      const column = rank.get(id);
+      card.x = columnX[column];
+      card.y = columnY.get(column) ?? y;
+      columnY.set(column, card.y + card.h + FLOW_ROW_GAP);
+      bottom = Math.max(bottom, card.y + card.h);
+    }
+    y = bottom + FLOW_ROW_GAP * 1.5;
   }
 }
 
@@ -720,5 +945,51 @@ export async function stampBoardFile(boardFile, { repin = false, write = true } 
   for (const edit of edits) next = next.slice(0, edit.start) + edit.text + next.slice(edit.end);
   const changed = next !== html;
   if (changed && write) await writeFile(boardFile, next);
-  return { file: boardFile, root: codeRoot, changed, cards: results, html: next };
+  const parsed = parseBoardHtml(next);
+  return {
+    file: boardFile,
+    root: codeRoot,
+    changed,
+    cards: results,
+    problems: parsed ? parsed.problems : [],
+    html: next,
+  };
+}
+
+/**
+ * What an agent must fix in a board's flows, each as one sentence that says
+ * what is wrong and what to write instead: an unknown card, a card on another
+ * level, or lines outside a code card's range.
+ * @param {{ cards: any[], flows: any[] }} board a parsed board
+ * @returns {string[]}
+ */
+export function boardProblems(board) {
+  const byId = new Map(board.cards.map((card) => [card.id, card]));
+  const problems = [];
+  for (const flow of board.flows || []) {
+    const where = flow.name ? `Flow "${flow.name}"` : "data-to";
+    const known = board.cards.filter((card) => card.level === flow.level).map((card) => card.id);
+    flow.steps.forEach((step, index) => {
+      for (const end of [step.from, step.to]) {
+        const card = byId.get(end.card);
+        const label = `${where} step ${index + 1}`;
+        if (!card) {
+          problems.push(`${label}: no card "${end.card}". Cards here: ${known.join(", ") || "none"}.`);
+        } else if (card.level !== flow.level) {
+          problems.push(`${label}: "${end.card}" is on another board level; a flow connects cards of one level.`);
+        } else if (end.lines) {
+          const code = card.kind === "code" ? card.code : null;
+          if (!code || code.error) {
+            problems.push(`${label}: "${end.card}" is not a code card, so drop the :${end.lines.start} lines.`);
+          } else if (end.lines.start < code.start || end.lines.end > code.end) {
+            problems.push(
+              `${label}: ${end.card}:${end.lines.start}-${end.lines.end} is outside its lines ${code.start}-${code.end}.`,
+            );
+          }
+        }
+      }
+      if (step.from.card === step.to.card) problems.push(`${where} step ${index + 1}: it starts and ends on one card.`);
+    });
+  }
+  return problems;
 }

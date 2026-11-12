@@ -1480,7 +1480,7 @@ async function boardCommand(args) {
 /**
  * @param {string} action
  * @param {string} file
- * @param {{ root: string, changed: boolean, cards: any[] }} result
+ * @param {{ root: string, changed: boolean, cards: any[], problems?: string[] }} result
  */
 export function createBoardOutput(action, file, result) {
   const cards = result.cards.map((card) => ({
@@ -1500,6 +1500,8 @@ export function createBoardOutput(action, file, result) {
       `${stale + moved} code card(s) no longer match their pin. Re-read those lines and update what the cards say, then run \`hilight board stamp ${file} --repin\` to pin the current code (moved cards follow their lines)`,
     );
   }
+  const problems = Array.isArray(result.problems) ? result.problems : [];
+  if (problems.length) help.unshift(`Fix the ${problems.length} problem(s) listed under problems, then run this again`);
   return {
     board: {
       file,
@@ -1507,6 +1509,7 @@ export function createBoardOutput(action, file, result) {
       ...(action === "stamp" ? { changed: result.changed } : {}),
     },
     code_cards: cards,
+    ...(problems.length ? { problems } : {}),
     ...(help.length ? { help } : {}),
   };
 }

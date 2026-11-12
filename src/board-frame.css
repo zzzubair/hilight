@@ -17,6 +17,9 @@ body[data-hilight-board] {
   --bd-warn-bg: #fff6e5;
   --bd-warn-line: #f3d9a6;
   --bd-accent: #1f6fe0;
+  --bd-ink-2: #34332f;
+  --bd-link: #7048e8;
+  --bd-link-bg: rgba(112, 72, 232, 0.1);
   --bd-font: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --bd-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: var(--bd-table);
@@ -39,6 +42,9 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] {
   --bd-warn-bg: #2a2112;
   --bd-warn-line: #5a4316;
   --bd-accent: #6aa8ff;
+  --bd-ink-2: #d6d5cf;
+  --bd-link: #9b80f5;
+  --bd-link-bg: rgba(155, 128, 245, 0.16);
 }
 
 .bd-shell {
@@ -104,11 +110,11 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] {
 
 .bd-health {
   margin-left: 8px;
-  border: 1px solid var(--bd-line);
-  background: transparent;
-  color: var(--bd-muted);
-  font: 12px/1 var(--bd-font);
-  padding: 6px 9px;
+  border: 1px solid var(--bd-line-strong);
+  background: var(--bd-card);
+  color: var(--bd-ink);
+  font: 600 13px/1 var(--bd-font);
+  padding: 7px 11px;
   border-radius: 999px;
   white-space: nowrap;
   cursor: default;
@@ -120,7 +126,7 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--bd-faint);
+  background: #2f8a4c;
   margin-right: 7px;
   vertical-align: 1px;
 }
@@ -378,16 +384,17 @@ body[data-hilight-board] .excalidraw-hyperlinkContainer {
   border-style: dashed;
 }
 
+/* The overview: wraps to the rows the server sized the card for (padding,
+   height and line clamp are set inline from NOTE_LAYOUT). */
 .bd-note-line {
   box-sizing: border-box;
   flex: 0 0 auto;
-  padding: 6px 14px 0;
-  color: var(--bd-muted);
-  font-size: 12.5px;
-  line-height: 18px;
-  white-space: nowrap;
+  color: var(--bd-ink-2);
+  font-size: 13.5px;
+  line-height: 20px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .bd-code {
@@ -415,6 +422,18 @@ body[data-hilight-board] .excalidraw-hyperlinkContainer {
 .bd-line.is-changed {
   background: var(--bd-warn-bg);
   box-shadow: inset 2px 0 0 var(--bd-warn);
+}
+
+/* Lines an agent connector lands on. */
+/* Lines a flow arrow starts or ends on, in that flow's colour. */
+.bd-line.is-landing {
+  background: color-mix(in srgb, var(--bd-flow, var(--bd-link)) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--bd-flow, var(--bd-link));
+}
+
+.bd-line.is-landing .bd-ln {
+  color: var(--bd-flow, var(--bd-link));
+  font-weight: 600;
 }
 
 .bd-ln {
@@ -496,8 +515,8 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] .bd-src .tn {
 
 .bd-sub-note {
   margin: 0;
-  color: var(--bd-muted);
-  font-size: 13px;
+  color: var(--bd-ink-2);
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -605,4 +624,85 @@ body[data-hilight-board][data-lavish-whiteboard-theme="dark"] .bd-src .tn {
 /* Excalidraw's tool hint sits over the top row of cards; the board bar already says what to do. */
 .bd-editor .excalidraw .HintViewer {
   display: none;
+}
+
+/* The level's summary and its flow legend, under the bar and outside the canvas. */
+.bd-lede {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 16px 9px;
+  background: var(--bd-bar);
+  border-bottom: 1px solid var(--bd-line);
+  position: relative;
+  z-index: 4;
+}
+
+.bd-lede-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--bd-ink-2);
+  font: 14px/20px var(--bd-font);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.bd-lede-text[hidden],
+.bd-legend[hidden] {
+  display: none;
+}
+
+.bd-legend {
+  flex: 0 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--bd-ink);
+  font: 600 13px/20px var(--bd-font);
+  white-space: nowrap;
+}
+
+.bd-legend-item::before {
+  content: "";
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bd-flow);
+}
+
+.bd-lede[hidden] {
+  display: none;
+}
+
+/* A card cut by the canvas edge or slid under a control keeps its header and
+   overview in view (offsets set by pinHeads). */
+.bd-card[data-pinned] .bd-head,
+.bd-card[data-pinned] .bd-note-line,
+.bd-card[data-pinned] .bd-sub-note {
+  transform: translateX(var(--bd-pin-x, 0px));
+  max-width: var(--bd-pin-w, none);
+}
+
+.bd-card[data-pinned="y"] .bd-head {
+  position: relative;
+  z-index: 2;
+  transform: translate(var(--bd-pin-x, 0px), var(--bd-pin-y, 0px));
+  background: var(--bd-card);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--bd-line);
+  box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.25);
 }

@@ -22,7 +22,6 @@ export const CARD_LINK_PREFIX = "https://hilight.invalid/card/";
 // monospace; `char` is a slightly generous advance so a row never overflows.
 export const CODE_CARD_LAYOUT = Object.freeze({
   header: 52,
-  note: 30,
   padTop: 8,
   padBottom: 12,
   line: 20,
@@ -33,6 +32,51 @@ export const CODE_CARD_LAYOUT = Object.freeze({
   maxCols: 100,
   tab: 4,
 });
+
+// A card's note (its overview) wraps under the title. Its height is estimated
+// from the text with a generous character width, then fixed on the card, so the
+// server's card size, the rendered note, and every line position below it agree.
+export const NOTE_LAYOUT = Object.freeze({ padTop: 7, padBottom: 7, line: 20, padX: 14, char: 7.3, maxRows: 4 });
+
+/**
+ * How many rows a note wraps to in a card of this width (0 for no note).
+ * @param {string} note
+ * @param {number} width
+ */
+export function noteRows(note, width) {
+  const words = String(note || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return 0;
+  const cols = Math.max(12, Math.floor((Number(width) - NOTE_LAYOUT.padX * 2) / NOTE_LAYOUT.char));
+  let rows = 1;
+  let used = 0;
+  for (const word of words) {
+    let length = word.length;
+    if (used && used + 1 + length > cols) {
+      rows += 1;
+      used = 0;
+    }
+    while (length > cols) {
+      rows += 1;
+      length -= cols;
+    }
+    used += (used ? 1 : 0) + length;
+  }
+  return Math.min(rows, NOTE_LAYOUT.maxRows);
+}
+
+/** Height of a code card's note strip, from the card's note and width. */
+export function codeNoteHeight(card) {
+  const rows = noteRows(card?.note, card?.w || 0);
+  return rows ? NOTE_LAYOUT.padTop + rows * NOTE_LAYOUT.line + NOTE_LAYOUT.padBottom : 0;
+}
+
+/** Offset of a code card's first code row from the card's top edge. */
+export function codeBodyTop(card) {
+  return CODE_CARD_LAYOUT.header + codeNoteHeight(card) + CODE_CARD_LAYOUT.padTop;
+}
 
 /** Horizontal space a code card needs besides its code columns. */
 export function codeChromeWidth() {
@@ -129,75 +173,549 @@ export function isLinkElement(element) {
   return Boolean(element?.customData?.hilightLink) || String(element?.id || "").startsWith(LINK_ELEMENT_PREFIX);
 }
 
-const LINK_GAP = 10;
+// Flow colours: one accent per flow, distinct from the reviewer's blue ink, the
+// amber of stale code, and the grey card chrome.
+export const FLOW_COLORS = Object.freeze(["#7048e8", "#0c8599", "#c2255c", "#2b8a3e", "#d9480f", "#5f3dc4"]);
 
-function anchorPoints(a, b) {
-  const ac = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
-  const bc = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-  const dx = bc.x - ac.x;
-  const dy = bc.y - ac.y;
-  const horizontal = Math.abs(dx) / (a.width + b.width) >= Math.abs(dy) / (a.height + b.height);
-  if (horizontal) {
-    const sign = dx >= 0 ? 1 : -1;
-    return [
-      { x: ac.x + (sign * a.width) / 2 + sign * LINK_GAP, y: ac.y },
-      { x: bc.x - (sign * b.width) / 2 - sign * LINK_GAP, y: bc.y },
-    ];
+/** The colour of the n-th flow of a board. */
+export function flowColor(index) {
+  const n = Number.isInteger(index) && index >= 0 ? index : 0;
+  return FLOW_COLORS[n % FLOW_COLORS.length];
+}
+
+// How far an endpoint on code lines sits inside its card, the clearance a
+// route keeps from every card, the price of a bend, and how far apart
+// overlapping segments of different arrows are pushed.
+const LINK_TIP = 12;
+const ROUTE_MARGIN = 20;
+const BEND_COST = 60;
+const NUDGE = 6;
+const EDGE_PAD = 18;
+const MAX_LINE_NUMBER = 9_999_999;
+
+/**
+ * Line numbers in a step or token: `120` or `120-124`, an optional `L`.
+ * @param {string} text
+ */
+export function parseLineSpan(text) {
+  const match = /^L?(\d{1,7})(?:-L?(\d{1,7}))?$/i.exec(String(text || ""));
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : start;
+  if (start < 1 || end < start || end > MAX_LINE_NUMBER) return null;
+  return { start, end };
+}
+
+/**
+ * One endpoint: `card` or `card:120` or `card:120-124`. Null when malformed.
+ * @param {string} text
+ * @returns {{ card: string, lines: { start: number, end: number } | null } | null}
+ */
+export function parseEndpoint(text) {
+  const value = String(text || "").trim();
+  const colon = value.lastIndexOf(":");
+  if (colon > 0) {
+    const lines = parseLineSpan(value.slice(colon + 1));
+    if (!lines) return null;
+    return { card: value.slice(0, colon), lines };
   }
-  const sign = dy >= 0 ? 1 : -1;
+  if (!value || /[\s:>]/.test(value)) return null;
+  return { card: value, lines: null };
+}
+
+/**
+ * One legacy `data-to` token: `target[:lines]`, optionally prefixed with the
+ * source card's own lines, `88>target:120`. Null when malformed.
+ * @param {string} token
+ */
+export function parseLinkToken(token) {
+  let text = String(token || "").trim();
+  let from = null;
+  const arrow = text.indexOf(">");
+  if (arrow >= 0) {
+    from = parseLineSpan(text.slice(0, arrow));
+    if (!from) return null;
+    text = text.slice(arrow + 1);
+  }
+  const target = parseEndpoint(text);
+  return target ? { card: target.card, lines: target.lines, from } : null;
+}
+
+/**
+ * Where lines of a code card sit, as offsets from the card's top edge. Lines
+ * are numbered as when the card was pinned, so an anchor follows code that
+ * moved. Null when the card has no such lines.
+ * @param {any} card the card model
+ * @param {{ start: number, end: number } | null} span
+ */
+export function codeLineSpan(card, span) {
+  const code = card?.code;
+  if (!span || !code || !Array.isArray(code.lines) || !code.lines.length) return null;
+  const base = Number.isInteger(code.pinned_start) ? code.pinned_start : code.start;
+  const first = span.start - base;
+  if (first < 0 || first >= code.lines.length) return null;
+  const last = Math.min(span.end - base, code.lines.length - 1);
+  const rows = codeRows(code.lines, code.cols);
+  const firstRow = rows.findIndex((row) => row.index === first);
+  let lastRow = firstRow;
+  rows.forEach((row, index) => {
+    if (row.index === last) lastRow = index;
+  });
+  if (firstRow < 0) return null;
+  const top = codeBodyTop(card);
+  return {
+    first,
+    last,
+    top: top + firstRow * CODE_CARD_LAYOUT.line,
+    bottom: top + (lastRow + 1) * CODE_CARD_LAYOUT.line,
+  };
+}
+
+/** Every step of the given flows, flattened, each with its flow's colour. */
+export function flowSteps(flows) {
+  const steps = [];
+  for (const flow of Array.isArray(flows) ? flows : []) {
+    (Array.isArray(flow.steps) ? flow.steps : []).forEach((step, index) => {
+      if (!step?.from?.card || !step?.to?.card) return;
+      steps.push({ ...step, flow: flow.id, color: flow.color || flowColor(0), key: `${flow.id}.${index + 1}` });
+    });
+  }
+  return steps;
+}
+
+/**
+ * The lines each code card has a flow arrow starting or ending on, as line
+ * indices into the card's shown lines with the flow's colour, so the card can
+ * highlight both ends of every arrow.
+ * @param {any[]} cards
+ * @param {any[]} flows
+ * @returns {Map<string, Map<number, string>>}
+ */
+export function linkLandings(cards, flows) {
+  const byId = new Map((cards || []).map((card) => [card.id, card]));
+  /** @type {Map<string, Map<number, string>>} */
+  const landings = new Map();
+  for (const step of flowSteps(flows)) {
+    for (const end of [step.from, step.to]) {
+      const card = byId.get(end.card);
+      const span = card && end.lines ? codeLineSpan(card, end.lines) : null;
+      if (!span) continue;
+      if (!landings.has(card.id)) landings.set(card.id, new Map());
+      const lines = landings.get(card.id);
+      for (let index = span.first; index <= span.last; index += 1) if (!lines.has(index)) lines.set(index, step.color);
+    }
+  }
+  return landings;
+}
+
+function tidyPoints(points) {
+  const out = [];
+  for (const point of points) {
+    const last = out[out.length - 1];
+    if (last && last[0] === point[0] && last[1] === point[1]) continue;
+    const before = out[out.length - 2];
+    if (
+      last &&
+      before &&
+      ((before[0] === last[0] && last[0] === point[0]) || (before[1] === last[1] && last[1] === point[1]))
+    ) {
+      out[out.length - 1] = point;
+      continue;
+    }
+    out.push(point);
+  }
+  return out;
+}
+
+const SIDE_NORMAL = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
+
+function makePort(side, edge, inside) {
+  const [nx, ny] = SIDE_NORMAL[side];
+  return {
+    side,
+    dir: [nx, ny],
+    tip: inside ? [edge[0] - nx * LINK_TIP, edge[1] - ny * LINK_TIP] : edge,
+    out: [edge[0] + nx * ROUTE_MARGIN, edge[1] + ny * ROUTE_MARGIN],
+  };
+}
+
+// Where a connector may leave or enter a card. On code lines it starts or
+// stops inside the card, on that line, through the left or right side; for a
+// whole card it meets an edge, preferring the stretch it shares with the other card.
+function cardPorts(rect, lineY, other) {
+  const right = rect.x + rect.w;
+  const bottom = rect.y + rect.h;
+  if (lineY !== null) return [makePort("left", [rect.x, lineY], true), makePort("right", [right, lineY], true)];
+  const ys = [rect.y + rect.h / 2];
+  const low = Math.max(rect.y, other.y) + EDGE_PAD;
+  const high = Math.min(bottom, other.y + other.h) - EDGE_PAD;
+  if (high >= low) ys.unshift((low + high) / 2);
+  const xs = [rect.x + rect.w / 2];
+  const left = Math.max(rect.x, other.x) + EDGE_PAD;
+  const rightEnd = Math.min(right, other.x + other.w) - EDGE_PAD;
+  if (rightEnd >= left) xs.unshift((left + rightEnd) / 2);
   return [
-    { x: ac.x, y: ac.y + (sign * a.height) / 2 + sign * LINK_GAP },
-    { x: bc.x, y: bc.y - (sign * b.height) / 2 - sign * LINK_GAP },
+    ...ys.flatMap((y) => [makePort("left", [rect.x, y], false), makePort("right", [right, y], false)]),
+    ...xs.flatMap((x) => [makePort("top", [x, rect.y], false), makePort("bottom", [x, bottom], false)]),
   ];
 }
 
-/** Arrow elements for the `data-to` connectors between visible cards of one level. */
-export function createLinkElements(cards, cardElements) {
+function inflate(rect) {
+  return {
+    x1: rect.x - ROUTE_MARGIN,
+    y1: rect.y - ROUTE_MARGIN,
+    x2: rect.x + rect.w + ROUTE_MARGIN,
+    y2: rect.y + rect.h + ROUTE_MARGIN,
+  };
+}
+
+const EPS = 0.01;
+
+function insideAny(boxes, x, y) {
+  return boxes.some((box) => x > box.x1 + EPS && x < box.x2 - EPS && y > box.y1 + EPS && y < box.y2 - EPS);
+}
+
+function gridCoordinates(values) {
+  const sorted = [...new Set(values.map((value) => Math.round(value * 100) / 100))].sort((a, b) => a - b);
+  const out = [...sorted];
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index] - sorted[index - 1] > ROUTE_MARGIN * 2) out.push((sorted[index] + sorted[index - 1]) / 2);
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+class MinHeap {
+  constructor() {
+    /** @type {any[]} */
+    this.items = [];
+  }
+  push(item) {
+    const items = this.items;
+    items.push(item);
+    let index = items.length - 1;
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (items[parent].f <= items[index].f) break;
+      [items[parent], items[index]] = [items[index], items[parent]];
+      index = parent;
+    }
+  }
+  pop() {
+    const items = this.items;
+    const top = items[0];
+    const last = items.pop();
+    if (items.length) {
+      items[0] = last;
+      let index = 0;
+      for (;;) {
+        const left = index * 2 + 1;
+        const right = left + 1;
+        let best = index;
+        if (left < items.length && items[left].f < items[best].f) best = left;
+        if (right < items.length && items[right].f < items[best].f) best = right;
+        if (best === index) break;
+        [items[best], items[index]] = [items[index], items[best]];
+        index = best;
+      }
+    }
+    return top;
+  }
+  get size() {
+    return this.items.length;
+  }
+}
+
+const DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+function dirIndex([dx, dy]) {
+  return DIRS.findIndex((dir) => dir[0] === dx && dir[1] === dy);
+}
+
+/**
+ * A right-angled route from one of `starts` to one of `goals` that keeps
+ * clear of every rect in `obstacles` (all cards of the level, the two it
+ * connects included: it leaves and enters them only through its ports).
+ * Fewest bends first, then shortest. Null when no route exists.
+ * @param {any[]} starts ports
+ * @param {any[]} goals ports
+ * @param {{ x: number, y: number, w: number, h: number }[]} obstacles
+ * @returns {number[][] | null}
+ */
+export function routeAround(starts, goals, obstacles) {
+  const boxes = obstacles.map(inflate);
+  const usable = (port) => !insideAny(boxes, port.out[0], port.out[1]);
+  const from = starts.filter(usable);
+  const to = goals.filter(usable);
+  if (!from.length || !to.length) return null;
+  const allX = boxes.flatMap((box) => [box.x1, box.x2]);
+  const allY = boxes.flatMap((box) => [box.y1, box.y2]);
+  const portXs = [...from, ...to].map((port) => port.out[0]);
+  const portYs = [...from, ...to].map((port) => port.out[1]);
+  const pad = ROUTE_MARGIN * 3;
+  const xs = gridCoordinates([
+    ...allX,
+    ...portXs,
+    Math.min(...allX, ...portXs) - pad,
+    Math.max(...allX, ...portXs) + pad,
+  ]);
+  const ys = gridCoordinates([
+    ...allY,
+    ...portYs,
+    Math.min(...allY, ...portYs) - pad,
+    Math.max(...allY, ...portYs) + pad,
+  ]);
+  const xIndex = new Map(xs.map((value, index) => [Math.round(value * 100) / 100, index]));
+  const yIndex = new Map(ys.map((value, index) => [Math.round(value * 100) / 100, index]));
+  const nodeOf = ([x, y]) => [xIndex.get(Math.round(x * 100) / 100), yIndex.get(Math.round(y * 100) / 100)];
+  const cols = xs.length;
+  const free = new Uint8Array(cols * ys.length);
+  for (let j = 0; j < ys.length; j += 1) {
+    for (let i = 0; i < cols; i += 1) free[j * cols + i] = insideAny(boxes, xs[i], ys[j]) ? 0 : 1;
+  }
+  const edgeFree = (i, j, ni, nj) => !insideAny(boxes, (xs[i] + xs[ni]) / 2, (ys[j] + ys[nj]) / 2);
+  const goalAt = new Map();
+  for (const port of to) {
+    const [i, j] = nodeOf(port.out);
+    if (i === undefined || j === undefined) continue;
+    goalAt.set(j * cols + i, [...(goalAt.get(j * cols + i) || []), port]);
+  }
+  const goalNodes = [...goalAt.keys()].map((key) => [xs[key % cols], ys[Math.floor(key / cols)]]);
+  const heuristic = (i, j) => Math.min(...goalNodes.map(([gx, gy]) => Math.abs(gx - xs[i]) + Math.abs(gy - ys[j])));
+  const heap = new MinHeap();
+  const best = new Map();
+  const parent = new Map();
+  for (const port of from) {
+    const [i, j] = nodeOf(port.out);
+    if (i === undefined || j === undefined) continue;
+    const d = dirIndex(port.dir);
+    const key = (j * cols + i) * 4 + d;
+    const g = Math.abs(port.out[0] - port.tip[0]) + Math.abs(port.out[1] - port.tip[1]);
+    if (g < (best.get(key) ?? Infinity)) {
+      best.set(key, g);
+      parent.set(key, { start: port });
+      heap.push({ f: g + heuristic(i, j), g, i, j, d, key });
+    }
+  }
+  let found = null;
+  while (heap.size) {
+    const item = heap.pop();
+    if (item.done) {
+      found = item;
+      break;
+    }
+    if (item.g > (best.get(item.key) ?? Infinity)) continue;
+    const node = item.j * cols + item.i;
+    for (const port of goalAt.get(node) || []) {
+      const inward = dirIndex([-port.dir[0], -port.dir[1]]);
+      const outward = dirIndex(port.dir);
+      if (item.d === outward) continue;
+      const g =
+        item.g +
+        (item.d === inward ? 0 : BEND_COST) +
+        Math.abs(port.out[0] - port.tip[0]) +
+        Math.abs(port.out[1] - port.tip[1]);
+      heap.push({ f: g, g, done: true, key: item.key, port });
+    }
+    for (let d = 0; d < 4; d += 1) {
+      const [dx, dy] = DIRS[d];
+      if (d === dirIndex([-DIRS[item.d][0], -DIRS[item.d][1]])) continue;
+      const ni = item.i + dx;
+      const nj = item.j + dy;
+      if (ni < 0 || nj < 0 || ni >= cols || nj >= ys.length || !free[nj * cols + ni]) continue;
+      if (!edgeFree(item.i, item.j, ni, nj)) continue;
+      const g = item.g + Math.abs(xs[ni] - xs[item.i]) + Math.abs(ys[nj] - ys[item.j]) + (d === item.d ? 0 : BEND_COST);
+      const key = (nj * cols + ni) * 4 + d;
+      if (g >= (best.get(key) ?? Infinity)) continue;
+      best.set(key, g);
+      parent.set(key, { key: item.key });
+      heap.push({ f: g + heuristic(ni, nj), g, i: ni, j: nj, d, key });
+    }
+  }
+  if (!found) return null;
+  const middle = [];
+  let key = found.key;
+  let start = null;
+  while (key !== undefined) {
+    const node = Math.floor(key / 4);
+    middle.unshift([xs[node % cols], ys[Math.floor(node / cols)]]);
+    const link = parent.get(key);
+    if (link?.start) {
+      start = link.start;
+      break;
+    }
+    key = link?.key;
+  }
+  if (!start) return null;
+  return tidyPoints([start.tip, ...middle, found.port.tip]);
+}
+
+/**
+ * A plain right-angled path for when no clear route exists (cards packed too
+ * tightly): out of the source's facing side, across, into the target.
+ * @returns {number[][]}
+ */
+export function connectorPoints(a, b, { fromY = null, toY = null } = {}) {
+  const dir = b.x + b.w / 2 >= a.x + a.w / 2 ? 1 : -1;
+  const sx = dir > 0 ? a.x + a.w : a.x;
+  const ex = dir > 0 ? b.x : b.x + b.w;
+  const sy = fromY ?? a.y + a.h / 2;
+  const ey = toY ?? b.y + b.h / 2;
+  const start = fromY !== null ? sx - dir * LINK_TIP : sx;
+  const end = toY !== null ? ex + dir * LINK_TIP : ex;
+  const mx = (sx + ex) / 2;
+  return tidyPoints([
+    [start, sy],
+    [mx, sy],
+    [mx, ey],
+    [end, ey],
+  ]);
+}
+
+// Push apart interior segments of different arrows that run along the same
+// line, so overlapping flows stay readable. The end segments stay put: they
+// sit on code lines.
+function nudgeOverlaps(routes) {
+  const segments = [];
+  routes.forEach((points, route) => {
+    for (let index = 1; index < points.length - 2; index += 1) {
+      const [x1, y1] = points[index];
+      const [x2, y2] = points[index + 1];
+      const vertical = x1 === x2;
+      segments.push({
+        route,
+        index,
+        vertical,
+        at: vertical ? x1 : y1,
+        low: vertical ? Math.min(y1, y2) : Math.min(x1, x2),
+        high: vertical ? Math.max(y1, y2) : Math.max(x1, x2),
+      });
+    }
+  });
+  const groups = new Map();
+  for (const segment of segments) {
+    const key = `${segment.vertical ? "v" : "h"}${Math.round(segment.at)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(segment);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => a.route - b.route || a.low - b.low);
+    const lanes = [];
+    for (const segment of group) {
+      let lane = lanes.findIndex((items) =>
+        items.every((other) => other.route === segment.route || other.high <= segment.low || other.low >= segment.high),
+      );
+      if (lane < 0) lane = lanes.push([]) - 1;
+      lanes[lane].push(segment);
+      segment.lane = lane;
+    }
+    if (lanes.length < 2) continue;
+    for (const segment of group) {
+      const shift = (segment.lane - (lanes.length - 1) / 2) * NUDGE;
+      const points = routes[segment.route];
+      const axis = segment.vertical ? 0 : 1;
+      points[segment.index][axis] += shift;
+      points[segment.index + 1][axis] += shift;
+    }
+  }
+}
+
+function elementRect(element) {
+  return { x: element.x, y: element.y, w: element.width, h: element.height };
+}
+
+function lineY(element, card, span) {
+  const info = card && span ? codeLineSpan(card, span) : null;
+  if (!info) return null;
+  // A reviewer can shrink a card; stop at its last visible row.
+  return element.y + Math.min((info.top + info.bottom) / 2, element.height - 10);
+}
+
+/**
+ * Arrow elements for the flows of one level: each step starts and ends on its
+ * code lines (or a card edge) and routes around every other card. They are
+ * recomputed whenever a card moves or resizes, and carry no bindings, so
+ * Excalidraw never reshapes them.
+ * @param {any[]} cards the level's cards
+ * @param {any[]} cardElements their scene elements
+ * @param {any[]} flows the board's flows (other levels' steps are skipped)
+ */
+export function createLinkElements(cards, cardElements, flows = []) {
   const byCard = new Map(
     cardElements.filter((element) => !element.isDeleted).map((element) => [cardIdOfElement(element), element]),
   );
-  const links = [];
-  for (const card of cards) {
-    const from = byCard.get(card.id);
-    if (!from) continue;
-    for (const targetId of Array.isArray(card.to) ? card.to : []) {
-      const to = byCard.get(targetId);
-      if (!to || to === from) continue;
-      const [start, end] = anchorPoints(from, to);
-      links.push({
-        id: `${LINK_ELEMENT_PREFIX}${card.id}>${targetId}`,
-        type: "arrow",
-        x: start.x,
-        y: start.y,
-        width: Math.abs(end.x - start.x),
-        height: Math.abs(end.y - start.y),
-        points: [
-          [0, 0],
-          [end.x - start.x, end.y - start.y],
-        ],
-        angle: 0,
-        strokeColor: "#6f6e69",
-        backgroundColor: "transparent",
-        fillStyle: "solid",
-        strokeWidth: 2,
-        strokeStyle: "solid",
-        roughness: 0,
-        opacity: 100,
-        roundness: null,
-        locked: true,
-        startArrowhead: null,
-        endArrowhead: "triangle",
-        startBinding: { elementId: from.id, focus: 0, gap: LINK_GAP },
-        endBinding: { elementId: to.id, focus: 0, gap: LINK_GAP },
-        boundElements: [],
-        groupIds: [],
-        frameId: null,
-        isDeleted: false,
-        customData: { hilightLink: `${card.id}>${targetId}`, boardLevel: card.level },
-      });
-    }
+  const models = new Map(cards.map((card) => [card.id, card]));
+  const obstacles = [...byCard.values()].map(elementRect);
+  const routes = [];
+  const meta = [];
+  const seen = new Set();
+  for (const step of flowSteps(flows)) {
+    const fromElement = byCard.get(step.from.card);
+    const toElement = byCard.get(step.to.card);
+    if (!fromElement || !toElement || fromElement === toElement) continue;
+    const id = `${LINK_ELEMENT_PREFIX}${step.key}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const a = elementRect(fromElement);
+    const b = elementRect(toElement);
+    const fromY = lineY(fromElement, models.get(step.from.card), step.from.lines);
+    const toY = lineY(toElement, models.get(step.to.card), step.to.lines);
+    const route =
+      routeAround(cardPorts(a, fromY, b), cardPorts(b, toY, a), obstacles) || connectorPoints(a, b, { fromY, toY });
+    routes.push(route.map((point) => [...point]));
+    meta.push({ id, step, level: models.get(step.from.card)?.level ?? "" });
   }
-  return links;
+  nudgeOverlaps(routes);
+  return routes.map((absolute, index) => {
+    const { id, step, level } = meta[index];
+    const [x0, y0] = absolute[0];
+    const points = absolute.map(([x, y]) => [x - x0, y - y0]);
+    const xs = points.map((point) => point[0]);
+    const ys = points.map((point) => point[1]);
+    return {
+      id,
+      type: "arrow",
+      x: x0,
+      y: y0,
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+      points,
+      angle: 0,
+      strokeColor: step.color,
+      backgroundColor: "transparent",
+      fillStyle: "solid",
+      strokeWidth: 2,
+      strokeStyle: "solid",
+      roughness: 0,
+      opacity: 100,
+      roundness: null,
+      elbowed: false,
+      locked: true,
+      startArrowhead: "dot",
+      endArrowhead: "triangle",
+      startBinding: null,
+      endBinding: null,
+      boundElements: [],
+      groupIds: [],
+      frameId: null,
+      isDeleted: false,
+      customData: { hilightLink: step.key, boardLevel: level },
+    };
+  });
+}
+
+/** A signature of the cards' geometry, to tell when connectors need redrawing. */
+export function cardGeometryKey(cardElements) {
+  return cardElements
+    .filter((element) => !element.isDeleted)
+    .map((element) => `${element.id}:${element.x},${element.y},${element.width},${element.height}`)
+    .sort()
+    .join("|");
 }
 
 export function elementLevel(element) {
@@ -263,7 +781,7 @@ function shiftArrow(arrow, startDelta, endDelta) {
  * @param {any[]} cards cards of this level from the board model
  * @param {any[]} saved saved elements of this level (cards and marks)
  */
-export function reconcileLevelElements(cards, saved) {
+export function reconcileLevelElements(cards, saved, flows = []) {
   const savedById = new Map((Array.isArray(saved) ? saved : []).map((element) => [element.id, element]));
   const liveCardIds = new Set(cards.map((card) => cardElementId(card.id)));
   const deltas = new Map();
@@ -303,7 +821,7 @@ export function reconcileLevelElements(cards, saved) {
     }
     marks.push(next);
   }
-  const links = createLinkElements(cards, cardElements);
+  const links = createLinkElements(cards, cardElements, flows);
   const bound = new Map();
   for (const mark of [...links, ...marks]) {
     if (mark.isDeleted) continue;
@@ -385,7 +903,7 @@ export function codeLinesUnder(card, cardRect, y1, y2, scrollTop = 0) {
   const code = card?.code;
   if (!code || !Array.isArray(code.lines) || !code.lines.length) return null;
   const rows = codeRows(code.lines, code.cols);
-  const top = cardRect.y + CODE_CARD_LAYOUT.header + (card.note ? CODE_CARD_LAYOUT.note : 0) + CODE_CARD_LAYOUT.padTop;
+  const top = cardRect.y + codeBodyTop(card);
   const first = Math.floor((Math.max(y1, top) - top + scrollTop) / CODE_CARD_LAYOUT.line);
   const last = Math.floor((Math.min(y2, cardRect.y + cardRect.h) - top + scrollTop) / CODE_CARD_LAYOUT.line);
   if (last < 0 || first > rows.length - 1 || last < first) return null;

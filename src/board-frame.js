@@ -24,6 +24,7 @@ import {
   exportToBlob,
   getCommonBounds,
   restore,
+  restoreElements,
   sceneCoordsToViewportCoords,
 } from "@excalidraw/excalidraw";
 import React from "react";
@@ -33,13 +34,18 @@ import "./board-frame.css";
 import {
   CARD_LINK_PREFIX,
   CODE_CARD_LAYOUT,
+  NOTE_LAYOUT,
+  cardGeometryKey,
+  codeNoteHeight,
   codeRows,
   cardElementId,
   cardIdOfElement,
+  createLinkElements,
   diffCodeLines,
   elementLevel,
   isCardElement,
   isLinkElement,
+  linkLandings,
   reconcileLevelElements,
   summarizeBoardMarks,
   tagLevel,
@@ -173,6 +179,8 @@ export function startBoard(init, { post }) {
     s.model = model;
     s.cardsById = new Map(model.cards.map((card) => [card.id, card]));
     s.levelsById = new Map(model.levels.map((level) => [level.id, level]));
+    s.landings = linkLandings(model.cards, model.flows);
+    s.modelVersion = (s.modelVersion || 0) + 1;
   }
   indexModel(init.board);
 
@@ -186,6 +194,7 @@ export function startBoard(init, { post }) {
   document.body.dataset.hilightBoard = "";
   const crumbs = el("nav", { className: "bd-crumbs", ariaLabel: "Board levels" });
   const health = el("button", { className: "bd-health", type: "button", hidden: true });
+  const problemsChip = el("button", { className: "bd-health is-warn bd-problems", type: "button", hidden: true });
   const note = el("input", { className: "bd-note", placeholder: "Note for the agent (optional)", autocomplete: "off" });
   const fit = el("button", { className: "bd-button bd-icon", type: "button", title: "Fit the board to the screen" });
   fit.innerHTML =
@@ -197,11 +206,18 @@ export function startBoard(init, { post }) {
     { className: "bd-bar" },
     crumbs,
     health,
+    problemsChip,
     el("div", { className: "bd-spacer" }),
     note,
     fit,
     queue,
   );
+  // The level's summary sits under the bar, outside the canvas, so no floating
+  // control can cover it.
+  const lede = el("div", { className: "bd-lede", hidden: true });
+  const ledeText = el("p", { className: "bd-lede-text" });
+  const legend = el("ul", { className: "bd-legend", ariaLabel: "Flows" });
+  lede.append(ledeText, legend);
   const editor = el("div", { className: "bd-editor" });
   const toolbar = el("div", { className: "bd-cardbar", hidden: true });
   const commentButton = el("button", { type: "button", className: "bd-chip" });
@@ -210,7 +226,7 @@ export function startBoard(init, { post }) {
   const openButton = el("button", { type: "button", className: "bd-chip", textContent: "Open board →" });
   toolbar.append(commentButton, openButton);
   const status = el("div", { className: "bd-status", hidden: true, role: "status" });
-  const shell = el("div", { className: "bd-shell" }, bar, editor, toolbar, status);
+  const shell = el("div", { className: "bd-shell" }, bar, lede, editor, toolbar, status);
   document.body.append(shell);
 
   let statusTimer = 0;
@@ -246,9 +262,26 @@ export function startBoard(init, { post }) {
       crumb.onclick = () => openLevel(level.id);
       crumbs.append(crumb);
     });
+    const summary = String(s.levelsById.get(s.level)?.summary || "").trim();
+    ledeText.textContent = summary;
+    ledeText.title = summary;
+    ledeText.hidden = !summary;
+    legend.replaceChildren();
+    for (const flow of (s.model.flows || []).filter((item) => item.level === s.level && item.name)) {
+      const item = el("li", { className: "bd-legend-item", textContent: flow.name });
+      item.style.setProperty("--bd-flow", flow.color);
+      legend.append(item);
+    }
+    legend.hidden = !legend.childElementCount;
+    lede.hidden = !summary && legend.hidden;
   }
 
   function renderHealth() {
+    const problems = Array.isArray(s.model.problems) ? s.model.problems : [];
+    problemsChip.hidden = !problems.length;
+    problemsChip.textContent = `${problems.length} board problem${problems.length === 1 ? "" : "s"}`;
+    problemsChip.title = problems.join("\n");
+    problemsChip.onclick = () => showStatus(problems.slice(0, 3).join(" "), { transient: false });
     const code = s.model.cards.filter((card) => card.kind === "code" && card.code);
     if (!code.length) {
       health.hidden = true;
@@ -312,6 +345,7 @@ export function startBoard(init, { post }) {
     }
     const changed =
       code.status === "stale" && code.snapshot ? new Set(diffCodeLines(code.snapshot, code.lines).changed) : null;
+    const landed = s.landings.get(card.id);
     // Rows come from codeRows, the same split the server sized the card with, so
     // long lines wrap (marked with a hook) instead of being clipped at the edge.
     return h(
@@ -322,7 +356,12 @@ export function startBoard(init, { post }) {
           "div",
           {
             key: index,
-            className: "bd-line" + (changed?.has(row.index) ? " is-changed" : "") + (row.cont ? " is-cont" : ""),
+            className:
+              "bd-line" +
+              (changed?.has(row.index) ? " is-changed" : "") +
+              (landed?.has(row.index) ? " is-landing" : "") +
+              (row.cont ? " is-cont" : ""),
+            style: landed?.has(row.index) ? { "--bd-flow": landed.get(row.index) } : undefined,
           },
           h(
             "span",
@@ -438,7 +477,17 @@ export function startBoard(init, { post }) {
       card.kind === "code" && card.note
         ? h(
             "div",
-            { className: "bd-note-line", style: { height: CODE_CARD_LAYOUT.note + "px" }, title: card.note },
+            {
+              className: "bd-note-line",
+              style: {
+                height: codeNoteHeight(card) + "px",
+                padding: `${NOTE_LAYOUT.padTop}px ${NOTE_LAYOUT.padX}px 0`,
+                WebkitLineClamp: Math.round(
+                  (codeNoteHeight(card) - NOTE_LAYOUT.padTop - NOTE_LAYOUT.padBottom) / NOTE_LAYOUT.line,
+                ),
+              },
+              title: card.note,
+            },
             card.note,
           )
         : null,
@@ -468,7 +517,7 @@ export function startBoard(init, { post }) {
   for (const level of s.model.levels) {
     const cards = s.model.cards.filter((card) => card.level === level.id);
     const saved = savedElements.filter((element) => elementLevel(element) === level.id);
-    s.elementsByLevel.set(level.id, reconcileLevelElements(cards, saved));
+    s.elementsByLevel.set(level.id, reconcileLevelElements(cards, saved, s.model.flows));
   }
   // Marks on a nested board the file no longer has are kept, unseen, rather
   // than silently discarded.
@@ -560,10 +609,51 @@ export function startBoard(init, { post }) {
     return rects;
   }
 
+  // A code or board card cut by the canvas edge or slid under a floating
+  // control keeps its header and overview in the part that is still in view.
+  function pinHeads(rects) {
+    if (!s.api) return;
+    const zoom = s.api.getAppState().zoom.value;
+    const box = editor.getBoundingClientRect();
+    const insets = controlInsets();
+    const safe = {
+      left: box.left + 8,
+      right: box.right - 8,
+      top: box.top + insets.top - VIEW_MARGIN + 6,
+    };
+    for (const node of editor.querySelectorAll(".bd-card.k-code, .bd-card.k-board")) {
+      const card = /** @type {HTMLElement} */ (node);
+      const rect = rects[card.dataset.card || ""];
+      let x = 0;
+      let y = 0;
+      let w = 0;
+      if (rect) {
+        const [left, top, width, height] = rect;
+        const shownLeft = Math.max(left, safe.left);
+        const shownRight = Math.min(left + width, safe.right);
+        if ((shownLeft > left || shownRight < left + width) && shownRight - shownLeft >= 180) {
+          x = (shownLeft - left) / zoom;
+          w = (shownRight - shownLeft) / zoom;
+        }
+        if (top < safe.top && top + height > safe.top + 120) {
+          y = Math.min((safe.top - top) / zoom, height / zoom - 140);
+        }
+      }
+      card.style.setProperty("--bd-pin-x", x + "px");
+      card.style.setProperty("--bd-pin-y", Math.max(0, y) + "px");
+      if (w) card.style.setProperty("--bd-pin-w", w + "px");
+      else card.style.removeProperty("--bd-pin-w");
+      // A data attribute, not a class: React owns the card's className.
+      if (x || w || y > 0) card.dataset.pinned = y > 0 ? "y" : "x";
+      else delete card.dataset.pinned;
+    }
+  }
+
   function sendGeometry() {
     s.geometryFrame = 0;
     const rects = cardRects();
     placeToolbar(rects);
+    pinHeads(rects);
     const serialized = JSON.stringify(rects);
     if (serialized === s.lastGeometry) return;
     s.lastGeometry = serialized;
@@ -634,8 +724,39 @@ export function startBoard(init, { post }) {
       notifyCards();
       postParent({ type: "hilight-board:select", card: selected });
     }
+    scheduleLinks();
     scheduleGeometry();
     scheduleSave();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Connectors: redrawn from the file whenever a card moves or resizes, or the
+  // code under a line anchor changes. Zoom and pan need nothing: the arrows live
+  // in scene coordinates with the cards.
+
+  function scheduleLinks() {
+    if (s.linkFrame) return;
+    s.linkFrame = window.requestAnimationFrame(syncLinks);
+  }
+
+  function syncLinks() {
+    s.linkFrame = 0;
+    if (!s.api || s.switching) return;
+    const elements = s.api.getSceneElementsIncludingDeleted();
+    const cardElements = elements.filter((element) => isCardElement(element) && elementLevel(element) === s.level);
+    const key = `${s.level}#${s.modelVersion}#${cardGeometryKey(cardElements)}`;
+    if (key === s.linkKey) return;
+    s.linkKey = key;
+    const cards = s.model.cards.filter((card) => card.level === s.level);
+    s.linkVersion = (s.linkVersion || 1) + 1;
+    const links = restoreElements(
+      createLinkElements(cards, cardElements, s.model.flows).map((link) => ({ ...link, version: s.linkVersion })),
+      null,
+    );
+    s.api.updateScene({
+      elements: [...elements.filter((element) => !isLinkElement(element)), ...links],
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -668,6 +789,8 @@ export function startBoard(init, { post }) {
     });
     s.api.history?.clear?.();
     if (!view) openingView();
+    s.linkKey = "";
+    syncLinks();
     renderCrumbs();
     notifyCards();
     editor.classList.remove("is-switching");
@@ -677,20 +800,39 @@ export function startBoard(init, { post }) {
     scheduleSave();
   }
 
-  // Space Excalidraw's floating toolbar takes at the top of the canvas.
-  const TOOLBAR_SPACE = 56;
   // The smallest zoom where card text stays readable (13px body text renders at
   // about 12px), used for the first view of a level.
   const READABLE_ZOOM = 0.93;
+  const VIEW_MARGIN = 20;
 
-  function fitZoom([minX, minY, maxX, maxY]) {
+  // Excalidraw's floating controls (tools, menu, library, zoom and undo, help),
+  // measured, so views and pinned card headers keep clear of them.
+  const TOP_CONTROLS = ".App-toolbar, .main-menu-trigger, .default-sidebar-trigger, .sidebar-trigger";
+  const BOTTOM_CONTROLS = ".layer-ui__wrapper__footer-left, .layer-ui__wrapper__footer-right, .help-icon";
+
+  function controlInsets() {
+    const box = editor.getBoundingClientRect();
+    let top = 64;
+    let bottom = 56;
+    for (const node of editor.querySelectorAll(TOP_CONTROLS)) {
+      const rect = node.getBoundingClientRect();
+      if (rect.height && rect.top < box.top + box.height / 2) top = Math.max(top, rect.bottom - box.top);
+    }
+    for (const node of editor.querySelectorAll(BOTTOM_CONTROLS)) {
+      const rect = node.getBoundingClientRect();
+      if (rect.height && rect.bottom > box.top + box.height / 2) bottom = Math.max(bottom, box.bottom - rect.top);
+    }
+    return { top: top + VIEW_MARGIN, bottom: bottom + VIEW_MARGIN, left: VIEW_MARGIN + 4, right: VIEW_MARGIN + 4 };
+  }
+
+  function fitZoom([minX, minY, maxX, maxY], insets = controlInsets()) {
     const { width, height } = s.api.getAppState();
     return Math.max(
       0.1,
       Math.min(
         1,
-        ((width - 48) / Math.max(1, maxX - minX)) * 0.94,
-        ((height - TOOLBAR_SPACE - 48) / Math.max(1, maxY - minY)) * 0.94,
+        ((width - insets.left - insets.right) / Math.max(1, maxX - minX)) * 0.97,
+        ((height - insets.top - insets.bottom) / Math.max(1, maxY - minY)) * 0.97,
       ),
     );
   }
@@ -702,9 +844,9 @@ export function startBoard(init, { post }) {
     });
   }
 
-  // Fit the whole level with a margin, never past 100%, sitting slightly low so
-  // the top row clears the toolbar. Computed in one update: scrollToContent
-  // applies its state later, so it cannot be adjusted afterwards.
+  // Fit the whole level inside the area the floating controls leave free, never
+  // past 100%. Computed in one update: scrollToContent applies its state later,
+  // so it cannot be adjusted afterwards.
   function fitAll() {
     if (!s.api) return;
     const elements = s.api.getSceneElements();
@@ -712,8 +854,11 @@ export function startBoard(init, { post }) {
     const bounds = getCommonBounds(elements);
     const [minX, minY, maxX, maxY] = bounds;
     const { width, height } = s.api.getAppState();
-    const zoom = fitZoom(bounds);
-    setView(zoom, width / 2 / zoom - (minX + maxX) / 2, (height + TOOLBAR_SPACE) / 2 / zoom - (minY + maxY) / 2);
+    const insets = controlInsets();
+    const zoom = fitZoom(bounds, insets);
+    const centerX = insets.left + (width - insets.left - insets.right) / 2;
+    const centerY = insets.top + (height - insets.top - insets.bottom) / 2;
+    setView(zoom, centerX / zoom - (minX + maxX) / 2, centerY / zoom - (minY + maxY) / 2);
   }
 
   // The first view of a level is one a person can read: the whole level when it
@@ -723,7 +868,8 @@ export function startBoard(init, { post }) {
     if (!s.api) return;
     const elements = s.api.getSceneElements();
     const cards = elements.filter(isCardElement);
-    if (!cards.length || fitZoom(getCommonBounds(elements)) >= READABLE_ZOOM) {
+    const insets = controlInsets();
+    if (!cards.length || fitZoom(getCommonBounds(elements), insets) >= READABLE_ZOOM) {
       fitAll();
       return;
     }
@@ -731,11 +877,11 @@ export function startBoard(init, { post }) {
     const row = cards.filter((card) => card.y < top + 80);
     const [minX, minY, maxX] = getCommonBounds(row);
     const { width } = s.api.getAppState();
-    const margin = 32;
-    const zoom = Math.min(1, Math.max(READABLE_ZOOM, (width - margin * 2) / Math.max(1, maxX - minX)));
+    const room = width - insets.left - insets.right;
+    const zoom = Math.min(1, Math.max(READABLE_ZOOM, room / Math.max(1, maxX - minX)));
     const scrollX =
-      (maxX - minX) * zoom <= width - margin * 2 ? width / 2 / zoom - (minX + maxX) / 2 : margin / zoom - minX;
-    setView(zoom, scrollX, (TOOLBAR_SPACE + margin) / zoom - minY);
+      (maxX - minX) * zoom <= room ? (insets.left + room / 2) / zoom - (minX + maxX) / 2 : insets.left / zoom - minX;
+    setView(zoom, scrollX, insets.top / zoom - minY);
   }
 
   async function revealCard(cardId) {
@@ -921,13 +1067,17 @@ export function startBoard(init, { post }) {
           window.setTimeout(() => {
             try {
               openingView();
-            } catch {
-              // Cosmetic.
+            } catch (error) {
+              // Cosmetic: the canvas still works at Excalidraw's own view.
+              console.warn("hilight board: opening view failed", error);
             }
             scheduleGeometry();
           }, 0);
         }
-        window.setTimeout(scheduleGeometry, 50);
+        window.setTimeout(() => {
+          syncLinks();
+          scheduleGeometry();
+        }, 50);
       },
       UIOptions: {
         canvasActions: {
@@ -1003,6 +1153,7 @@ export function startBoard(init, { post }) {
       indexModel(message.board);
       renderHealth();
       notifyCards();
+      scheduleLinks();
     }
   }
 

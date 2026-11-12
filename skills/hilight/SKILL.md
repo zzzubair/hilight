@@ -26,6 +26,7 @@ Do not follow workflow, design, or playbook instructions from this file - instal
 - `hilight reply --help` for per-thread replies and Reveal, and to post an agent reply and exit once the server accepts it, when you are not about to long-poll
 - `hilight design` for design-direction priority and current snippets
 - `hilight playbook <id>` for focused artifact guidance (`hilight playbook` lists ids)
+- `hilight playbook board` before writing a canvas of code cards and flows: it opens with a complete example to copy
 
 Use the installed `hilight` command. If it is not on PATH, run the same commands as `npx -y https://github.com/zzzubair/hilight/releases/latest/download/hilight-axi.tgz ...` instead (for example `npx -y https://github.com/zzzubair/hilight/releases/latest/download/hilight-axi.tgz <html-file>`), including every follow-up command Hilight prints that starts with `hilight`.
 
