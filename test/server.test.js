@@ -6883,3 +6883,28 @@ test("a board page keeps the desktop chrome at every width", async () => {
   assert.doesNotMatch(desktop, /\(max-width: 860px\)|\(min-width: 861px\)/);
   assert.equal(desktop.length > 0, true);
 });
+
+test("a board page shows a phone note instead of the canvas, decided by touch-only input, never width", async () => {
+  const board = createChromeHtml({ key: "abc", file: "/tmp/board.html" }, { boardPage: true });
+  assert.match(
+    board,
+    /class="board-phone-note"[^>]*>.*Canvas boards aren&#39;t supported on phones yet\..*laptop or desktop/,
+  );
+  const page = createChromeHtml({ key: "abc", file: "/tmp/page.html" });
+  assert.doesNotMatch(page, /board-phone-note/, "non-canvas pages are unchanged");
+
+  const css = await readFile(new URL("../src/chrome.css", import.meta.url), "utf8");
+  const rule = css.match(/@media ([^{]+)\{\s*body\.board-page > :not\(\.board-phone-note, script\)/);
+  assert.ok(rule, "the note replaces the board under one media query");
+  const query = rule[1];
+  assert.match(query, /\(pointer: coarse\)/);
+  assert.match(query, /\(any-hover: none\)/);
+  assert.match(
+    query,
+    /\(not \(any-pointer: fine\)\)/,
+    "a touchscreen laptop also has a fine pointer and keeps the board",
+  );
+  assert.doesNotMatch(query, /width|height/, "a small desktop window keeps drawing the board");
+  // The desktop-only stylesheet a board links keeps the rule.
+  assert.match(desktopOnlyChromeCss(css), /\(not \(any-pointer: fine\)\)/);
+});
