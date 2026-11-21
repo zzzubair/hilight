@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "hilight-axi",
-  "version": "0.1.96",
+  "version": "0.1.97",
   "description": "Hilight: review agent-made HTML pages in the browser and send comments back to the agent.",
   "author": {
     "name": "Zubair Shaik",
